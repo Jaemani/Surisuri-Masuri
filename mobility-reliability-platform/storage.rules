@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Raw telemetry is accepted only by the Cloud Run service account through
+    // the Admin SDK. Admin SDK requests bypass these client security rules.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

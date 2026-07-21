@@ -1,0 +1,204 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function membershipPath(tenantId) {
+      return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
+    }
+
+    function isActiveMember(tenantId) {
+      return signedIn()
+        && exists(membershipPath(tenantId))
+        && get(membershipPath(tenantId)).data.status == 'active';
+    }
+
+    function role(tenantId) {
+      return get(membershipPath(tenantId)).data.role;
+    }
+
+    function isTenantAdmin(tenantId) {
+      return isActiveMember(tenantId) && role(tenantId) == 'tenant_admin';
+    }
+
+    function canMaintain(tenantId) {
+      return isActiveMember(tenantId)
+        && role(tenantId) in ['repairer', 'case_worker', 'tenant_admin'];
+    }
+
+    function validCreateMetadata(tenantId) {
+      return request.resource.data.tenantId == tenantId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function validUpdateMetadata(tenantId) {
+      return request.resource.data.tenantId == tenantId
+        && request.resource.data.tenantId == resource.data.tenantId
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function repairKeys() {
+      return [
+        'tenantId', 'deviceId', 'occurredAt', 'repairKind', 'status',
+        'currency', 'billedAmount', 'subsidizedAmount', 'copayAmount',
+        'batteryVoltageV', 'memoRedacted', 'sourceQuality', 'items',
+        'createdBy', 'createdAt', 'updatedAt'
+      ];
+    }
+
+    function validRepair() {
+      return request.resource.data.keys().hasAll([
+          'tenantId', 'deviceId', 'occurredAt', 'repairKind', 'status',
+          'currency', 'sourceQuality', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly(repairKeys())
+        && request.resource.data.deviceId is string
+        && request.resource.data.repairKind in [
+          'scheduled', 'breakdown', 'accident', 'recall', 'unknown'
+        ]
+        && request.resource.data.status in ['draft', 'completed', 'voided']
+        && request.resource.data.currency == 'KRW'
+        && request.resource.data.sourceQuality in [
+          'verified', 'legacy_unverified', 'user_reported'
+        ];
+    }
+
+    function inspectionKeys() {
+      return [
+        'tenantId', 'deviceId', 'inspectionType', 'templateId',
+        'templateVersion', 'startedAt', 'completedAt', 'overallResult',
+        'observations', 'createdBy', 'createdAt', 'updatedAt'
+      ];
+    }
+
+    function validInspection() {
+      return request.resource.data.keys().hasAll([
+          'tenantId', 'deviceId', 'inspectionType', 'templateId',
+          'templateVersion', 'startedAt', 'overallResult', 'observations',
+          'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly(inspectionKeys())
+        && request.resource.data.deviceId is string
+        && request.resource.data.inspectionType in [
+          'self', 'repairer', 'case_worker', 'automated_review'
+        ]
+        && request.resource.data.overallResult in [
+          'normal', 'issue_found', 'incomplete', 'unknown'
+        ]
+        && request.resource.data.observations is list;
+    }
+
+    function tripSessionKeys() {
+      return [
+        'tenantId', 'deviceId', 'installationId', 'clientSessionId',
+        'startedAt', 'endedAt', 'captureMode', 'status', 'rawSampleCount',
+        'acceptedSampleCount', 'distanceM', 'durationS', 'qualityStatus',
+        'qualityScore', 'processingVersion', 'createdBy', 'createdAt',
+        'updatedAt'
+      ];
+    }
+
+    function validTripSession() {
+      return request.resource.data.keys().hasAll([
+          'tenantId', 'deviceId', 'installationId', 'clientSessionId',
+          'startedAt', 'captureMode', 'status', 'rawSampleCount',
+          'acceptedSampleCount', 'qualityStatus', 'createdBy', 'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly(tripSessionKeys())
+        && request.resource.data.deviceId is string
+        && request.resource.data.installationId is string
+        && request.resource.data.clientSessionId is string
+        && request.resource.data.captureMode in [
+          'manual', 'background_assisted', 'imported_test'
+        ]
+        && request.resource.data.status in [
+          'recording', 'uploaded', 'processed', 'rejected'
+        ]
+        && request.resource.data.qualityStatus in [
+          'unreviewed', 'accepted', 'rejected', 'abstained'
+        ];
+    }
+
+    match /tenants/{tenantId} {
+      allow read: if isActiveMember(tenantId);
+      allow write: if false;
+
+      match /members/{uid} {
+        allow get: if isActiveMember(tenantId)
+          && (request.auth.uid == uid || isTenantAdmin(tenantId));
+        allow list: if isTenantAdmin(tenantId);
+        allow write: if false;
+      }
+
+      match /devices/{deviceId} {
+        allow read: if isActiveMember(tenantId);
+        allow write: if false;
+      }
+
+      match /repairs/{repairId} {
+        allow read: if isActiveMember(tenantId);
+        allow create: if canMaintain(tenantId)
+          && validCreateMetadata(tenantId)
+          && validRepair();
+        allow update: if canMaintain(tenantId)
+          && validUpdateMetadata(tenantId)
+          && validRepair();
+        allow delete: if false;
+      }
+
+      match /inspections/{inspectionId} {
+        allow read: if isActiveMember(tenantId);
+        allow create: if canMaintain(tenantId)
+          && validCreateMetadata(tenantId)
+          && validInspection();
+        allow update: if canMaintain(tenantId)
+          && validUpdateMetadata(tenantId)
+          && validInspection();
+        allow delete: if false;
+      }
+
+      match /tripSessions/{sessionId} {
+        allow read: if isActiveMember(tenantId);
+        allow create: if isActiveMember(tenantId)
+          && validCreateMetadata(tenantId)
+          && validTripSession();
+        allow update: if isActiveMember(tenantId)
+          && request.resource.data.createdBy == request.auth.uid
+          && validUpdateMetadata(tenantId)
+          && validTripSession();
+        allow delete: if false;
+      }
+
+      match /ingestReceipts/{receiptId} {
+        allow read: if isActiveMember(tenantId);
+        allow write: if false;
+      }
+
+      match /deviceStates/{deviceId} {
+        allow read: if isActiveMember(tenantId);
+        allow write: if false;
+      }
+
+      match /reports/{reportId} {
+        allow read: if isActiveMember(tenantId);
+        allow write: if false;
+      }
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

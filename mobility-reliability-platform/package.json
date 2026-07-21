@@ -1,0 +1,14 @@
+{
+  "name": "mobility-reliability-platform",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.8.0",
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "check": "pnpm check:docs && pnpm -r --if-present check",
+    "check:docs": "node scripts/check-doc-links.mjs",
+    "check:firebase": "pnpm --filter @mobility-reliability/firebase-rules test",
+    "doctor": "node scripts/doctor.mjs",
+    "test": "pnpm -r --if-present test"
+  }
+}

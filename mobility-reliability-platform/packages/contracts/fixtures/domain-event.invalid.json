@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "domain-event.v1",
+  "eventId": "not-a-uuid",
+  "eventType": "failure.predicted_by_llm",
+  "tenantId": "d35aae31-28b3-41c0-8c15-20f156cc1cf7",
+  "aggregateType": "unknown",
+  "aggregateId": "6da071f4-58fa-4a68-90a9-cde23c065b8c",
+  "occurredAt": "yesterday",
+  "recordedAt": "2026-07-21T09:00:03Z",
+  "payload": {}
+}

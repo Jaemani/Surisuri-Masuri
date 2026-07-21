@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "telemetry-batch.v1",
+  "batchId": "1555c4e1-d1ae-4db2-bb0f-bb5dd20daf15",
+  "idempotencyKey": "session-001-batch-0001",
+  "tenantId": "d35aae31-28b3-41c0-8c15-20f156cc1cf7",
+  "actorId": "f2e975eb-0d42-4ac4-8253-d569937185aa",
+  "mobilityDeviceId": "ba9d0844-eb5a-4503-8bc2-b70ac1a6f5e4",
+  "sessionId": "d6a6e478-20d4-4608-89f1-7980c98844e0",
+  "consentVersion": "location-consent.v1",
+  "sentAt": "2026-07-21T08:30:00Z",
+  "samples": [
+    {
+      "sampleId": "85fd63ad-0358-49dd-9dad-dbcdfd324817",
+      "sequence": 0,
+      "capturedAt": "2026-07-21T08:29:50Z",
+      "latitude": 37.5665,
+      "longitude": 126.978,
+      "horizontalAccuracyM": 8.5,
+      "altitudeM": 31.2,
+      "speedMps": 1.8,
+      "headingDegrees": 92.4,
+      "activityHint": "wheeled",
+      "isMockLocation": false,
+      "source": "phone_gps"
+    }
+  ]
+}

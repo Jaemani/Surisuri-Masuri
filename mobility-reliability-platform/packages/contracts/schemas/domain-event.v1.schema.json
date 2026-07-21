@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/domain-event.v1.schema.json",
+  "title": "DomainEventV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "eventType",
+    "tenantId",
+    "aggregateType",
+    "aggregateId",
+    "occurredAt",
+    "recordedAt",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "domain-event.v1" },
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "mobility_session.started",
+        "mobility_session.ended",
+        "telemetry_batch.accepted",
+        "repair.recorded",
+        "part.replaced",
+        "inspection.completed",
+        "consent.changed",
+        "alert.acknowledged",
+        "prediction.generated",
+        "prediction.reviewed"
+      ]
+    },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "aggregateType": {
+      "type": "string",
+      "enum": ["mobility_device", "mobility_session", "repair", "inspection", "consent", "prediction"]
+    },
+    "aggregateId": { "type": "string", "format": "uuid" },
+    "actorId": { "type": ["string", "null"], "format": "uuid" },
+    "causationId": { "type": ["string", "null"], "format": "uuid" },
+    "correlationId": { "type": ["string", "null"], "format": "uuid" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" }
+  }
+}

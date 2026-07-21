@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "domain-event.v1",
+  "eventId": "08a031b5-f542-4985-8875-fac6264757ac",
+  "eventType": "repair.recorded",
+  "tenantId": "d35aae31-28b3-41c0-8c15-20f156cc1cf7",
+  "aggregateType": "repair",
+  "aggregateId": "6da071f4-58fa-4a68-90a9-cde23c065b8c",
+  "actorId": "f2e975eb-0d42-4ac4-8253-d569937185aa",
+  "causationId": null,
+  "correlationId": "a010a670-83a0-47ef-875f-69ce1fb31538",
+  "occurredAt": "2026-07-21T09:00:00Z",
+  "recordedAt": "2026-07-21T09:00:03Z",
+  "payload": {
+    "mobilityDeviceId": "ba9d0844-eb5a-4503-8bc2-b70ac1a6f5e4",
+    "repairCategoryCode": "tire"
+  }
+}

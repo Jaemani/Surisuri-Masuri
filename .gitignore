@@ -1,0 +1,13 @@
+# Local handoff package contains source documents and personal information.
+/attached/
+
+# Legacy repositories remain separate references and keep their own histories.
+/soo-ri/
+/soo-ri-admin/
+/power_assist_device_helper_backend/
+/soo-ri_CAPABILITY.md
+
+# Local tools
+.DS_Store
+.idea/
+.vscode/

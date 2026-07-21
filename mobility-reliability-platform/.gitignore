@@ -1,0 +1,43 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# JavaScript / Expo
+node_modules/
+.expo/
+dist/
+.next/
+coverage/
+
+# Go
+bin/
+*.test
+
+# Python / ML
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+mlruns/
+
+# Sensitive or generated data
+data/raw/
+data/private/
+artifacts/private/
+artifacts/models/
+*.sqlite
+*.sqlite3
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Agent-local tool configuration
+.claude/
+CLAUDE.md
