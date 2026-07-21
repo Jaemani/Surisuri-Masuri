@@ -59,8 +59,8 @@ audience: project team and technical reviewer
 | 실제 주장 | 증거 ID·링크 | 검증 상태 | 확인자·확인일 |
 | --- | --- | --- | --- |
 | immutable raw·manifest·receipt 계약이 결정됨 | [ADR-0016](../../decisions/ADR-0016-immutable-telemetry-artifact-lineage.md) | `accepted` decision; runtime 증거 아님 | 문서 검토 필요 |
-| canonical manifest, partial recovery와 finalizer 전체 계보가 local race test를 통과 | [EVD-20260721-016](../../evidence/2026-07.md#evd-20260721-016--immutable-telemetry-objectmanifest-lineage) | `generated` — local 검증 완료, clean CI 대기 | Codex / 2026-07-21 |
-| Cloud Storage client가 동일 bytes replay를 같은 generation으로 읽음 | [EVD-20260721-016](../../evidence/2026-07.md#evd-20260721-016--immutable-telemetry-objectmanifest-lineage) | `generated` — official testbench 범위 | Codex / 2026-07-21 |
+| canonical manifest, partial recovery와 finalizer 전체 계보가 local race test와 clean CI를 통과 | [EVD-20260721-016](../../evidence/2026-07.md#evd-20260721-016--immutable-telemetry-objectmanifest-lineage) | `verified` — [CI 29825767754](https://github.com/Jaemani/Surisuri-Masuri/actions/runs/29825767754) | Codex / 2026-07-21 |
+| Cloud Storage client가 동일 bytes replay를 같은 generation으로 읽음 | [EVD-20260721-016](../../evidence/2026-07.md#evd-20260721-016--immutable-telemetry-objectmanifest-lineage) | `verified` — local official testbench와 clean CI 범위 | Codex / 2026-07-21 |
 | production/staging bucket과 Cloud Run ingest가 활성화됨 | 확인 필요 — 현재 활성화하지 않음 | `미검증` | 해당 없음 |
 | lease·fencing·sweeper가 orphan을 복구함 | 확인 필요 — 현재 구현하지 않음 | `미검증` | 해당 없음 |
 
@@ -95,5 +95,5 @@ audience: project team and technical reviewer
 - [x] 참석자·사진·지출을 생성하거나 추정하지 않았다.
 - [x] 민감정보와 원본 GPS 좌표가 없다.
 - [x] EVD-20260721-016의 local 명령과 결과를 확인했다.
-- [ ] clean CI commit·run을 push 후 확정한다.
+- [x] clean CI commit `478eb4ee677b781c72b3b43bd8b32abca8f17947`·run `29825767754`를 확정했다.
 - [ ] reviewer와 발행일을 사람이 확정했다.
