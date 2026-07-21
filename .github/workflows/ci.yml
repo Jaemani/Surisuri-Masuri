@@ -88,7 +88,7 @@ jobs:
           curl --max-time 5 --fail --silent http://127.0.0.1:9000 >/dev/null
           STORAGE_EMULATOR_HOST=http://127.0.0.1:9000 \
             go test -mod=readonly -count=1 -race -timeout 60s \
-              ./internal/gcsadapter -run ArtifactStoreEmulator -v
+              ./internal/gcsadapter -run 'Artifact(Store|Reader)Emulator' -v
 
       - name: Check telemetry gateway
         working-directory: mobility-reliability-platform/services/telemetry-gateway
