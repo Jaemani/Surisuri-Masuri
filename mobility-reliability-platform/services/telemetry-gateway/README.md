@@ -23,13 +23,14 @@
 - tenant·beneficiary membership·app installation·server trip·exact 기기 배정·현재 정밀위치 동의를 교차 검사하는 pure policy
 - 좌표/body 없이 bounded exact path만 읽는 Firestore authorization snapshot adapter
 - pseudonymous current-consent state ID와 sample 최소·최대 시각 검사
+- authorization 재평가와 두 uniqueness index·최초 receipt 생성을 결합한 Firestore transaction adapter
+- replay·두 conflict·partial/corrupt linkage의 fail-closed 판정과 30일 receipt lineage
 
 아직 구현하지 않은 production adapter:
 
-- authorization read와 3-way idempotency/receipt create를 결합한 Firestore transaction
 - Cloud Storage object store와 lifecycle
 
-verifier와 read-only authorizer가 아직 `cmd/server`에 주입되지 않았고 원자적 receipt·Storage adapter도 없어 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
+verifier, authorization/admission transaction과 object store가 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. transaction adapter는 local fake seam만 검증했으며 실제 Firestore Emulator 경쟁·ADC/IAM 검증은 후속 gate입니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
 
 ## WSL2에서 검사
 

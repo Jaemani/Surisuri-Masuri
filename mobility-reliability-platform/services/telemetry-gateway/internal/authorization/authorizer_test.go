@@ -30,6 +30,13 @@ func TestAuthorizerAllowsExactActiveBeneficiaryScope(t *testing.T) {
 	}
 }
 
+func TestEvaluateSnapshotAllowsTheSameProviderNeutralPolicy(t *testing.T) {
+	now := fixedNow()
+	if err := EvaluateSnapshot(validPrincipal(), validScope(now), validSnapshot(now), now); err != nil {
+		t.Fatalf("EvaluateSnapshot() error = %v", err)
+	}
+}
+
 func TestAuthorizerRejectsRelationshipAndValidityFailures(t *testing.T) {
 	now := fixedNow()
 	tests := []struct {

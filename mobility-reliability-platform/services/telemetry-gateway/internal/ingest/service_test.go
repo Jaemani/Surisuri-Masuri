@@ -32,6 +32,14 @@ func TestServiceStoresCompressedBatchAndCompletesReceipt(t *testing.T) {
 	if result.Receipt.State != ReceiptStored || result.Receipt.SampleCount != len(batch.Samples) {
 		t.Fatalf("receipt = %#v", result.Receipt)
 	}
+	if result.Receipt.DeviceID != batch.DeviceID ||
+		result.Receipt.TripID != batch.TripID ||
+		result.Receipt.InstallationID != batch.InstallationID ||
+		result.Receipt.ConsentRevisionID != batch.ConsentRevisionID ||
+		result.Receipt.PayloadSchemaVersion != batch.SchemaVersion ||
+		!result.Receipt.ExpiresAt.Equal(now.Add(ReceiptRetention)) {
+		t.Fatalf("receipt lineage = %#v", result.Receipt)
+	}
 
 	stored := objects.contentAt(t, result.Receipt.ObjectPath)
 	reader, err := gzip.NewReader(bytes.NewReader(stored))
@@ -70,6 +78,9 @@ func TestServiceReturnsCompletedReplayWithoutSecondObjectWrite(t *testing.T) {
 	if objects.putCount != 1 {
 		t.Fatalf("object writes = %d, want 1", objects.putCount)
 	}
+	if receipts.authorizeCalls != 2 {
+		t.Fatalf("authorization calls = %d, want 2", receipts.authorizeCalls)
+	}
 }
 
 func TestServiceRejectsIdempotencyBodyConflict(t *testing.T) {
@@ -91,6 +102,53 @@ func TestServiceRejectsIdempotencyBodyConflict(t *testing.T) {
 	)
 	if !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("conflict error = %v", err)
+	}
+	if receipts.authorizeCalls != 2 {
+		t.Fatalf("authorization calls = %d, want 2", receipts.authorizeCalls)
+	}
+}
+
+func TestServiceUsesFreshCompletionTimeAfterObjectStorage(t *testing.T) {
+	batch, raw := validBatch(t)
+	receipts := newMemoryReceiptStore()
+	objects := newMemoryObjectStore()
+	base := time.Date(2026, time.July, 21, 6, 0, 0, 0, time.UTC)
+	call := 0
+	service := mustService(t, receipts, objects, func() time.Time {
+		value := base.Add(time.Duration(call) * time.Second)
+		call++
+		return value
+	})
+
+	result, err := service.Ingest(context.Background(), matchingPrincipal(batch), batch, raw)
+	if err != nil {
+		t.Fatalf("Ingest() error = %v", err)
+	}
+	if !result.Receipt.CreatedAt.Equal(base) || !result.Receipt.UpdatedAt.Equal(base.Add(time.Second)) {
+		t.Fatalf("receipt times = %s, %s", result.Receipt.CreatedAt, result.Receipt.UpdatedAt)
+	}
+}
+
+func TestNewServiceRequiresEveryDependency(t *testing.T) {
+	admissions := newMemoryReceiptStore()
+	objects := newMemoryObjectStore()
+	batchIDs := fixedBatchIDGenerator()
+	tests := []struct {
+		name       string
+		admissions AdmissionStore
+		objects    ObjectStore
+		batchIDs   ServerBatchIDGenerator
+	}{
+		{name: "nil admissions", objects: objects, batchIDs: batchIDs},
+		{name: "nil objects", admissions: admissions, batchIDs: batchIDs},
+		{name: "nil batch IDs", admissions: admissions, objects: objects},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := NewService(test.admissions, test.objects, test.batchIDs, nil); err == nil {
+				t.Fatal("NewService() error = nil")
+			}
+		})
 	}
 }
 
@@ -114,13 +172,13 @@ func TestServiceRejectsIncompleteVerifiedPrincipal(t *testing.T) {
 func TestServiceRejectsUnauthorizedBatchScopeBeforeStorage(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
+	receipts.authorize = func(context.Context, Principal, BatchScope) error {
+		return ErrBatchUnauthorized
+	}
 	objects := newMemoryObjectStore()
 	service, err := NewService(
 		receipts,
 		objects,
-		authorizerFunc(func(context.Context, Principal, BatchScope) error {
-			return ErrBatchUnauthorized
-		}),
 		fixedBatchIDGenerator(),
 		nil,
 	)
@@ -134,6 +192,40 @@ func TestServiceRejectsUnauthorizedBatchScopeBeforeStorage(t *testing.T) {
 	}
 	if len(receipts.receipts) != 0 || objects.putCount != 0 {
 		t.Fatal("unauthorized batch wrote storage state")
+	}
+}
+
+func TestServicePassesIdentityAndCapturedAtBoundsToAtomicAdmission(t *testing.T) {
+	batch, raw := validBatch(t)
+	original := batch.Samples[0]
+	second := original
+	second.ClientSampleID = "85fd63ad-0358-49dd-9dad-dbcdfd324818"
+	second.CapturedAt = "2026-07-21T08:10:00Z"
+	sequence := int64(1)
+	second.Sequence = &sequence
+	batch.Samples = append(batch.Samples, second)
+	receipts := newMemoryReceiptStore()
+	receipts.authorize = func(context.Context, Principal, BatchScope) error {
+		return ErrBatchUnauthorized
+	}
+	objects := newMemoryObjectStore()
+	service := mustService(t, receipts, objects, nil)
+	principal := matchingPrincipal(batch)
+
+	if _, err := service.Ingest(context.Background(), principal, batch, raw); !errors.Is(err, ErrBatchUnauthorized) {
+		t.Fatalf("Ingest() error = %v", err)
+	}
+	if receipts.authorizeCalls != 1 {
+		t.Fatalf("authorization calls = %d", receipts.authorizeCalls)
+	}
+	if receipts.lastPrincipal != principal {
+		t.Fatalf("principal = %#v", receipts.lastPrincipal)
+	}
+	wantFirst := time.Date(2026, time.July, 21, 8, 10, 0, 0, time.UTC)
+	wantLast := time.Date(2026, time.July, 21, 8, 29, 50, 0, time.UTC)
+	if !receipts.lastScope.FirstCapturedAt.Equal(wantFirst) ||
+		!receipts.lastScope.LastCapturedAt.Equal(wantLast) {
+		t.Fatalf("scope times = %s, %s", receipts.lastScope.FirstCapturedAt, receipts.lastScope.LastCapturedAt)
 	}
 }
 
@@ -225,7 +317,12 @@ func TestServicePersistsTerminalObjectConflict(t *testing.T) {
 			t.Fatalf("attempt %d error = %v", attempt+1, err)
 		}
 	}
-	receipt := receipts.receipts[deriveReservationKey(batch)]
+	receipt := receipts.receipts[DeriveReservationKey(
+		batch.SchemaVersion,
+		batch.TenantID,
+		batch.InstallationID,
+		batch.ClientBatchID,
+	)]
 	if receipt.State != ReceiptRejected || receipt.RejectionCode != "object_conflict" {
 		t.Fatalf("receipt = %#v", receipt)
 	}
@@ -249,8 +346,16 @@ func TestDeterministicGZIP(t *testing.T) {
 func TestDerivedReservationKeyMatchesCrossLanguageContract(t *testing.T) {
 	batch, _ := validBatch(t)
 	const expected = "b8443d7fe776ca88dc5e738732a31419aad494de9313d71f60d4893c75157023"
-	if actual := deriveReservationKey(batch); actual != expected {
-		t.Fatalf("deriveReservationKey() = %q, want %q", actual, expected)
+	if actual := DeriveReservationKey(batch.SchemaVersion, batch.TenantID, batch.InstallationID, batch.ClientBatchID); actual != expected {
+		t.Fatalf("DeriveReservationKey() = %q, want %q", actual, expected)
+	}
+}
+
+func TestDerivedClientBatchKeyMatchesCrossLanguageContract(t *testing.T) {
+	batch, _ := validBatch(t)
+	const expected = "0a1c43bb1a86c8b2ec556feed55c7595552dbed7a8a0d86ba24c418a641e1828"
+	if actual := DeriveClientBatchKey(batch.TenantID, batch.ClientBatchID); actual != expected {
+		t.Fatalf("DeriveClientBatchKey() = %q, want %q", actual, expected)
 	}
 }
 
@@ -259,6 +364,10 @@ type memoryReceiptStore struct {
 	receipts                map[string]Receipt
 	clientBatchReservations map[string]string
 	failNextMarkStored      bool
+	authorize               func(context.Context, Principal, BatchScope) error
+	authorizeCalls          int
+	lastPrincipal           Principal
+	lastScope               BatchScope
 }
 
 func newMemoryReceiptStore() *memoryReceiptStore {
@@ -268,12 +377,22 @@ func newMemoryReceiptStore() *memoryReceiptStore {
 	}
 }
 
-func (s *memoryReceiptStore) Reserve(
-	_ context.Context,
+func (s *memoryReceiptStore) AuthorizeAndReserve(
+	ctx context.Context,
+	principal Principal,
+	scope BatchScope,
 	reservation Reservation,
 ) (Receipt, ReservationStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.authorizeCalls++
+	s.lastPrincipal = principal
+	s.lastScope = scope
+	if s.authorize != nil {
+		if err := s.authorize(ctx, principal, scope); err != nil {
+			return Receipt{}, "", err
+		}
+	}
 
 	if current, ok := s.receipts[reservation.ReservationKey]; ok {
 		if current.BodyHash != reservation.BodyHash || current.ClientBatchKey != reservation.ClientBatchKey {
@@ -292,16 +411,23 @@ func (s *memoryReceiptStore) Reserve(
 	}
 
 	receipt := Receipt{
-		ReservationKey: reservation.ReservationKey,
-		ClientBatchKey: reservation.ClientBatchKey,
-		ReceiptID:      reservation.ReceiptID,
-		TenantID:       reservation.TenantID,
-		BatchID:        reservation.BatchID,
-		ClientBatchID:  reservation.ClientBatchID,
-		BodyHash:       reservation.BodyHash,
-		State:          ReceiptReserved,
-		CreatedAt:      reservation.CreatedAt,
-		UpdatedAt:      reservation.CreatedAt,
+		ReservationKey:       reservation.ReservationKey,
+		ClientBatchKey:       reservation.ClientBatchKey,
+		ReceiptID:            reservation.ReceiptID,
+		TenantID:             reservation.TenantID,
+		BatchID:              reservation.BatchID,
+		DeviceID:             reservation.DeviceID,
+		TripID:               reservation.TripID,
+		InstallationID:       reservation.InstallationID,
+		ConsentRevisionID:    reservation.ConsentRevisionID,
+		ClientBatchID:        reservation.ClientBatchID,
+		PayloadSchemaVersion: reservation.PayloadSchemaVersion,
+		BodyHash:             reservation.BodyHash,
+		State:                ReceiptReserved,
+		Revision:             1,
+		CreatedAt:            reservation.CreatedAt,
+		UpdatedAt:            reservation.CreatedAt,
+		ExpiresAt:            reservation.ExpiresAt,
 	}
 	s.receipts[reservation.ReservationKey] = receipt
 	s.clientBatchReservations[reservation.ClientBatchKey] = reservation.ReservationKey
@@ -310,6 +436,7 @@ func (s *memoryReceiptStore) Reserve(
 
 func (s *memoryReceiptStore) MarkStored(
 	_ context.Context,
+	_ string,
 	reservationKey string,
 	objectPath string,
 	sampleCount int,
@@ -329,6 +456,7 @@ func (s *memoryReceiptStore) MarkStored(
 	receipt.ObjectPath = objectPath
 	receipt.SampleCount = sampleCount
 	receipt.State = ReceiptStored
+	receipt.Revision++
 	receipt.UpdatedAt = updatedAt
 	s.receipts[reservationKey] = receipt
 	return receipt, nil
@@ -336,6 +464,7 @@ func (s *memoryReceiptStore) MarkStored(
 
 func (s *memoryReceiptStore) MarkRejected(
 	_ context.Context,
+	_ string,
 	reservationKey string,
 	rejectionCode string,
 	updatedAt time.Time,
@@ -349,6 +478,7 @@ func (s *memoryReceiptStore) MarkRejected(
 	}
 	receipt.State = ReceiptRejected
 	receipt.RejectionCode = rejectionCode
+	receipt.Revision++
 	receipt.UpdatedAt = updatedAt
 	s.receipts[reservationKey] = receipt
 	return receipt, nil
@@ -402,7 +532,7 @@ func (s *memoryObjectStore) contentAt(t *testing.T, path string) []byte {
 
 func mustService(
 	t *testing.T,
-	receipts ReceiptStore,
+	receipts AdmissionStore,
 	objects ObjectStore,
 	now func() time.Time,
 ) *Service {
@@ -410,7 +540,6 @@ func mustService(
 	service, err := NewService(
 		receipts,
 		objects,
-		authorizerFunc(func(context.Context, Principal, BatchScope) error { return nil }),
 		fixedBatchIDGenerator(),
 		now,
 	)
@@ -418,12 +547,6 @@ func mustService(
 		t.Fatalf("NewService() error = %v", err)
 	}
 	return service
-}
-
-type authorizerFunc func(context.Context, Principal, BatchScope) error
-
-func (f authorizerFunc) Authorize(ctx context.Context, principal Principal, scope BatchScope) error {
-	return f(ctx, principal, scope)
 }
 
 type batchIDGeneratorFunc func() (string, error)

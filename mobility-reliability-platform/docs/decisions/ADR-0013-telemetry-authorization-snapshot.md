@@ -2,7 +2,7 @@
 
 - 상태: accepted
 - 결정일: 2026-07-21
-- 관련 결정: [ADR-0010](./ADR-0010-authenticated-telemetry-references.md), [ADR-0011](./ADR-0011-domain-command-worker-boundaries.md), [ADR-0012](./ADR-0012-firebase-dual-token-verifier-policy.md)
+- 관련 결정: [ADR-0010](./ADR-0010-authenticated-telemetry-references.md), [ADR-0011](./ADR-0011-domain-command-worker-boundaries.md), [ADR-0012](./ADR-0012-firebase-dual-token-verifier-policy.md), [ADR-0015](./ADR-0015-atomic-telemetry-admission.md)
 
 ## 맥락
 
@@ -91,6 +91,8 @@ authorizer는 참조 revision과 current state가 모두 같은 tenant·person·
 read-only authorizer 반환 후 receipt reservation 전 membership·installation·consent가 철회될 수 있는 TOCTOU가 남는다. 따라서 이 authorizer만 연결해 production ingest를 열지 않는다.
 
 다음 단계의 Firestore read-write transaction이 authorization 문서를 다시 읽고 `ingestIdempotency`, `ingestClientBatches`, `ingestReceipts` create를 같은 callback에서 수행해야 한다. callback 안에서는 외부 side effect를 금지하고 Cloud Storage write는 commit 뒤에 실행한다. 이 transaction adapter와 Storage `DoesNotExist` adapter가 모두 준비되기 전 readiness는 503을 유지한다.
+
+후속 [ADR-0015](./ADR-0015-atomic-telemetry-admission.md)는 이 transaction 경계와 replay·corruption 판정을 구체화한다. 해당 adapter의 local fake-seam 검증은 read-only snapshot의 TOCTOU 설계 공백을 줄이지만, 실제 Firestore 경쟁 검증과 Storage adapter가 완료될 때까지 rollout gate 자체는 유지한다.
 
 ## 결과
 

@@ -165,6 +165,22 @@ func (a *Authorizer) Authorize(
 	return evaluate(principal, scope, snapshot, a.now().UTC())
 }
 
+// EvaluateSnapshot applies the provider-neutral authorization policy to a
+// snapshot read inside another atomic operation, such as receipt reservation.
+// It performs no I/O and is safe to call again when a Firestore transaction
+// callback is retried.
+func EvaluateSnapshot(
+	principal ingest.Principal,
+	scope ingest.BatchScope,
+	snapshot Snapshot,
+	now time.Time,
+) error {
+	if err := validateRequest(principal, scope); err != nil {
+		return err
+	}
+	return evaluate(principal, scope, snapshot, now.UTC())
+}
+
 func validateRequest(principal ingest.Principal, scope ingest.BatchScope) error {
 	if !safeDocumentID(principal.FirebaseUID, 128) || principal.AppID == "" || len(principal.AppID) > 512 {
 		return ingest.ErrBatchUnauthorized

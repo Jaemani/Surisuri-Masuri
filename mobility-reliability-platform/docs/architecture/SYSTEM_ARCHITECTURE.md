@@ -55,7 +55,9 @@
 - 비즈니스 CRUD를 모두 담당하는 범용 백엔드가 아니다.
 - 모바일 텔레메트리의 인증, 계약 검증, 멱등성, receipt만 책임진다.
 - Firebase ID token과 App Check를 확인한 뒤 request의 `tenantId` 후보 scope를 active membership, 기기 배정, trip, installation, consent로 authorize한다.
+- authorization exact read와 `ingestIdempotency`·`ingestClientBatches`·`ingestReceipts` 최초 생성을 하나의 Firestore transaction에 두며, retry callback마다 현재 권한을 다시 평가한다.
 - `schemaVersion`, `tenantId`, `installationId`, `clientBatchId`로 서버가 파생한 같은 key와 동일 body는 기존 receipt를 반환한다.
+- UUID·시각·body hash는 transaction callback 전에 한 번만 만들고, Cloud Storage write는 commit 성공 뒤에만 실행한다.
 - 수집 시각과 기기 발생 시각을 분리한다.
 - raw sample은 Firestore 개별 문서가 아니라 압축 Storage object로 저장한다.
 

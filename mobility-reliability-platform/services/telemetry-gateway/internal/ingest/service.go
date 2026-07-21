@@ -15,12 +15,15 @@ import (
 )
 
 var (
-	ErrInvalidPrincipal    = errors.New("verified principal is incomplete")
-	ErrBatchUnauthorized   = errors.New("verified principal is not authorized for the batch scope")
-	ErrIdempotencyConflict = errors.New("idempotency key reused with a different body")
-	ErrClientBatchConflict = errors.New("client batch id reused in a different installation or body")
-	ErrObjectConflict      = errors.New("object path already contains different content")
+	ErrInvalidPrincipal     = errors.New("verified principal is incomplete")
+	ErrBatchUnauthorized    = errors.New("verified principal is not authorized for the batch scope")
+	ErrIdempotencyConflict  = errors.New("idempotency key reused with a different body")
+	ErrClientBatchConflict  = errors.New("client batch id reused in a different installation or body")
+	ErrObjectConflict       = errors.New("object path already contains different content")
+	ErrAdmissionUnavailable = errors.New("telemetry admission store is unavailable")
 )
+
+const ReceiptRetention = 30 * 24 * time.Hour
 
 type Principal struct {
 	FirebaseUID string
@@ -41,10 +44,6 @@ type BatchScope struct {
 	LastCapturedAt    time.Time
 }
 
-type BatchAuthorizer interface {
-	Authorize(context.Context, Principal, BatchScope) error
-}
-
 type ServerBatchIDGenerator interface {
 	NewID() (string, error)
 }
@@ -58,19 +57,26 @@ const (
 )
 
 type Receipt struct {
-	ReservationKey string
-	ClientBatchKey string
-	ReceiptID      string
-	TenantID       string
-	BatchID        string
-	ClientBatchID  string
-	BodyHash       string
-	ObjectPath     string
-	SampleCount    int
-	State          ReceiptState
-	RejectionCode  string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ReservationKey       string
+	ClientBatchKey       string
+	ReceiptID            string
+	TenantID             string
+	BatchID              string
+	DeviceID             string
+	TripID               string
+	InstallationID       string
+	ConsentRevisionID    string
+	ClientBatchID        string
+	PayloadSchemaVersion string
+	BodyHash             string
+	ObjectPath           string
+	SampleCount          int
+	State                ReceiptState
+	RejectionCode        string
+	Revision             int64
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	ExpiresAt            time.Time
 }
 
 type ReservationStatus string
@@ -85,20 +91,26 @@ const (
 )
 
 type Reservation struct {
-	ReservationKey string
-	ClientBatchKey string
-	ReceiptID      string
-	TenantID       string
-	BatchID        string
-	ClientBatchID  string
-	BodyHash       string
-	CreatedAt      time.Time
+	ReservationKey       string
+	ClientBatchKey       string
+	ReceiptID            string
+	TenantID             string
+	BatchID              string
+	DeviceID             string
+	TripID               string
+	InstallationID       string
+	ConsentRevisionID    string
+	ClientBatchID        string
+	PayloadSchemaVersion string
+	BodyHash             string
+	CreatedAt            time.Time
+	ExpiresAt            time.Time
 }
 
-type ReceiptStore interface {
-	Reserve(context.Context, Reservation) (Receipt, ReservationStatus, error)
-	MarkStored(context.Context, string, string, int, time.Time) (Receipt, error)
-	MarkRejected(context.Context, string, string, time.Time) (Receipt, error)
+type AdmissionStore interface {
+	AuthorizeAndReserve(context.Context, Principal, BatchScope, Reservation) (Receipt, ReservationStatus, error)
+	MarkStored(context.Context, string, string, string, int, time.Time) (Receipt, error)
+	MarkRejected(context.Context, string, string, string, time.Time) (Receipt, error)
 }
 
 type ObjectStore interface {
@@ -106,9 +118,8 @@ type ObjectStore interface {
 }
 
 type Service struct {
-	receipts   ReceiptStore
+	admissions AdmissionStore
 	objects    ObjectStore
-	authorizer BatchAuthorizer
 	batchIDs   ServerBatchIDGenerator
 	now        func() time.Time
 }
@@ -119,22 +130,20 @@ type Result struct {
 }
 
 func NewService(
-	receipts ReceiptStore,
+	admissions AdmissionStore,
 	objects ObjectStore,
-	authorizer BatchAuthorizer,
 	batchIDs ServerBatchIDGenerator,
 	now func() time.Time,
 ) (*Service, error) {
-	if receipts == nil || objects == nil || authorizer == nil || batchIDs == nil {
-		return nil, errors.New("ingest stores, authorizer and batch id generator are required")
+	if admissions == nil || objects == nil || batchIDs == nil {
+		return nil, errors.New("ingest admission store, object store and batch id generator are required")
 	}
 	if now == nil {
 		now = time.Now
 	}
 	return &Service{
-		receipts:   receipts,
+		admissions: admissions,
 		objects:    objects,
-		authorizer: authorizer,
 		batchIDs:   batchIDs,
 		now:        now,
 	}, nil
@@ -153,7 +162,7 @@ func (s *Service) Ingest(
 		return Result{}, ErrInvalidPrincipal
 	}
 	firstCapturedAt, lastCapturedAt := capturedAtBounds(batch)
-	if err := s.authorizer.Authorize(ctx, principal, BatchScope{
+	scope := BatchScope{
 		TenantID:          batch.TenantID,
 		DeviceID:          batch.DeviceID,
 		TripID:            batch.TripID,
@@ -162,11 +171,6 @@ func (s *Service) Ingest(
 		ConsentRevisionID: batch.ConsentRevisionID,
 		FirstCapturedAt:   firstCapturedAt,
 		LastCapturedAt:    lastCapturedAt,
-	}); err != nil {
-		if errors.Is(err, ErrBatchUnauthorized) {
-			return Result{}, ErrBatchUnauthorized
-		}
-		return Result{}, fmt.Errorf("authorize batch: %w", err)
 	}
 
 	bodyDigest := sha256.Sum256(rawBody)
@@ -180,20 +184,34 @@ func (s *Service) Ingest(
 		return Result{}, errors.New("generated batch id is not a UUID")
 	}
 	receiptID := serverBatchID
-	reservationKey := deriveReservationKey(batch)
-	clientBatchKey := batch.TenantID + ":" + batch.ClientBatchID
-	receipt, status, err := s.receipts.Reserve(ctx, Reservation{
-		ReservationKey: reservationKey,
-		ClientBatchKey: clientBatchKey,
-		ReceiptID:      receiptID,
-		TenantID:       batch.TenantID,
-		BatchID:        serverBatchID,
-		ClientBatchID:  batch.ClientBatchID,
-		BodyHash:       bodyHash,
-		CreatedAt:      now,
+	reservationKey := DeriveReservationKey(
+		batch.SchemaVersion,
+		batch.TenantID,
+		batch.InstallationID,
+		batch.ClientBatchID,
+	)
+	clientBatchKey := DeriveClientBatchKey(batch.TenantID, batch.ClientBatchID)
+	receipt, status, err := s.admissions.AuthorizeAndReserve(ctx, principal, scope, Reservation{
+		ReservationKey:       reservationKey,
+		ClientBatchKey:       clientBatchKey,
+		ReceiptID:            receiptID,
+		TenantID:             batch.TenantID,
+		BatchID:              serverBatchID,
+		DeviceID:             batch.DeviceID,
+		TripID:               batch.TripID,
+		InstallationID:       batch.InstallationID,
+		ConsentRevisionID:    batch.ConsentRevisionID,
+		ClientBatchID:        batch.ClientBatchID,
+		PayloadSchemaVersion: batch.SchemaVersion,
+		BodyHash:             bodyHash,
+		CreatedAt:            now,
+		ExpiresAt:            now.Add(ReceiptRetention),
 	})
 	if err != nil {
-		return Result{}, fmt.Errorf("reserve receipt: %w", err)
+		if errors.Is(err, ErrBatchUnauthorized) {
+			return Result{}, ErrBatchUnauthorized
+		}
+		return Result{}, fmt.Errorf("authorize and reserve receipt: %w", err)
 	}
 	switch status {
 	case ReservationConflict:
@@ -229,8 +247,9 @@ func (s *Service) Ingest(
 	)
 	if err := s.objects.PutIfAbsent(ctx, objectPath, compressed, bodyHash); err != nil {
 		if errors.Is(err, ErrObjectConflict) {
-			if _, rejectErr := s.receipts.MarkRejected(
+			if _, rejectErr := s.admissions.MarkRejected(
 				ctx,
+				batch.TenantID,
 				reservationKey,
 				"object_conflict",
 				s.now().UTC(),
@@ -242,12 +261,13 @@ func (s *Service) Ingest(
 		return Result{}, fmt.Errorf("store batch object: %w", err)
 	}
 
-	receipt, err = s.receipts.MarkStored(
+	receipt, err = s.admissions.MarkStored(
 		ctx,
+		batch.TenantID,
 		reservationKey,
 		objectPath,
 		len(batch.Samples),
-		now,
+		s.now().UTC(),
 	)
 	if err != nil {
 		return Result{}, fmt.Errorf("complete receipt: %w", err)
@@ -270,13 +290,19 @@ func capturedAtBounds(batch telemetry.Batch) (time.Time, time.Time) {
 	return first, last
 }
 
-func deriveReservationKey(batch telemetry.Batch) string {
+func DeriveReservationKey(schemaVersion, tenantID, installationID, clientBatchID string) string {
 	material := strings.Join([]string{
-		batch.SchemaVersion,
-		batch.TenantID,
-		batch.InstallationID,
-		batch.ClientBatchID,
+		schemaVersion,
+		tenantID,
+		installationID,
+		clientBatchID,
 	}, "\x1f")
+	digest := sha256.Sum256([]byte(material))
+	return hex.EncodeToString(digest[:])
+}
+
+func DeriveClientBatchKey(tenantID, clientBatchID string) string {
+	material := tenantID + "\x1f" + clientBatchID
 	digest := sha256.Sum256([]byte(material))
 	return hex.EncodeToString(digest[:])
 }
