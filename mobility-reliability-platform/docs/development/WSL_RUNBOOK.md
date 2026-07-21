@@ -39,6 +39,7 @@ rtk adb.exe reverse tcp:8081 tcp:8081
 rtk adb.exe reverse tcp:9099 tcp:9099
 rtk adb.exe reverse tcp:8080 tcp:8080
 rtk adb.exe reverse tcp:9199 tcp:9199
+rtk adb.exe reverse tcp:8085 tcp:8085
 ```
 
 포트 의미:
@@ -47,6 +48,7 @@ rtk adb.exe reverse tcp:9199 tcp:9199
 - `9099`: Firebase Auth Emulator
 - `8080`: Firestore Emulator
 - `9199`: Storage Emulator
+- `8085`: 로컬 telemetry gateway host port (`container/Cloud Run PORT=8080`)
 
 Windows localhost가 WSL 서비스로 전달되지 않는 구성에서는 WSL mirrored networking 또는 Windows port proxy가 필요할 수 있다. 관리자 권한이 필요한 `netsh interface portproxy`는 자동 실행하지 않고 필요 시 별도 승인·기록한다.
 

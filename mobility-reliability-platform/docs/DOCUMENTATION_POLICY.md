@@ -39,7 +39,8 @@
 
 ## 상태와 표현 규칙
 
-- 허용 상태: `planned`, `in-progress`, `verified`, `blocked`, `superseded`, `cancelled`.
+- 내용 수명주기 상태: `planned`, `in-progress`, `verified`, `blocked`, `superseded`, `cancelled`.
+- 자동 생성·검토 전 문서는 `draft`, 자동 수집했지만 사람 검토 전인 증거는 `generated`를 사용할 수 있다. 두 값은 완료나 검증을 뜻하지 않으며 발행 시 내용 수명주기 상태와 검토자를 확정한다.
 - `완료`, `개선`, `안정화`, `검증`이라는 표현은 완료 조건과 근거가 있을 때만 사용한다.
 - 합성 데이터 실험은 `synthetic`, 현장 데이터 검증은 `field`, 로컬 테스트는 `local`로 명시한다.
 - 추정치와 관측치는 분리하고, 숫자에는 측정 기간·모수·단위를 적는다.

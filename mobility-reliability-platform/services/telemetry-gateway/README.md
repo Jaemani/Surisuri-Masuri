@@ -2,14 +2,48 @@
 
 모바일 텔레메트리 수집에 집중하는 scale-to-zero Go Cloud Run 서비스입니다.
 
-초기 책임:
+현재 구현된 kernel 책임:
+
+- duplicate key·invalid UTF-8까지 거부하는 strict `telemetry-batch.v1` decode와 최대 500 sample 검증
+- request body 2MiB 제한과 좌표값이 없는 안정적 오류 응답
+- verifier principal과 payload tenant/actor 재검증
+- 기기·세션·현재 정밀위치 동의를 서버 상태로 검사하는 authorizer 계약
+- tenant 범위 idempotency key와 batch ID를 함께 고유화하는 replay/conflict 계약
+- 결정론적 gzip object와 receipt 상태 전이 interface
+- 늦은 retry에서 object를 중복 생성하지 않는 `PutIfAbsent`와 terminal rejection 계약
+- Cloud Run용 timeout·graceful shutdown·non-root distroless image
+
+아직 구현하지 않은 production adapter:
 
 - Firebase ID token과 App Check 검증
-- 인증 주체와 tenant membership 검증
-- telemetry batch v1 JSON Schema 검증
-- `tenant_id + idempotency_key` 중복 제거
-- accepted/rejected sample receipt
-- 압축 Cloud Storage object 저장과 Firestore receipt 기록
-- trace/correlation ID 생성
+- tenant membership 및 기기·세션·동의 authorizer
+- Firestore receipt store
+- Cloud Storage object store와 lifecycle
 
-Firestore에는 GPS sample을 개별 document로 쓰지 않습니다. 현재 환경에는 Go toolchain이 확인되지 않았으므로 구현 전에 재현 가능한 버전을 프로젝트 도구로 고정합니다.
+adapter가 없는 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
+
+## WSL2에서 검사
+
+host Go가 없어도 고정 Docker image로 검사할 수 있습니다.
+
+```bash
+rtk docker run --rm \
+  -v "$PWD:/workspace:ro" \
+  -w /workspace/services/telemetry-gateway \
+  golang:1.26.5-bookworm \
+  sh -c 'go test -race ./... && go vet ./...'
+
+rtk docker build \
+  -f services/telemetry-gateway/Dockerfile \
+  -t mobility-telemetry-gateway:dev .
+```
+
+Docker build context는 프로젝트 root이며 `.dockerignore` allowlist가 현재 gateway source와 사용하는 synthetic contract fixture 하나만 전달합니다.
+
+Firestore Emulator가 WSL host의 `8080`을 사용하므로 gateway는 host `8085`로 노출합니다. container 내부와 Cloud Run의 `PORT`는 `8080`을 유지합니다.
+
+```bash
+rtk docker run --rm -p 127.0.0.1:8085:8080 mobility-telemetry-gateway:dev
+```
+
+host Go로 직접 실행하는 환경에서는 `PORT=8085`를 명시합니다.
