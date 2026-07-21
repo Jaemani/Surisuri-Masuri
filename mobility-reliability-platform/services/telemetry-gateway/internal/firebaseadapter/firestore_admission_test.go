@@ -3,6 +3,7 @@ package firebaseadapter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -75,6 +76,7 @@ func TestFirestoreAdmissionStoreAuthorizesBeforeIndexReadsAndCreatesAtomicTriple
 	if receipt.State != ingest.ReceiptReserved || receipt.Revision != 1 {
 		t.Fatalf("created receipt state/revision = %q/%d, want reserved/1", receipt.State, receipt.Revision)
 	}
+	assertAdmissionReceiptArtifactsEmpty(t, receipt)
 
 	createdReceipt, ok := tx.createValue(admissionReceiptPath()).(firestoreIngestReceipt)
 	if !ok {
@@ -212,6 +214,11 @@ func TestFirestoreAdmissionStoreMapsReplayReceiptStates(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, expected) {
 				t.Fatalf("AuthorizeAndReserve() receipt = %#v, want existing %#v", got, expected)
+			}
+			if test.state == ingest.ReceiptStored {
+				assertAdmissionStoredReceiptData(t, got, admissionStoredReceiptData(admissionTestReservation(now)))
+			} else {
+				assertAdmissionReceiptArtifactsEmpty(t, got)
 			}
 			if len(tx.creates) != 0 || len(tx.updates) != 0 {
 				t.Fatalf("replay creates/updates = %d/%d, want 0/0", len(tx.creates), len(tx.updates))
@@ -361,6 +368,28 @@ func TestFirestoreAdmissionStoreTreatsCorruptAdmissionLinkageAsUnavailable(t *te
 				tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
 			},
 		},
+		{
+			name: "stored receipt has incomplete artifact lineage",
+			configure: func(tx *fakeAdmissionTransaction) {
+				index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
+				tx.indexes[admissionIdempotencyPath()] = index
+				tx.indexes[admissionClientBatchPath()] = index
+				receipt := admissionTestReceipt(reservation, ingest.ReceiptStored)
+				receipt.ManifestSHA256 = ""
+				tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
+			},
+		},
+		{
+			name: "rejected receipt has stale artifact lineage",
+			configure: func(tx *fakeAdmissionTransaction) {
+				index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
+				tx.indexes[admissionIdempotencyPath()] = index
+				tx.indexes[admissionClientBatchPath()] = index
+				receipt := admissionTestReceipt(reservation, ingest.ReceiptRejected)
+				applyAdmissionStoredReceiptData(&receipt, admissionStoredReceiptData(reservation))
+				tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -495,19 +524,21 @@ func TestFirestoreAdmissionStoreMarkStoredAndRejectedPreserveLinkageAndAdvanceRe
 		invoke        func(*FirestoreAdmissionStore) (ingest.Receipt, error)
 		wantState     ingest.ReceiptState
 		wantPath      string
-		wantObject    string
-		wantSamples   int
 		wantRejection string
 	}{
 		{
 			name: "mark stored",
 			invoke: func(store *FirestoreAdmissionStore) (ingest.Receipt, error) {
-				return store.MarkStored(context.Background(), admissionTenantID, admissionReservationKey, admissionObjectPath(), 42, updatedAt)
+				return store.MarkStored(
+					context.Background(),
+					admissionTenantID,
+					admissionReservationKey,
+					admissionStoredReceiptData(reservation),
+					updatedAt,
+				)
 			},
-			wantState:   ingest.ReceiptStored,
-			wantPath:    admissionReceiptPath(),
-			wantObject:  admissionObjectPath(),
-			wantSamples: 42,
+			wantState: ingest.ReceiptStored,
+			wantPath:  admissionReceiptPath(),
 		},
 		{
 			name: "mark rejected",
@@ -536,8 +567,13 @@ func TestFirestoreAdmissionStoreMarkStoredAndRejectedPreserveLinkageAndAdvanceRe
 			if got.State != test.wantState || got.Revision != 2 || !got.UpdatedAt.Equal(updatedAt) {
 				t.Fatalf("final receipt state/revision/time = %q/%d/%s, want %q/2/%s", got.State, got.Revision, got.UpdatedAt, test.wantState, updatedAt)
 			}
-			if got.ObjectPath != test.wantObject || got.SampleCount != test.wantSamples || got.RejectionCode != test.wantRejection {
-				t.Fatalf("final receipt payload = object:%q samples:%d rejection:%q", got.ObjectPath, got.SampleCount, got.RejectionCode)
+			if got.RejectionCode != test.wantRejection {
+				t.Fatalf("final receipt rejection = %q, want %q", got.RejectionCode, test.wantRejection)
+			}
+			if test.wantState == ingest.ReceiptStored {
+				assertAdmissionStoredReceiptData(t, got, admissionStoredReceiptData(reservation))
+			} else {
+				assertAdmissionReceiptArtifactsEmpty(t, got)
 			}
 			if len(tx.creates) != 0 || len(tx.updates) != 1 || tx.updates[0].path != test.wantPath {
 				t.Fatalf("finalizer creates/updates = %d/%#v", len(tx.creates), tx.updates)
@@ -581,14 +617,13 @@ func TestFirestoreAdmissionStoreFinalizersRejectBrokenLinkageWithoutUpdate(t *te
 			},
 		},
 		{
-			name: "reserved receipt has stale object fields",
+			name: "reserved receipt has stale artifact fields",
 			configure: func(tx *fakeAdmissionTransaction) {
 				index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
 				tx.indexes[admissionIdempotencyPath()] = index
 				tx.indexes[admissionClientBatchPath()] = index
 				receipt := admissionTestReceipt(reservation, ingest.ReceiptReserved)
-				receipt.ObjectPath = admissionObjectPath()
-				receipt.SampleCount = 1
+				applyAdmissionStoredReceiptData(&receipt, admissionStoredReceiptData(reservation))
 				tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
 			},
 		},
@@ -602,7 +637,13 @@ func TestFirestoreAdmissionStoreFinalizersRejectBrokenLinkageWithoutUpdate(t *te
 			}
 			store := admissionTestStore(now, admissionRunner(tx))
 
-			_, err := store.MarkStored(context.Background(), admissionTenantID, admissionReservationKey, admissionObjectPath(), 1, now.Add(time.Minute))
+			_, err := store.MarkStored(
+				context.Background(),
+				admissionTenantID,
+				admissionReservationKey,
+				admissionStoredReceiptData(reservation),
+				now.Add(time.Minute),
+			)
 			if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
 				t.Fatalf("MarkStored() error = %v, want generic admission unavailable", err)
 			}
@@ -629,8 +670,7 @@ func TestFirestoreAdmissionStoreFinalizerTerminalReplayIgnoresOlderCallerTime(t 
 					context.Background(),
 					admissionTenantID,
 					admissionReservationKey,
-					admissionObjectPath(),
-					42,
+					admissionStoredReceiptData(reservation),
 					now.Add(time.Minute),
 				)
 			},
@@ -668,8 +708,65 @@ func TestFirestoreAdmissionStoreFinalizerTerminalReplayIgnoresOlderCallerTime(t 
 			if !got.UpdatedAt.Equal(receipt.UpdatedAt) || got.Revision != receipt.Revision {
 				t.Fatalf("terminal replay receipt = %#v, want existing %#v", got, receipt)
 			}
+			if test.state == ingest.ReceiptStored {
+				assertAdmissionStoredReceiptData(t, got, admissionStoredReceiptData(reservation))
+			} else {
+				assertAdmissionReceiptArtifactsEmpty(t, got)
+			}
 			if len(tx.updates) != 0 {
 				t.Fatalf("terminal replay updates = %d, want zero", len(tx.updates))
+			}
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreStoredReplayRejectsArtifactMismatch(t *testing.T) {
+	now := admissionTestNow()
+	reservation := admissionTestReservation(now)
+	mutations := []struct {
+		name   string
+		mutate func(*ingest.StoredReceiptData)
+	}{
+		{name: "object path", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Object.Path += ".other" }},
+		{name: "object sha256", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Object.SHA256 = strings.Repeat("c", 64) }},
+		{name: "object crc32c", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Object.CRC32C++ }},
+		{name: "object size", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Object.Size++ }},
+		{name: "object generation", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Object.Generation++ }},
+		{name: "object metageneration", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Object.Metageneration++ }},
+		{name: "manifest path", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Manifest.Path += ".other" }},
+		{name: "manifest sha256", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Manifest.SHA256 = strings.Repeat("d", 64) }},
+		{name: "manifest crc32c", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Manifest.CRC32C++ }},
+		{name: "manifest size", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Manifest.Size++ }},
+		{name: "manifest generation", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Manifest.Generation++ }},
+		{name: "manifest metageneration", mutate: func(stored *ingest.StoredReceiptData) { stored.Artifacts.Manifest.Metageneration++ }},
+		{name: "sample count", mutate: func(stored *ingest.StoredReceiptData) { stored.SampleCount++ }},
+	}
+
+	for _, test := range mutations {
+		t.Run(test.name, func(t *testing.T) {
+			tx := newFakeAdmissionTransaction(admissionTestSnapshot(now))
+			index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
+			tx.indexes[admissionIdempotencyPath()] = index
+			tx.indexes[admissionClientBatchPath()] = index
+			receipt := admissionTestReceipt(reservation, ingest.ReceiptStored)
+			receipt.Revision = 2
+			tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
+			store := admissionTestStore(now, admissionRunner(tx))
+			stored := admissionStoredReceiptData(reservation)
+			test.mutate(&stored)
+
+			_, err := store.MarkStored(
+				context.Background(),
+				admissionTenantID,
+				admissionReservationKey,
+				stored,
+				now.Add(time.Minute),
+			)
+			if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+				t.Fatalf("MarkStored() error = %v, want artifact mismatch unavailable", err)
+			}
+			if len(tx.updates) != 0 {
+				t.Fatalf("artifact mismatch updates = %d, want zero", len(tx.updates))
 			}
 		})
 	}
@@ -691,8 +788,7 @@ func TestFirestoreAdmissionStoreRejectsExpiredReservedFinalizer(t *testing.T) {
 		context.Background(),
 		admissionTenantID,
 		admissionReservationKey,
-		expectedObjectPath(receiptDTO),
-		1,
+		admissionStoredReceiptData(reservation),
 		now,
 	)
 	if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
@@ -912,8 +1008,7 @@ func admissionTestReceipt(reservation ingest.Reservation, state ingest.ReceiptSt
 		ExpiresAt:            reservation.ExpiresAt,
 	}
 	if state == ingest.ReceiptStored || state == "queued" || state == "projected" || state == "deleting" || state == "deleted" {
-		receipt.ObjectPath = admissionObjectPath()
-		receipt.SampleCount = 42
+		applyAdmissionStoredReceiptData(&receipt, admissionStoredReceiptData(reservation))
 	}
 	if state == ingest.ReceiptRejected {
 		receipt.RejectionCode = "object_conflict"
@@ -923,27 +1018,96 @@ func admissionTestReceipt(reservation ingest.Reservation, state ingest.ReceiptSt
 
 func admissionTestReceiptDTO(receipt ingest.Receipt) firestoreIngestReceipt {
 	return firestoreIngestReceipt{
-		ReservationKey:       receipt.ReservationKey,
-		ClientBatchKey:       receipt.ClientBatchKey,
-		ReceiptID:            receipt.ReceiptID,
-		TenantID:             receipt.TenantID,
-		BatchID:              receipt.BatchID,
-		DeviceID:             receipt.DeviceID,
-		TripID:               receipt.TripID,
-		InstallationID:       receipt.InstallationID,
-		ConsentRevisionID:    receipt.ConsentRevisionID,
-		ClientBatchID:        receipt.ClientBatchID,
-		PayloadSchemaVersion: receipt.PayloadSchemaVersion,
-		BodyHash:             receipt.BodyHash,
-		ObjectPath:           receipt.ObjectPath,
-		SampleCount:          receipt.SampleCount,
-		State:                receipt.State,
-		RejectionCode:        receipt.RejectionCode,
-		Revision:             receipt.Revision,
-		CreatedAt:            receipt.CreatedAt,
-		UpdatedAt:            receipt.UpdatedAt,
-		ExpiresAt:            receipt.ExpiresAt,
+		ReservationKey:         receipt.ReservationKey,
+		ClientBatchKey:         receipt.ClientBatchKey,
+		ReceiptID:              receipt.ReceiptID,
+		TenantID:               receipt.TenantID,
+		BatchID:                receipt.BatchID,
+		DeviceID:               receipt.DeviceID,
+		TripID:                 receipt.TripID,
+		InstallationID:         receipt.InstallationID,
+		ConsentRevisionID:      receipt.ConsentRevisionID,
+		ClientBatchID:          receipt.ClientBatchID,
+		PayloadSchemaVersion:   receipt.PayloadSchemaVersion,
+		BodyHash:               receipt.BodyHash,
+		ObjectPath:             receipt.ObjectPath,
+		ObjectSHA256:           receipt.ObjectSHA256,
+		ObjectCRC32C:           int64(receipt.ObjectCRC32C),
+		ObjectSize:             receipt.ObjectSize,
+		ObjectGeneration:       receipt.ObjectGeneration,
+		ObjectMetageneration:   receipt.ObjectMetageneration,
+		ManifestPath:           receipt.ManifestPath,
+		ManifestSHA256:         receipt.ManifestSHA256,
+		ManifestCRC32C:         int64(receipt.ManifestCRC32C),
+		ManifestSize:           receipt.ManifestSize,
+		ManifestGeneration:     receipt.ManifestGeneration,
+		ManifestMetageneration: receipt.ManifestMetageneration,
+		SampleCount:            receipt.SampleCount,
+		State:                  receipt.State,
+		RejectionCode:          receipt.RejectionCode,
+		Revision:               receipt.Revision,
+		CreatedAt:              receipt.CreatedAt,
+		UpdatedAt:              receipt.UpdatedAt,
+		ExpiresAt:              receipt.ExpiresAt,
 	}
+}
+
+func admissionStoredReceiptData(reservation ingest.Reservation) ingest.StoredReceiptData {
+	receivedAt := reservation.CreatedAt.UTC()
+	return ingest.StoredReceiptData{
+		Artifacts: ingest.StoredBatchArtifacts{
+			Object: ingest.StoredArtifact{
+				Path: fmt.Sprintf(
+					"telemetry/v2/tenants/%s/devices/%s/trips/%s/year=%04d/month=%02d/day=%02d/%s.json.gz",
+					reservation.TenantID,
+					reservation.DeviceID,
+					reservation.TripID,
+					receivedAt.Year(),
+					receivedAt.Month(),
+					receivedAt.Day(),
+					reservation.BatchID,
+				),
+				SHA256:         strings.Repeat("a", 64),
+				CRC32C:         0x12345678,
+				Size:           2048,
+				Generation:     1700000000000001,
+				Metageneration: 1,
+			},
+			Manifest: ingest.StoredArtifact{
+				Path: fmt.Sprintf(
+					"telemetry-manifests/v2/tenants/%s/trips/%s/year=%04d/month=%02d/day=%02d/%s.manifest.json",
+					reservation.TenantID,
+					reservation.TripID,
+					receivedAt.Year(),
+					receivedAt.Month(),
+					receivedAt.Day(),
+					reservation.BatchID,
+				),
+				SHA256:         strings.Repeat("b", 64),
+				CRC32C:         0x87654321,
+				Size:           1024,
+				Generation:     1700000000000002,
+				Metageneration: 1,
+			},
+		},
+		SampleCount: 42,
+	}
+}
+
+func applyAdmissionStoredReceiptData(receipt *ingest.Receipt, stored ingest.StoredReceiptData) {
+	receipt.ObjectPath = stored.Artifacts.Object.Path
+	receipt.ObjectSHA256 = stored.Artifacts.Object.SHA256
+	receipt.ObjectCRC32C = stored.Artifacts.Object.CRC32C
+	receipt.ObjectSize = stored.Artifacts.Object.Size
+	receipt.ObjectGeneration = stored.Artifacts.Object.Generation
+	receipt.ObjectMetageneration = stored.Artifacts.Object.Metageneration
+	receipt.ManifestPath = stored.Artifacts.Manifest.Path
+	receipt.ManifestSHA256 = stored.Artifacts.Manifest.SHA256
+	receipt.ManifestCRC32C = stored.Artifacts.Manifest.CRC32C
+	receipt.ManifestSize = stored.Artifacts.Manifest.Size
+	receipt.ManifestGeneration = stored.Artifacts.Manifest.Generation
+	receipt.ManifestMetageneration = stored.Artifacts.Manifest.Metageneration
+	receipt.SampleCount = stored.SampleCount
 }
 
 func admissionReplayTransaction(
@@ -974,10 +1138,6 @@ func admissionReceiptPath() string {
 	return "tenants/" + admissionTenantID + "/ingestReceipts/" + admissionReceiptID
 }
 
-func admissionObjectPath() string {
-	return "telemetry/v2/tenants/" + admissionTenantID + "/devices/" + admissionDeviceID + "/trips/" + admissionTripID + "/year=2026/month=07/day=21/" + admissionReceiptID + ".json.gz"
-}
-
 func assertAdmissionReceiptMatchesReservation(t *testing.T, got ingest.Receipt, reservation ingest.Reservation) {
 	t.Helper()
 	if got.ReservationKey != reservation.ReservationKey ||
@@ -998,6 +1158,43 @@ func assertAdmissionReceiptMatchesReservation(t *testing.T, got ingest.Receipt, 
 	}
 }
 
+func assertAdmissionStoredReceiptData(
+	t *testing.T,
+	receipt ingest.Receipt,
+	want ingest.StoredReceiptData,
+) {
+	t.Helper()
+	got := ingest.StoredReceiptData{
+		Artifacts: ingest.StoredBatchArtifacts{
+			Object: ingest.StoredArtifact{
+				Path: receipt.ObjectPath, SHA256: receipt.ObjectSHA256,
+				CRC32C: receipt.ObjectCRC32C, Size: receipt.ObjectSize,
+				Generation: receipt.ObjectGeneration, Metageneration: receipt.ObjectMetageneration,
+			},
+			Manifest: ingest.StoredArtifact{
+				Path: receipt.ManifestPath, SHA256: receipt.ManifestSHA256,
+				CRC32C: receipt.ManifestCRC32C, Size: receipt.ManifestSize,
+				Generation: receipt.ManifestGeneration, Metageneration: receipt.ManifestMetageneration,
+			},
+		},
+		SampleCount: receipt.SampleCount,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stored receipt data = %#v, want %#v", got, want)
+	}
+}
+
+func assertAdmissionReceiptArtifactsEmpty(t *testing.T, receipt ingest.Receipt) {
+	t.Helper()
+	if receipt.ObjectPath != "" || receipt.ObjectSHA256 != "" || receipt.ObjectCRC32C != 0 ||
+		receipt.ObjectSize != 0 || receipt.ObjectGeneration != 0 || receipt.ObjectMetageneration != 0 ||
+		receipt.ManifestPath != "" || receipt.ManifestSHA256 != "" || receipt.ManifestCRC32C != 0 ||
+		receipt.ManifestSize != 0 || receipt.ManifestGeneration != 0 || receipt.ManifestMetageneration != 0 ||
+		receipt.SampleCount != 0 {
+		t.Fatalf("receipt has unexpected artifact data: %#v", receipt)
+	}
+}
+
 func assertFirestoreUpdates(t *testing.T, updates []firestore.Update, receipt ingest.Receipt) {
 	t.Helper()
 	got := make(map[string]any, len(updates))
@@ -1011,6 +1208,17 @@ func assertFirestoreUpdates(t *testing.T, updates []firestore.Update, receipt in
 	}
 	if receipt.State == ingest.ReceiptStored {
 		want["object_path"] = receipt.ObjectPath
+		want["object_sha256"] = receipt.ObjectSHA256
+		want["object_crc32c"] = int64(receipt.ObjectCRC32C)
+		want["object_size"] = receipt.ObjectSize
+		want["object_generation"] = receipt.ObjectGeneration
+		want["object_metageneration"] = receipt.ObjectMetageneration
+		want["manifest_path"] = receipt.ManifestPath
+		want["manifest_sha256"] = receipt.ManifestSHA256
+		want["manifest_crc32c"] = int64(receipt.ManifestCRC32C)
+		want["manifest_size"] = receipt.ManifestSize
+		want["manifest_generation"] = receipt.ManifestGeneration
+		want["manifest_metageneration"] = receipt.ManifestMetageneration
 		want["sample_count"] = receipt.SampleCount
 	}
 	if receipt.State == ingest.ReceiptRejected {

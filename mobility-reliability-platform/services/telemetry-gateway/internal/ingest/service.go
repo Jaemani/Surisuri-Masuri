@@ -23,7 +23,10 @@ var (
 	ErrAdmissionUnavailable = errors.New("telemetry admission store is unavailable")
 )
 
-const ReceiptRetention = 30 * 24 * time.Hour
+const (
+	ReceiptRetention          = 30 * 24 * time.Hour
+	TelemetryValidatorVersion = "telemetry-gateway-validator@1"
+)
 
 type Principal struct {
 	FirebaseUID string
@@ -57,26 +60,37 @@ const (
 )
 
 type Receipt struct {
-	ReservationKey       string
-	ClientBatchKey       string
-	ReceiptID            string
-	TenantID             string
-	BatchID              string
-	DeviceID             string
-	TripID               string
-	InstallationID       string
-	ConsentRevisionID    string
-	ClientBatchID        string
-	PayloadSchemaVersion string
-	BodyHash             string
-	ObjectPath           string
-	SampleCount          int
-	State                ReceiptState
-	RejectionCode        string
-	Revision             int64
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	ExpiresAt            time.Time
+	ReservationKey         string
+	ClientBatchKey         string
+	ReceiptID              string
+	TenantID               string
+	BatchID                string
+	DeviceID               string
+	TripID                 string
+	InstallationID         string
+	ConsentRevisionID      string
+	ClientBatchID          string
+	PayloadSchemaVersion   string
+	BodyHash               string
+	ObjectPath             string
+	ObjectSHA256           string
+	ObjectCRC32C           uint32
+	ObjectSize             int64
+	ObjectGeneration       int64
+	ObjectMetageneration   int64
+	ManifestPath           string
+	ManifestSHA256         string
+	ManifestCRC32C         uint32
+	ManifestSize           int64
+	ManifestGeneration     int64
+	ManifestMetageneration int64
+	SampleCount            int
+	State                  ReceiptState
+	RejectionCode          string
+	Revision               int64
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	ExpiresAt              time.Time
 }
 
 type ReservationStatus string
@@ -107,19 +121,23 @@ type Reservation struct {
 	ExpiresAt            time.Time
 }
 
-type AdmissionStore interface {
-	AuthorizeAndReserve(context.Context, Principal, BatchScope, Reservation) (Receipt, ReservationStatus, error)
-	MarkStored(context.Context, string, string, string, int, time.Time) (Receipt, error)
-	MarkRejected(context.Context, string, string, string, time.Time) (Receipt, error)
+// StoredReceiptData carries the complete immutable raw and manifest lineage
+// into the control-plane finalizer. SampleCount remains explicit because it is
+// receipt state rather than provider-returned artifact metadata.
+type StoredReceiptData struct {
+	Artifacts   StoredBatchArtifacts
+	SampleCount int
 }
 
-type ObjectStore interface {
-	PutIfAbsent(context.Context, string, []byte, string) error
+type AdmissionStore interface {
+	AuthorizeAndReserve(context.Context, Principal, BatchScope, Reservation) (Receipt, ReservationStatus, error)
+	MarkStored(context.Context, string, string, StoredReceiptData, time.Time) (Receipt, error)
+	MarkRejected(context.Context, string, string, string, time.Time) (Receipt, error)
 }
 
 type Service struct {
 	admissions AdmissionStore
-	objects    ObjectStore
+	artifacts  TelemetryArtifactStore
 	batchIDs   ServerBatchIDGenerator
 	now        func() time.Time
 }
@@ -131,19 +149,19 @@ type Result struct {
 
 func NewService(
 	admissions AdmissionStore,
-	objects ObjectStore,
+	artifacts TelemetryArtifactStore,
 	batchIDs ServerBatchIDGenerator,
 	now func() time.Time,
 ) (*Service, error) {
-	if admissions == nil || objects == nil || batchIDs == nil {
-		return nil, errors.New("ingest admission store, object store and batch id generator are required")
+	if admissions == nil || artifacts == nil || batchIDs == nil {
+		return nil, errors.New("ingest admission store, artifact store and batch id generator are required")
 	}
 	if now == nil {
 		now = time.Now
 	}
 	return &Service{
 		admissions: admissions,
-		objects:    objects,
+		artifacts:  artifacts,
 		batchIDs:   batchIDs,
 		now:        now,
 	}, nil
@@ -234,39 +252,55 @@ func (s *Service) Ingest(
 	if receipt.CreatedAt.IsZero() || !telemetry.IsUUID(receipt.BatchID) {
 		return Result{}, errors.New("reserved receipt is missing stable batch identity")
 	}
-	receivedAt := receipt.CreatedAt.UTC()
-	objectPath := fmt.Sprintf(
-		"telemetry/v2/tenants/%s/devices/%s/trips/%s/year=%04d/month=%02d/day=%02d/%s.json.gz",
-		batch.TenantID,
-		batch.DeviceID,
-		batch.TripID,
-		receivedAt.Year(),
-		receivedAt.Month(),
-		receivedAt.Day(),
-		receipt.BatchID,
-	)
-	if err := s.objects.PutIfAbsent(ctx, objectPath, compressed, bodyHash); err != nil {
-		if errors.Is(err, ErrObjectConflict) {
+	manifestInput := BatchManifestInput{
+		PayloadSchemaVersion: receipt.PayloadSchemaVersion,
+		TenantID:             receipt.TenantID,
+		DeviceID:             receipt.DeviceID,
+		TripID:               receipt.TripID,
+		InstallationID:       receipt.InstallationID,
+		BatchID:              receipt.BatchID,
+		ClientBatchID:        receipt.ClientBatchID,
+		ConsentRevisionID:    receipt.ConsentRevisionID,
+		BodyHash:             receipt.BodyHash,
+		SampleCount:          len(batch.Samples),
+		FirstCapturedAt:      firstCapturedAt,
+		LastCapturedAt:       lastCapturedAt,
+		ReceivedAt:           receipt.CreatedAt.UTC(),
+		ExpiresAt:            receipt.ExpiresAt.UTC(),
+		ValidatorVersion:     TelemetryValidatorVersion,
+	}
+	objectPath := ExpectedTelemetryObjectPath(manifestInput)
+	manifestPath := ExpectedTelemetryManifestPath(manifestInput)
+	storedArtifacts, err := s.artifacts.StoreBatch(ctx, BatchArtifactWrite{
+		ObjectPath:     objectPath,
+		ManifestPath:   manifestPath,
+		CompressedBody: compressed,
+		Manifest:       manifestInput,
+	})
+	if err != nil {
+		if errors.Is(err, ErrRawArtifactConflict) {
 			if _, rejectErr := s.admissions.MarkRejected(
 				ctx,
-				batch.TenantID,
-				reservationKey,
+				receipt.TenantID,
+				receipt.ReservationKey,
 				"object_conflict",
 				s.now().UTC(),
 			); rejectErr != nil {
-				return Result{}, fmt.Errorf("reject receipt after object conflict: %w", rejectErr)
+				return Result{}, fmt.Errorf("reject receipt after artifact conflict: %w", rejectErr)
 			}
 			return Result{}, ErrObjectConflict
 		}
-		return Result{}, fmt.Errorf("store batch object: %w", err)
+		return Result{}, fmt.Errorf("store batch artifacts: %w", err)
 	}
 
 	receipt, err = s.admissions.MarkStored(
 		ctx,
-		batch.TenantID,
-		reservationKey,
-		objectPath,
-		len(batch.Samples),
+		receipt.TenantID,
+		receipt.ReservationKey,
+		StoredReceiptData{
+			Artifacts:   storedArtifacts,
+			SampleCount: len(batch.Samples),
+		},
 		s.now().UTC(),
 	)
 	if err != nil {

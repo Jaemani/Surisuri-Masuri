@@ -142,16 +142,16 @@ status, revision, created_at, updated_at, expires_at
 - Firestore commit과 Cloud Storage write는 분산 transaction이 아니다. receipt가 `reserved`인 채 남거나 object가 저장된 뒤 `MarkStored`가 실패할 수 있다.
 - pending replay 여러 개가 같은 object write를 시도할 수 있다. Storage `DoesNotExist`는 overwrite를 막지만 lease owner·fencing token과 sweeper 복구가 후속으로 필요하다.
 - 만료 직전 `reserved` replay가 admission을 통과한 뒤 Storage 처리 중 만료되면 finalizer는 막히지만 orphan object가 생길 수 있다. object/manifest에 원 receipt 만료시각을 보존하고 lease deadline·fencing·orphan cleanup을 구현하기 전에는 runtime을 열지 않는다.
-- 현재 ObjectStore 계약은 object SHA-256, generation과 immutable manifest 계보를 final receipt에 전달하지 않는다. Storage adapter와 함께 확장해야 한다.
+- 이 결정 작성 시점의 ObjectStore 한계는 [ADR-0016](./ADR-0016-immutable-telemetry-artifact-lineage.md)에서 raw·manifest 전체 계보를 반환하는 artifact store와 finalizer 계약으로 확장했다. runtime wiring 전이라는 운영 한계는 유지된다.
 - consent 철회가 transaction commit 뒤에 발생하면 이미 승인·저장된 object를 자동 취소하지 않는다. 이후 수집 차단과 삭제 workflow를 별도로 적용한다.
 - transaction read 수와 retry 비용이 늘지만 GPS sample별 Firestore write는 만들지 않는다.
-- adapter는 `cmd/server`에 연결하지 않았고 Cloud Storage adapter도 없으므로 `/healthz` 외 readiness와 ingest는 계속 fail-closed여야 한다.
+- adapter는 `cmd/server`에 연결하지 않았고 lease·fencing·sweeper도 없으므로 `/healthz` 외 readiness와 ingest는 계속 fail-closed여야 한다.
 
 ## Rollout gate와 후속 검증
 
 - actual Firestore Emulator의 신규·concurrent same-batch·missing authorization 검증은 CI gate로 유지하고, 실제 철회 transaction 경쟁과 partial/corrupt fixture를 추가한다.
 - staging ADC/IAM과 실제 tenant-scoped document decode를 검증한다.
-- Cloud Storage `DoesNotExist`, object SHA-256·generation, immutable manifest와 lifecycle을 구현한다.
+- Cloud Storage `DoesNotExist`, object SHA-256·generation과 immutable manifest adapter 구현 뒤 staging lifecycle·IAM을 검증한다.
 - pending reservation lease, fencing token, sweeper와 orphan reconciliation을 구현한다.
 - verifier, admission store, Storage adapter를 executable startup에 함께 연결한 뒤에만 readiness를 연다.
 - 위 gate 전에는 production authorization·원자 수신·운영 저장 완료를 주장하지 않는다.

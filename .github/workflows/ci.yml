@@ -73,6 +73,23 @@ jobs:
           --only firestore
           "cd ../../services/telemetry-gateway && go test -mod=readonly -count=1 -race -timeout 60s ./internal/firebaseadapter -run FirestoreAdmissionStoreEmulator -v"
 
+      - name: Test Cloud Storage artifact lineage
+        working-directory: mobility-reliability-platform/services/telemetry-gateway
+        run: |
+          docker run --rm -d --name mobility-storage-testbench --network host \
+            gcr.io/cloud-devrel-public-resources/storage-testbench@sha256:600fa5c3cfc8be26435c38591cc094fb4ef648f760ffabf77f93237b1ebee027
+          trap 'docker rm -f mobility-storage-testbench >/dev/null 2>&1 || true' EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl --max-time 5 --fail --silent http://127.0.0.1:9000 >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --max-time 5 --fail --silent http://127.0.0.1:9000 >/dev/null
+          STORAGE_EMULATOR_HOST=http://127.0.0.1:9000 \
+            go test -mod=readonly -count=1 -race -timeout 60s \
+              ./internal/gcsadapter -run ArtifactStoreEmulator -v
+
       - name: Check telemetry gateway
         working-directory: mobility-reliability-platform/services/telemetry-gateway
         run: |

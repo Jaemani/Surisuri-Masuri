@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 func TestServiceStoresCompressedBatchAndCompletesReceipt(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	now := time.Date(2026, 7, 21, 6, 0, 0, 0, time.UTC)
 	service := mustService(t, receipts, objects, func() time.Time { return now })
 
@@ -40,8 +41,40 @@ func TestServiceStoresCompressedBatchAndCompletesReceipt(t *testing.T) {
 		!result.Receipt.ExpiresAt.Equal(now.Add(ReceiptRetention)) {
 		t.Fatalf("receipt lineage = %#v", result.Receipt)
 	}
+	firstCapturedAt, lastCapturedAt := capturedAtBounds(batch)
+	wantManifest := BatchManifestInput{
+		PayloadSchemaVersion: result.Receipt.PayloadSchemaVersion,
+		TenantID:             result.Receipt.TenantID,
+		DeviceID:             result.Receipt.DeviceID,
+		TripID:               result.Receipt.TripID,
+		InstallationID:       result.Receipt.InstallationID,
+		BatchID:              result.Receipt.BatchID,
+		ClientBatchID:        result.Receipt.ClientBatchID,
+		ConsentRevisionID:    result.Receipt.ConsentRevisionID,
+		BodyHash:             result.Receipt.BodyHash,
+		SampleCount:          len(batch.Samples),
+		FirstCapturedAt:      firstCapturedAt,
+		LastCapturedAt:       lastCapturedAt,
+		ReceivedAt:           result.Receipt.CreatedAt,
+		ExpiresAt:            result.Receipt.ExpiresAt,
+		ValidatorVersion:     TelemetryValidatorVersion,
+	}
+	if !reflect.DeepEqual(objects.lastWrite.Manifest, wantManifest) {
+		t.Fatalf("artifact manifest input = %#v, want %#v", objects.lastWrite.Manifest, wantManifest)
+	}
+	if objects.lastWrite.ObjectPath != ExpectedTelemetryObjectPath(objects.lastWrite.Manifest) ||
+		objects.lastWrite.ManifestPath != ExpectedTelemetryManifestPath(objects.lastWrite.Manifest) {
+		t.Fatalf("artifact paths = %q / %q", objects.lastWrite.ObjectPath, objects.lastWrite.ManifestPath)
+	}
+	assertReceiptArtifactLineage(t, result.Receipt, objects.lastStored)
+	if !reflect.DeepEqual(receipts.lastStoredData, StoredReceiptData{
+		Artifacts:   objects.lastStored,
+		SampleCount: len(batch.Samples),
+	}) {
+		t.Fatalf("finalizer data = %#v, stored = %#v", receipts.lastStoredData, objects.lastStored)
+	}
 
-	stored := objects.contentAt(t, result.Receipt.ObjectPath)
+	stored := objects.rawContentAt(t, result.Receipt.ObjectPath)
 	reader, err := gzip.NewReader(bytes.NewReader(stored))
 	if err != nil {
 		t.Fatalf("gzip.NewReader() error = %v", err)
@@ -61,7 +94,7 @@ func TestServiceStoresCompressedBatchAndCompletesReceipt(t *testing.T) {
 func TestServiceReturnsCompletedReplayWithoutSecondObjectWrite(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	service := mustService(t, receipts, objects, nil)
 	principal := matchingPrincipal(batch)
 
@@ -75,8 +108,8 @@ func TestServiceReturnsCompletedReplayWithoutSecondObjectWrite(t *testing.T) {
 	if !result.Replay {
 		t.Fatal("second ingest was not marked as replay")
 	}
-	if objects.putCount != 1 {
-		t.Fatalf("object writes = %d, want 1", objects.putCount)
+	if objects.rawWrites != 1 || objects.manifestWrites != 1 || objects.storeCalls != 1 {
+		t.Fatalf("artifact writes/calls = %d/%d/%d, want 1/1/1", objects.rawWrites, objects.manifestWrites, objects.storeCalls)
 	}
 	if receipts.authorizeCalls != 2 {
 		t.Fatalf("authorization calls = %d, want 2", receipts.authorizeCalls)
@@ -86,7 +119,7 @@ func TestServiceReturnsCompletedReplayWithoutSecondObjectWrite(t *testing.T) {
 func TestServiceRejectsIdempotencyBodyConflict(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	service := mustService(t, receipts, objects, nil)
 	principal := matchingPrincipal(batch)
 
@@ -111,7 +144,7 @@ func TestServiceRejectsIdempotencyBodyConflict(t *testing.T) {
 func TestServiceUsesFreshCompletionTimeAfterObjectStorage(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	base := time.Date(2026, time.July, 21, 6, 0, 0, 0, time.UTC)
 	call := 0
 	service := mustService(t, receipts, objects, func() time.Time {
@@ -131,12 +164,12 @@ func TestServiceUsesFreshCompletionTimeAfterObjectStorage(t *testing.T) {
 
 func TestNewServiceRequiresEveryDependency(t *testing.T) {
 	admissions := newMemoryReceiptStore()
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	batchIDs := fixedBatchIDGenerator()
 	tests := []struct {
 		name       string
 		admissions AdmissionStore
-		objects    ObjectStore
+		objects    TelemetryArtifactStore
 		batchIDs   ServerBatchIDGenerator
 	}{
 		{name: "nil admissions", objects: objects, batchIDs: batchIDs},
@@ -155,7 +188,7 @@ func TestNewServiceRequiresEveryDependency(t *testing.T) {
 func TestServiceRejectsIncompleteVerifiedPrincipal(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	service := mustService(t, receipts, objects, nil)
 	principal := matchingPrincipal(batch)
 	principal.AppID = ""
@@ -164,7 +197,7 @@ func TestServiceRejectsIncompleteVerifiedPrincipal(t *testing.T) {
 	if !errors.Is(err, ErrInvalidPrincipal) {
 		t.Fatalf("principal error = %v", err)
 	}
-	if len(receipts.receipts) != 0 || objects.putCount != 0 {
+	if len(receipts.receipts) != 0 || objects.storeCalls != 0 {
 		t.Fatal("identity mismatch wrote storage state")
 	}
 }
@@ -175,7 +208,7 @@ func TestServiceRejectsUnauthorizedBatchScopeBeforeStorage(t *testing.T) {
 	receipts.authorize = func(context.Context, Principal, BatchScope) error {
 		return ErrBatchUnauthorized
 	}
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	service, err := NewService(
 		receipts,
 		objects,
@@ -190,7 +223,7 @@ func TestServiceRejectsUnauthorizedBatchScopeBeforeStorage(t *testing.T) {
 	if !errors.Is(err, ErrBatchUnauthorized) {
 		t.Fatalf("authorization error = %v", err)
 	}
-	if len(receipts.receipts) != 0 || objects.putCount != 0 {
+	if len(receipts.receipts) != 0 || objects.storeCalls != 0 {
 		t.Fatal("unauthorized batch wrote storage state")
 	}
 }
@@ -208,7 +241,7 @@ func TestServicePassesIdentityAndCapturedAtBoundsToAtomicAdmission(t *testing.T)
 	receipts.authorize = func(context.Context, Principal, BatchScope) error {
 		return ErrBatchUnauthorized
 	}
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	service := mustService(t, receipts, objects, nil)
 	principal := matchingPrincipal(batch)
 
@@ -249,7 +282,7 @@ func TestCapturedAtBoundsUsesTimeOrderInsteadOfSampleOrder(t *testing.T) {
 func TestServiceRejectsClientBatchReuseAcrossInstallations(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	service := mustService(t, receipts, objects, nil)
 	principal := matchingPrincipal(batch)
 
@@ -270,16 +303,65 @@ func TestServiceRejectsClientBatchReuseAcrossInstallations(t *testing.T) {
 	if !errors.Is(err, ErrClientBatchConflict) {
 		t.Fatalf("client batch conflict error = %v", err)
 	}
-	if objects.putCount != 1 {
-		t.Fatalf("object writes = %d, want 1", objects.putCount)
+	if objects.rawWrites != 1 || objects.manifestWrites != 1 {
+		t.Fatalf("artifact writes = %d/%d, want 1/1", objects.rawWrites, objects.manifestWrites)
 	}
 }
 
-func TestServiceRecoversPendingReceiptWithoutDuplicateObject(t *testing.T) {
+func TestServiceRetriesAfterRawArtifactFailure(t *testing.T) {
+	batch, raw := validBatch(t)
+	receipts := newMemoryReceiptStore()
+	artifacts := newMemoryArtifactStore()
+	artifacts.failNextRaw = true
+	service := mustService(t, receipts, artifacts, nil)
+	principal := matchingPrincipal(batch)
+
+	if _, err := service.Ingest(context.Background(), principal, batch, raw); !errors.Is(err, ErrArtifactUnavailable) {
+		t.Fatalf("first Ingest() error = %v, want artifact unavailable", err)
+	}
+	if artifacts.rawWrites != 0 || artifacts.manifestWrites != 0 || receipts.markStoredCalls != 0 {
+		t.Fatalf("failed raw attempt wrote state = %d/%d/%d", artifacts.rawWrites, artifacts.manifestWrites, receipts.markStoredCalls)
+	}
+	result, err := service.Ingest(context.Background(), principal, batch, raw)
+	if err != nil {
+		t.Fatalf("retry Ingest() error = %v", err)
+	}
+	if !result.Replay || artifacts.rawWrites != 1 || artifacts.manifestWrites != 1 || receipts.markStoredCalls != 1 {
+		t.Fatalf("retry state = %#v, writes/finalizers = %d/%d/%d", result, artifacts.rawWrites, artifacts.manifestWrites, receipts.markStoredCalls)
+	}
+}
+
+func TestServiceRecoversManifestFailureWithoutDuplicateRaw(t *testing.T) {
+	batch, raw := validBatch(t)
+	receipts := newMemoryReceiptStore()
+	artifacts := newMemoryArtifactStore()
+	artifacts.failNextManifest = true
+	service := mustService(t, receipts, artifacts, nil)
+	principal := matchingPrincipal(batch)
+
+	if _, err := service.Ingest(context.Background(), principal, batch, raw); !errors.Is(err, ErrArtifactUnavailable) {
+		t.Fatalf("first Ingest() error = %v, want artifact unavailable", err)
+	}
+	if artifacts.rawWrites != 1 || artifacts.manifestWrites != 0 || receipts.markStoredCalls != 0 {
+		t.Fatalf("manifest failure state = %d/%d/%d", artifacts.rawWrites, artifacts.manifestWrites, receipts.markStoredCalls)
+	}
+	result, err := service.Ingest(context.Background(), principal, batch, raw)
+	if err != nil {
+		t.Fatalf("retry Ingest() error = %v", err)
+	}
+	if !result.Replay || artifacts.rawWrites != 1 || artifacts.manifestWrites != 1 || receipts.markStoredCalls != 1 {
+		t.Fatalf("retry state = %#v, writes/finalizers = %d/%d/%d", result, artifacts.rawWrites, artifacts.manifestWrites, receipts.markStoredCalls)
+	}
+	if !artifacts.lastStored.Object.Replay || artifacts.lastStored.Manifest.Replay {
+		t.Fatalf("replay flags = %#v", artifacts.lastStored)
+	}
+}
+
+func TestServiceRecoversFinalizerFailureWithoutDuplicateArtifacts(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
 	receipts.failNextMarkStored = true
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	service := mustService(t, receipts, objects, nil)
 	principal := matchingPrincipal(batch)
 
@@ -293,21 +375,23 @@ func TestServiceRecoversPendingReceiptWithoutDuplicateObject(t *testing.T) {
 	if !result.Replay || result.Receipt.State != ReceiptStored {
 		t.Fatalf("retry result = %#v", result)
 	}
-	if objects.putCount != 1 {
-		t.Fatalf("object writes = %d, want 1", objects.putCount)
+	if objects.rawWrites != 1 || objects.manifestWrites != 1 || objects.storeCalls != 2 || receipts.markStoredCalls != 2 {
+		t.Fatalf("writes/calls/finalizers = %d/%d/%d/%d, want 1/1/2/2", objects.rawWrites, objects.manifestWrites, objects.storeCalls, receipts.markStoredCalls)
+	}
+	if !objects.lastStored.Object.Replay || !objects.lastStored.Manifest.Replay {
+		t.Fatalf("finalizer retry artifact flags = %#v", objects.lastStored)
+	}
+	if !reflect.DeepEqual(receipts.lastStoredData.Artifacts, objects.lastStored) {
+		t.Fatalf("finalizer retry data = %#v, stored = %#v", receipts.lastStoredData, objects.lastStored)
 	}
 }
 
 func TestServicePersistsTerminalObjectConflict(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
-	objects := newMemoryObjectStore()
+	objects := newMemoryArtifactStore()
 	now := time.Date(2026, 7, 21, 6, 0, 0, 0, time.UTC)
-	objectPath := "telemetry/v2/tenants/" + batch.TenantID +
-		"/devices/" + batch.DeviceID +
-		"/trips/" + batch.TripID +
-		"/year=2026/month=07/day=21/01982015-4400-7000-8000-000000000001.json.gz"
-	objects.objects[objectPath] = storedObject{bodyHash: "different", content: []byte("different")}
+	objects.rawConflict = true
 	service := mustService(t, receipts, objects, func() time.Time { return now })
 	principal := matchingPrincipal(batch)
 
@@ -325,6 +409,62 @@ func TestServicePersistsTerminalObjectConflict(t *testing.T) {
 	)]
 	if receipt.State != ReceiptRejected || receipt.RejectionCode != "object_conflict" {
 		t.Fatalf("receipt = %#v", receipt)
+	}
+	if receipts.markRejectedCalls != 1 {
+		t.Fatalf("rejection finalizer calls = %d, want 1", receipts.markRejectedCalls)
+	}
+}
+
+func TestServiceLeavesManifestConflictReserved(t *testing.T) {
+	batch, raw := validBatch(t)
+	receipts := newMemoryReceiptStore()
+	artifacts := newMemoryArtifactStore()
+	artifacts.manifestConflict = true
+	service := mustService(t, receipts, artifacts, nil)
+	principal := matchingPrincipal(batch)
+
+	for attempt := 0; attempt < 2; attempt++ {
+		_, err := service.Ingest(context.Background(), principal, batch, raw)
+		if !errors.Is(err, ErrManifestArtifactConflict) {
+			t.Fatalf("attempt %d error = %v, want manifest conflict", attempt+1, err)
+		}
+	}
+	receipt := receipts.receipts[DeriveReservationKey(
+		batch.SchemaVersion,
+		batch.TenantID,
+		batch.InstallationID,
+		batch.ClientBatchID,
+	)]
+	if receipt.State != ReceiptReserved || receipt.RejectionCode != "" {
+		t.Fatalf("manifest conflict receipt = %#v, want reserved", receipt)
+	}
+	if receipts.markRejectedCalls != 0 || receipts.markStoredCalls != 0 {
+		t.Fatalf("manifest conflict finalizers = %d/%d, want 0/0", receipts.markRejectedCalls, receipts.markStoredCalls)
+	}
+	if artifacts.rawWrites != 1 || artifacts.manifestWrites != 0 {
+		t.Fatalf("manifest conflict artifact writes = %d/%d, want 1/0", artifacts.rawWrites, artifacts.manifestWrites)
+	}
+}
+
+func TestServiceLeavesGenericArtifactConflictReserved(t *testing.T) {
+	batch, raw := validBatch(t)
+	receipts := newMemoryReceiptStore()
+	artifacts := newMemoryArtifactStore()
+	artifacts.genericConflict = true
+	service := mustService(t, receipts, artifacts, nil)
+
+	_, err := service.Ingest(context.Background(), matchingPrincipal(batch), batch, raw)
+	if !errors.Is(err, ErrArtifactConflict) || errors.Is(err, ErrRawArtifactConflict) {
+		t.Fatalf("generic conflict error = %v", err)
+	}
+	receipt := receipts.receipts[DeriveReservationKey(
+		batch.SchemaVersion,
+		batch.TenantID,
+		batch.InstallationID,
+		batch.ClientBatchID,
+	)]
+	if receipt.State != ReceiptReserved || receipts.markRejectedCalls != 0 || receipts.markStoredCalls != 0 {
+		t.Fatalf("generic conflict state = %#v, finalizers = %d/%d", receipt, receipts.markRejectedCalls, receipts.markStoredCalls)
 	}
 }
 
@@ -364,6 +504,9 @@ type memoryReceiptStore struct {
 	receipts                map[string]Receipt
 	clientBatchReservations map[string]string
 	failNextMarkStored      bool
+	markStoredCalls         int
+	markRejectedCalls       int
+	lastStoredData          StoredReceiptData
 	authorize               func(context.Context, Principal, BatchScope) error
 	authorizeCalls          int
 	lastPrincipal           Principal
@@ -438,12 +581,13 @@ func (s *memoryReceiptStore) MarkStored(
 	_ context.Context,
 	_ string,
 	reservationKey string,
-	objectPath string,
-	sampleCount int,
+	stored StoredReceiptData,
 	updatedAt time.Time,
 ) (Receipt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.markStoredCalls++
+	s.lastStoredData = stored
 
 	receipt, ok := s.receipts[reservationKey]
 	if !ok {
@@ -453,8 +597,19 @@ func (s *memoryReceiptStore) MarkStored(
 		s.failNextMarkStored = false
 		return Receipt{}, errors.New("synthetic receipt completion failure")
 	}
-	receipt.ObjectPath = objectPath
-	receipt.SampleCount = sampleCount
+	receipt.ObjectPath = stored.Artifacts.Object.Path
+	receipt.ObjectSHA256 = stored.Artifacts.Object.SHA256
+	receipt.ObjectCRC32C = stored.Artifacts.Object.CRC32C
+	receipt.ObjectSize = stored.Artifacts.Object.Size
+	receipt.ObjectGeneration = stored.Artifacts.Object.Generation
+	receipt.ObjectMetageneration = stored.Artifacts.Object.Metageneration
+	receipt.ManifestPath = stored.Artifacts.Manifest.Path
+	receipt.ManifestSHA256 = stored.Artifacts.Manifest.SHA256
+	receipt.ManifestCRC32C = stored.Artifacts.Manifest.CRC32C
+	receipt.ManifestSize = stored.Artifacts.Manifest.Size
+	receipt.ManifestGeneration = stored.Artifacts.Manifest.Generation
+	receipt.ManifestMetageneration = stored.Artifacts.Manifest.Metageneration
+	receipt.SampleCount = stored.SampleCount
 	receipt.State = ReceiptStored
 	receipt.Revision++
 	receipt.UpdatedAt = updatedAt
@@ -471,6 +626,7 @@ func (s *memoryReceiptStore) MarkRejected(
 ) (Receipt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.markRejectedCalls++
 
 	receipt, ok := s.receipts[reservationKey]
 	if !ok {
@@ -484,46 +640,131 @@ func (s *memoryReceiptStore) MarkRejected(
 	return receipt, nil
 }
 
-type storedObject struct {
-	bodyHash string
+type memoryStoredArtifact struct {
 	content  []byte
+	artifact StoredArtifact
 }
 
-type memoryObjectStore struct {
-	mu       sync.Mutex
-	objects  map[string]storedObject
-	putCount int
+type memoryArtifactStore struct {
+	mu               sync.Mutex
+	raw              map[string]memoryStoredArtifact
+	manifests        map[string]memoryStoredArtifact
+	storeCalls       int
+	rawWrites        int
+	manifestWrites   int
+	nextGeneration   int64
+	failNextRaw      bool
+	failNextManifest bool
+	rawConflict      bool
+	manifestConflict bool
+	genericConflict  bool
+	lastWrite        BatchArtifactWrite
+	lastStored       StoredBatchArtifacts
 }
 
-func newMemoryObjectStore() *memoryObjectStore {
-	return &memoryObjectStore{objects: make(map[string]storedObject)}
+func newMemoryArtifactStore() *memoryArtifactStore {
+	return &memoryArtifactStore{
+		raw:            make(map[string]memoryStoredArtifact),
+		manifests:      make(map[string]memoryStoredArtifact),
+		nextGeneration: 1000,
+	}
 }
 
-func (s *memoryObjectStore) PutIfAbsent(
+func (s *memoryArtifactStore) StoreBatch(
 	_ context.Context,
-	path string,
-	content []byte,
-	bodyHash string,
-) error {
+	write BatchArtifactWrite,
+) (StoredBatchArtifacts, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if existing, ok := s.objects[path]; ok {
-		if existing.bodyHash != bodyHash {
-			return ErrObjectConflict
-		}
-		return nil
+	s.storeCalls++
+	s.lastWrite = BatchArtifactWrite{
+		ObjectPath:     write.ObjectPath,
+		ManifestPath:   write.ManifestPath,
+		CompressedBody: append([]byte(nil), write.CompressedBody...),
+		Manifest:       write.Manifest,
 	}
-	s.objects[path] = storedObject{bodyHash: bodyHash, content: append([]byte(nil), content...)}
-	s.putCount++
-	return nil
+
+	if write.ObjectPath != ExpectedTelemetryObjectPath(write.Manifest) ||
+		write.ManifestPath != ExpectedTelemetryManifestPath(write.Manifest) {
+		return StoredBatchArtifacts{}, ErrArtifactUnavailable
+	}
+	if s.failNextRaw {
+		s.failNextRaw = false
+		return StoredBatchArtifacts{}, ErrArtifactUnavailable
+	}
+	if s.rawConflict {
+		return StoredBatchArtifacts{}, errors.Join(ErrRawArtifactConflict, ErrArtifactConflict)
+	}
+	if s.genericConflict {
+		return StoredBatchArtifacts{}, ErrArtifactConflict
+	}
+
+	objectDigest := ComputeArtifactDigest(write.CompressedBody)
+	object, exists := s.raw[write.ObjectPath]
+	objectArtifact := object.artifact
+	if exists {
+		if !bytes.Equal(object.content, write.CompressedBody) {
+			return StoredBatchArtifacts{}, errors.Join(ErrRawArtifactConflict, ErrArtifactConflict)
+		}
+		objectArtifact.Replay = true
+	} else {
+		objectArtifact = s.newArtifact(write.ObjectPath, objectDigest)
+		s.raw[write.ObjectPath] = memoryStoredArtifact{
+			content:  append([]byte(nil), write.CompressedBody...),
+			artifact: objectArtifact,
+		}
+		s.rawWrites++
+	}
+
+	if s.failNextManifest {
+		s.failNextManifest = false
+		return StoredBatchArtifacts{}, ErrArtifactUnavailable
+	}
+	manifestBytes, manifestDigest, err := CanonicalTelemetryManifest(write.Manifest, objectArtifact)
+	if err != nil {
+		return StoredBatchArtifacts{}, err
+	}
+	if s.manifestConflict {
+		return StoredBatchArtifacts{}, errors.Join(ErrManifestArtifactConflict, ErrArtifactConflict)
+	}
+	manifest, exists := s.manifests[write.ManifestPath]
+	manifestArtifact := manifest.artifact
+	if exists {
+		if !bytes.Equal(manifest.content, manifestBytes) {
+			return StoredBatchArtifacts{}, ErrArtifactUnavailable
+		}
+		manifestArtifact.Replay = true
+	} else {
+		manifestArtifact = s.newArtifact(write.ManifestPath, manifestDigest)
+		s.manifests[write.ManifestPath] = memoryStoredArtifact{
+			content:  append([]byte(nil), manifestBytes...),
+			artifact: manifestArtifact,
+		}
+		s.manifestWrites++
+	}
+
+	stored := StoredBatchArtifacts{Object: objectArtifact, Manifest: manifestArtifact}
+	s.lastStored = stored
+	return stored, nil
 }
 
-func (s *memoryObjectStore) contentAt(t *testing.T, path string) []byte {
+func (s *memoryArtifactStore) newArtifact(path string, digest ArtifactDigest) StoredArtifact {
+	s.nextGeneration++
+	return StoredArtifact{
+		Path:           path,
+		SHA256:         digest.SHA256,
+		CRC32C:         digest.CRC32C,
+		Size:           digest.Size,
+		Generation:     s.nextGeneration,
+		Metageneration: 1,
+	}
+}
+
+func (s *memoryArtifactStore) rawContentAt(t *testing.T, path string) []byte {
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	object, ok := s.objects[path]
+	object, ok := s.raw[path]
 	if !ok {
 		t.Fatalf("object %q not found", path)
 	}
@@ -533,7 +774,7 @@ func (s *memoryObjectStore) contentAt(t *testing.T, path string) []byte {
 func mustService(
 	t *testing.T,
 	receipts AdmissionStore,
-	objects ObjectStore,
+	objects TelemetryArtifactStore,
 	now func() time.Time,
 ) *Service {
 	t.Helper()
@@ -547,6 +788,24 @@ func mustService(
 		t.Fatalf("NewService() error = %v", err)
 	}
 	return service
+}
+
+func assertReceiptArtifactLineage(t *testing.T, receipt Receipt, stored StoredBatchArtifacts) {
+	t.Helper()
+	if receipt.ObjectPath != stored.Object.Path ||
+		receipt.ObjectSHA256 != stored.Object.SHA256 ||
+		receipt.ObjectCRC32C != stored.Object.CRC32C ||
+		receipt.ObjectSize != stored.Object.Size ||
+		receipt.ObjectGeneration != stored.Object.Generation ||
+		receipt.ObjectMetageneration != stored.Object.Metageneration ||
+		receipt.ManifestPath != stored.Manifest.Path ||
+		receipt.ManifestSHA256 != stored.Manifest.SHA256 ||
+		receipt.ManifestCRC32C != stored.Manifest.CRC32C ||
+		receipt.ManifestSize != stored.Manifest.Size ||
+		receipt.ManifestGeneration != stored.Manifest.Generation ||
+		receipt.ManifestMetageneration != stored.Manifest.Metageneration {
+		t.Fatalf("receipt artifacts = %#v, stored = %#v", receipt, stored)
+	}
 }
 
 type batchIDGeneratorFunc func() (string, error)

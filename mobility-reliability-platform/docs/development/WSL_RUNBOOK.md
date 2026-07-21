@@ -96,6 +96,34 @@ rtk pnpm --filter @mobility-reliability/firebase-rules exec firebase emulators:e
 
 이 검사는 demo project와 synthetic control document만 사용한다. `--network host`는 WSL localhost의 test emulator에 접근하기 위한 local 설정이며 production container network나 IAM 구성을 의미하지 않는다.
 
+## Cloud Storage artifact integration
+
+`DoesNotExist`, exact generation attrs와 `ReadCompressed(true)` 동작은 작은 in-memory fake만으로 증명하지 않는다. Cloud Storage Go client가 사용하는 official testbench image를 digest로 고정해 실행한다.
+
+```bash
+rtk docker run --rm -d \
+  --name mobility-storage-testbench \
+  --network host \
+  gcr.io/cloud-devrel-public-resources/storage-testbench@sha256:600fa5c3cfc8be26435c38591cc094fb4ef648f760ffabf77f93237b1ebee027
+
+rtk curl --retry 5 --retry-connrefused --silent --fail \
+  http://127.0.0.1:9000
+
+rtk docker run --rm --network host \
+  -e STORAGE_EMULATOR_HOST=http://127.0.0.1:9000 \
+  -v mobility-go-mod-cache:/go/pkg/mod \
+  -v mobility-go-build-cache:/root/.cache/go-build \
+  -v /home/jaeman/Codes/Surisuri-Masuri/mobility-reliability-platform:/workspace:ro \
+  -w /workspace/services/telemetry-gateway \
+  golang:1.26.5-bookworm \
+  go test -mod=readonly -count=1 -race -timeout 60s \
+    ./internal/gcsadapter -run ArtifactStoreEmulator -v
+
+rtk docker rm -f mobility-storage-testbench
+```
+
+testbench는 synthetic bucket과 payload만 사용한다. 실행 뒤 마지막 명령으로 임시 container를 제거한다. 이 검사는 production bucket의 IAM, lifecycle, retention, KMS나 실제 사용자 위치 데이터 저장을 증명하지 않는다.
+
 ## GPS 디버깅 체크리스트
 
 - [ ] 실기기 시각과 WSL 시각의 차이를 기록했다.

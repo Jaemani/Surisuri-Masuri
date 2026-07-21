@@ -54,7 +54,7 @@
 - Firebase Admin SDK dual-token verifier·App ID allowlist·production emulator guard factory의 local synthetic 검증. executable에는 미연결
 - active tenant·beneficiary·installation·trip·assignment·current consent를 교차 검사하는 pure authorization policy와 Firestore exact-read adapter의 local synthetic 검증. executable에는 미연결
 - 위 authorization을 replay·conflict 조회보다 먼저 재평가하고 두 uniqueness index와 최초 receipt를 같은 Firestore transaction에서 생성하는 admission adapter의 local fake-seam 및 Firestore Emulator concurrent same-batch 검증. ADC/IAM·production은 미검증이며 executable에는 미연결
-- raw deterministic gzip, canonical manifest와 Firestore receipt에 exact hash·CRC·size·generation을 고정하는 immutable artifact lineage 결정. adapter·finalizer 구현과 실제 Storage 검증은 아직 미완료
+- raw deterministic gzip과 canonical manifest를 `DoesNotExist`로 저장하고 exact hash·CRC·size·generation을 Firestore receipt에 고정하는 artifact adapter/finalizer의 local race·official testbench 검증. staging IAM·lifecycle·runtime은 미검증
 - server-only current consent projection의 Firebase client direct read/write 차단
 - Firestore client read를 own-person 또는 `case_worker`·`tenant_admin` 운영 범위로 제한하고 tenant/person query constraint를 고정한 local Rules Emulator 검증. production Rules에는 미배포
 - adapter 미구성 상태에서 `/healthz=200`, `/readyz`와 ingest는 `503`

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -231,14 +230,12 @@ func (s *FirestoreAdmissionStore) MarkStored(
 	ctx context.Context,
 	tenantID string,
 	reservationKey string,
-	objectPath string,
-	sampleCount int,
+	stored ingest.StoredReceiptData,
 	updatedAt time.Time,
 ) (ingest.Receipt, error) {
 	if s == nil || s.runTransaction == nil || ctx == nil ||
 		!telemetry.IsUUID(tenantID) || !lowerHexDigest(reservationKey) ||
-		!validObjectPath(objectPath, tenantID) || sampleCount <= 0 ||
-		sampleCount > telemetry.MaxSamples || updatedAt.IsZero() {
+		validateStoredReceiptData(stored, tenantID) != nil || updatedAt.IsZero() {
 		return ingest.Receipt{}, ingest.ErrAdmissionUnavailable
 	}
 	var result ingest.Receipt
@@ -269,12 +266,13 @@ func (s *FirestoreAdmissionStore) MarkStored(
 			return normalizeAdmissionError(runContext, readErr)
 		}
 		if !exists || validateReceiptLinkage(receipt, index) != nil || validateReceiptState(receipt) != nil ||
-			objectPath != expectedObjectPath(receipt) {
+			stored.Artifacts.Object.Path != expectedObjectPath(receipt) ||
+			stored.Artifacts.Manifest.Path != expectedManifestPath(receipt) {
 			return ingest.ErrAdmissionUnavailable
 		}
 		switch receipt.State {
 		case ingest.ReceiptStored:
-			if receipt.ObjectPath != objectPath || receipt.SampleCount != sampleCount {
+			if !sameStoredReceiptData(receipt, stored) {
 				return ingest.ErrAdmissionUnavailable
 			}
 			result = receipt.toDomain()
@@ -289,16 +287,26 @@ func (s *FirestoreAdmissionStore) MarkStored(
 		nextRevision := receipt.Revision + 1
 		if updateErr := transaction.Update(runContext, receiptPath, []firestore.Update{
 			{Path: "status", Value: string(ingest.ReceiptStored)},
-			{Path: "object_path", Value: objectPath},
-			{Path: "sample_count", Value: sampleCount},
+			{Path: "object_path", Value: stored.Artifacts.Object.Path},
+			{Path: "object_sha256", Value: stored.Artifacts.Object.SHA256},
+			{Path: "object_crc32c", Value: int64(stored.Artifacts.Object.CRC32C)},
+			{Path: "object_size", Value: stored.Artifacts.Object.Size},
+			{Path: "object_generation", Value: stored.Artifacts.Object.Generation},
+			{Path: "object_metageneration", Value: stored.Artifacts.Object.Metageneration},
+			{Path: "manifest_path", Value: stored.Artifacts.Manifest.Path},
+			{Path: "manifest_sha256", Value: stored.Artifacts.Manifest.SHA256},
+			{Path: "manifest_crc32c", Value: int64(stored.Artifacts.Manifest.CRC32C)},
+			{Path: "manifest_size", Value: stored.Artifacts.Manifest.Size},
+			{Path: "manifest_generation", Value: stored.Artifacts.Manifest.Generation},
+			{Path: "manifest_metageneration", Value: stored.Artifacts.Manifest.Metageneration},
+			{Path: "sample_count", Value: stored.SampleCount},
 			{Path: "revision", Value: nextRevision},
 			{Path: "updated_at", Value: updatedAt.UTC()},
 		}); updateErr != nil {
 			return normalizeAdmissionError(runContext, updateErr)
 		}
 		receipt.State = ingest.ReceiptStored
-		receipt.ObjectPath = objectPath
-		receipt.SampleCount = sampleCount
+		receipt.applyStoredData(stored)
 		receipt.Revision = nextRevision
 		receipt.UpdatedAt = updatedAt.UTC()
 		result = receipt.toDomain()
@@ -472,17 +480,25 @@ func lowerHexDigest(value string) bool {
 	return true
 }
 
-func validObjectPath(path, tenantID string) bool {
-	prefix := "telemetry/v2/tenants/" + tenantID + "/"
-	return strings.HasPrefix(path, prefix) && strings.HasSuffix(path, ".json.gz") && !strings.Contains(path, "..")
-}
-
 func expectedObjectPath(receipt firestoreIngestReceipt) string {
 	receivedAt := receipt.CreatedAt.UTC()
 	return fmt.Sprintf(
 		"telemetry/v2/tenants/%s/devices/%s/trips/%s/year=%04d/month=%02d/day=%02d/%s.json.gz",
 		receipt.TenantID,
 		receipt.DeviceID,
+		receipt.TripID,
+		receivedAt.Year(),
+		receivedAt.Month(),
+		receivedAt.Day(),
+		receipt.BatchID,
+	)
+}
+
+func expectedManifestPath(receipt firestoreIngestReceipt) string {
+	receivedAt := receipt.CreatedAt.UTC()
+	return fmt.Sprintf(
+		"telemetry-manifests/v2/tenants/%s/trips/%s/year=%04d/month=%02d/day=%02d/%s.manifest.json",
+		receipt.TenantID,
 		receipt.TripID,
 		receivedAt.Year(),
 		receivedAt.Month(),
@@ -546,26 +562,37 @@ func newFirestoreIngestIndex(reservation ingest.Reservation) firestoreIngestInde
 }
 
 type firestoreIngestReceipt struct {
-	ReservationKey       string              `firestore:"reservation_key"`
-	ClientBatchKey       string              `firestore:"client_batch_key"`
-	ReceiptID            string              `firestore:"receipt_id"`
-	TenantID             string              `firestore:"tenant_id"`
-	BatchID              string              `firestore:"batch_id"`
-	DeviceID             string              `firestore:"device_id"`
-	TripID               string              `firestore:"trip_id"`
-	InstallationID       string              `firestore:"installation_id"`
-	ConsentRevisionID    string              `firestore:"consent_revision_id"`
-	ClientBatchID        string              `firestore:"client_batch_id"`
-	PayloadSchemaVersion string              `firestore:"payload_schema_version"`
-	BodyHash             string              `firestore:"body_hash"`
-	ObjectPath           string              `firestore:"object_path,omitempty"`
-	SampleCount          int                 `firestore:"sample_count"`
-	State                ingest.ReceiptState `firestore:"status"`
-	RejectionCode        string              `firestore:"rejection_code,omitempty"`
-	Revision             int64               `firestore:"revision"`
-	CreatedAt            time.Time           `firestore:"created_at"`
-	UpdatedAt            time.Time           `firestore:"updated_at"`
-	ExpiresAt            time.Time           `firestore:"expires_at"`
+	ReservationKey         string              `firestore:"reservation_key"`
+	ClientBatchKey         string              `firestore:"client_batch_key"`
+	ReceiptID              string              `firestore:"receipt_id"`
+	TenantID               string              `firestore:"tenant_id"`
+	BatchID                string              `firestore:"batch_id"`
+	DeviceID               string              `firestore:"device_id"`
+	TripID                 string              `firestore:"trip_id"`
+	InstallationID         string              `firestore:"installation_id"`
+	ConsentRevisionID      string              `firestore:"consent_revision_id"`
+	ClientBatchID          string              `firestore:"client_batch_id"`
+	PayloadSchemaVersion   string              `firestore:"payload_schema_version"`
+	BodyHash               string              `firestore:"body_hash"`
+	ObjectPath             string              `firestore:"object_path,omitempty"`
+	ObjectSHA256           string              `firestore:"object_sha256,omitempty"`
+	ObjectCRC32C           int64               `firestore:"object_crc32c,omitempty"`
+	ObjectSize             int64               `firestore:"object_size,omitempty"`
+	ObjectGeneration       int64               `firestore:"object_generation,omitempty"`
+	ObjectMetageneration   int64               `firestore:"object_metageneration,omitempty"`
+	ManifestPath           string              `firestore:"manifest_path,omitempty"`
+	ManifestSHA256         string              `firestore:"manifest_sha256,omitempty"`
+	ManifestCRC32C         int64               `firestore:"manifest_crc32c,omitempty"`
+	ManifestSize           int64               `firestore:"manifest_size,omitempty"`
+	ManifestGeneration     int64               `firestore:"manifest_generation,omitempty"`
+	ManifestMetageneration int64               `firestore:"manifest_metageneration,omitempty"`
+	SampleCount            int                 `firestore:"sample_count"`
+	State                  ingest.ReceiptState `firestore:"status"`
+	RejectionCode          string              `firestore:"rejection_code,omitempty"`
+	Revision               int64               `firestore:"revision"`
+	CreatedAt              time.Time           `firestore:"created_at"`
+	UpdatedAt              time.Time           `firestore:"updated_at"`
+	ExpiresAt              time.Time           `firestore:"expires_at"`
 }
 
 func newFirestoreIngestReceipt(reservation ingest.Reservation) firestoreIngestReceipt {
@@ -592,27 +619,54 @@ func newFirestoreIngestReceipt(reservation ingest.Reservation) firestoreIngestRe
 
 func (receipt firestoreIngestReceipt) toDomain() ingest.Receipt {
 	return ingest.Receipt{
-		ReservationKey:       receipt.ReservationKey,
-		ClientBatchKey:       receipt.ClientBatchKey,
-		ReceiptID:            receipt.ReceiptID,
-		TenantID:             receipt.TenantID,
-		BatchID:              receipt.BatchID,
-		DeviceID:             receipt.DeviceID,
-		TripID:               receipt.TripID,
-		InstallationID:       receipt.InstallationID,
-		ConsentRevisionID:    receipt.ConsentRevisionID,
-		ClientBatchID:        receipt.ClientBatchID,
-		PayloadSchemaVersion: receipt.PayloadSchemaVersion,
-		BodyHash:             receipt.BodyHash,
-		ObjectPath:           receipt.ObjectPath,
-		SampleCount:          receipt.SampleCount,
-		State:                receipt.State,
-		RejectionCode:        receipt.RejectionCode,
-		Revision:             receipt.Revision,
-		CreatedAt:            receipt.CreatedAt,
-		UpdatedAt:            receipt.UpdatedAt,
-		ExpiresAt:            receipt.ExpiresAt,
+		ReservationKey:         receipt.ReservationKey,
+		ClientBatchKey:         receipt.ClientBatchKey,
+		ReceiptID:              receipt.ReceiptID,
+		TenantID:               receipt.TenantID,
+		BatchID:                receipt.BatchID,
+		DeviceID:               receipt.DeviceID,
+		TripID:                 receipt.TripID,
+		InstallationID:         receipt.InstallationID,
+		ConsentRevisionID:      receipt.ConsentRevisionID,
+		ClientBatchID:          receipt.ClientBatchID,
+		PayloadSchemaVersion:   receipt.PayloadSchemaVersion,
+		BodyHash:               receipt.BodyHash,
+		ObjectPath:             receipt.ObjectPath,
+		ObjectSHA256:           receipt.ObjectSHA256,
+		ObjectCRC32C:           uint32(receipt.ObjectCRC32C),
+		ObjectSize:             receipt.ObjectSize,
+		ObjectGeneration:       receipt.ObjectGeneration,
+		ObjectMetageneration:   receipt.ObjectMetageneration,
+		ManifestPath:           receipt.ManifestPath,
+		ManifestSHA256:         receipt.ManifestSHA256,
+		ManifestCRC32C:         uint32(receipt.ManifestCRC32C),
+		ManifestSize:           receipt.ManifestSize,
+		ManifestGeneration:     receipt.ManifestGeneration,
+		ManifestMetageneration: receipt.ManifestMetageneration,
+		SampleCount:            receipt.SampleCount,
+		State:                  receipt.State,
+		RejectionCode:          receipt.RejectionCode,
+		Revision:               receipt.Revision,
+		CreatedAt:              receipt.CreatedAt,
+		UpdatedAt:              receipt.UpdatedAt,
+		ExpiresAt:              receipt.ExpiresAt,
 	}
+}
+
+func (receipt *firestoreIngestReceipt) applyStoredData(stored ingest.StoredReceiptData) {
+	receipt.ObjectPath = stored.Artifacts.Object.Path
+	receipt.ObjectSHA256 = stored.Artifacts.Object.SHA256
+	receipt.ObjectCRC32C = int64(stored.Artifacts.Object.CRC32C)
+	receipt.ObjectSize = stored.Artifacts.Object.Size
+	receipt.ObjectGeneration = stored.Artifacts.Object.Generation
+	receipt.ObjectMetageneration = stored.Artifacts.Object.Metageneration
+	receipt.ManifestPath = stored.Artifacts.Manifest.Path
+	receipt.ManifestSHA256 = stored.Artifacts.Manifest.SHA256
+	receipt.ManifestCRC32C = int64(stored.Artifacts.Manifest.CRC32C)
+	receipt.ManifestSize = stored.Artifacts.Manifest.Size
+	receipt.ManifestGeneration = stored.Artifacts.Manifest.Generation
+	receipt.ManifestMetageneration = stored.Artifacts.Manifest.Metageneration
+	receipt.SampleCount = stored.SampleCount
 }
 
 func validateIndexDocument(index firestoreIngestIndex, tenantID string) error {
@@ -698,23 +752,76 @@ func validateReceiptLinkage(receipt firestoreIngestReceipt, index firestoreInges
 func validateReceiptState(receipt firestoreIngestReceipt) error {
 	switch receipt.State {
 	case ingest.ReceiptReserved:
-		if receipt.ObjectPath != "" || receipt.SampleCount != 0 || receipt.RejectionCode != "" {
+		if hasStoredArtifactData(receipt) || receipt.SampleCount != 0 || receipt.RejectionCode != "" {
 			return ingest.ErrAdmissionUnavailable
 		}
 	case ingest.ReceiptStored, "queued", "projected", "deleting", "deleted":
-		if receipt.ObjectPath != expectedObjectPath(receipt) ||
+		if validatePersistedArtifactData(receipt) != nil ||
 			receipt.SampleCount <= 0 || receipt.SampleCount > telemetry.MaxSamples ||
 			receipt.RejectionCode != "" {
 			return ingest.ErrAdmissionUnavailable
 		}
 	case ingest.ReceiptRejected:
-		if receipt.RejectionCode != "object_conflict" || receipt.ObjectPath != "" || receipt.SampleCount != 0 {
+		if receipt.RejectionCode != "object_conflict" || hasStoredArtifactData(receipt) || receipt.SampleCount != 0 {
 			return ingest.ErrAdmissionUnavailable
 		}
 	default:
 		return ingest.ErrAdmissionUnavailable
 	}
 	return nil
+}
+
+const maxCRC32C = int64(1<<32 - 1)
+
+func validateStoredReceiptData(stored ingest.StoredReceiptData, tenantID string) error {
+	object := stored.Artifacts.Object
+	manifest := stored.Artifacts.Manifest
+	if !telemetry.IsUUID(tenantID) || stored.SampleCount <= 0 || stored.SampleCount > telemetry.MaxSamples ||
+		!lowerHexDigest(object.SHA256) || object.Size <= 0 || object.Generation <= 0 || object.Metageneration <= 0 ||
+		!lowerHexDigest(manifest.SHA256) || manifest.Size <= 0 || manifest.Generation <= 0 || manifest.Metageneration <= 0 {
+		return ingest.ErrAdmissionUnavailable
+	}
+	if object.Path == "" || manifest.Path == "" {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func sameStoredReceiptData(receipt firestoreIngestReceipt, stored ingest.StoredReceiptData) bool {
+	return receipt.ObjectPath == stored.Artifacts.Object.Path &&
+		receipt.ObjectSHA256 == stored.Artifacts.Object.SHA256 &&
+		receipt.ObjectCRC32C == int64(stored.Artifacts.Object.CRC32C) &&
+		receipt.ObjectSize == stored.Artifacts.Object.Size &&
+		receipt.ObjectGeneration == stored.Artifacts.Object.Generation &&
+		receipt.ObjectMetageneration == stored.Artifacts.Object.Metageneration &&
+		receipt.ManifestPath == stored.Artifacts.Manifest.Path &&
+		receipt.ManifestSHA256 == stored.Artifacts.Manifest.SHA256 &&
+		receipt.ManifestCRC32C == int64(stored.Artifacts.Manifest.CRC32C) &&
+		receipt.ManifestSize == stored.Artifacts.Manifest.Size &&
+		receipt.ManifestGeneration == stored.Artifacts.Manifest.Generation &&
+		receipt.ManifestMetageneration == stored.Artifacts.Manifest.Metageneration &&
+		receipt.SampleCount == stored.SampleCount
+}
+
+func validatePersistedArtifactData(receipt firestoreIngestReceipt) error {
+	if receipt.ObjectPath != expectedObjectPath(receipt) ||
+		receipt.ManifestPath != expectedManifestPath(receipt) ||
+		!lowerHexDigest(receipt.ObjectSHA256) || !lowerHexDigest(receipt.ManifestSHA256) ||
+		receipt.ObjectCRC32C < 0 || receipt.ObjectCRC32C > maxCRC32C ||
+		receipt.ManifestCRC32C < 0 || receipt.ManifestCRC32C > maxCRC32C ||
+		receipt.ObjectSize <= 0 || receipt.ManifestSize <= 0 ||
+		receipt.ObjectGeneration <= 0 || receipt.ObjectMetageneration <= 0 ||
+		receipt.ManifestGeneration <= 0 || receipt.ManifestMetageneration <= 0 {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func hasStoredArtifactData(receipt firestoreIngestReceipt) bool {
+	return receipt.ObjectPath != "" || receipt.ObjectSHA256 != "" || receipt.ObjectCRC32C != 0 ||
+		receipt.ObjectSize != 0 || receipt.ObjectGeneration != 0 || receipt.ObjectMetageneration != 0 ||
+		receipt.ManifestPath != "" || receipt.ManifestSHA256 != "" || receipt.ManifestCRC32C != 0 ||
+		receipt.ManifestSize != 0 || receipt.ManifestGeneration != 0 || receipt.ManifestMetageneration != 0
 }
 
 type firestoreAdmissionTransaction struct {
