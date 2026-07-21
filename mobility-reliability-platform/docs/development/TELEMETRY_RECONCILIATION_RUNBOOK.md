@@ -98,6 +98,8 @@ planned
 
 R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0018-generation-pinned-read-only-classifier.md)을 따른다. 아래 목록은 이후 reconciler·cleanup까지 포함한 전체 recovery checklist이며 R5 하나의 완료 조건으로 해석하지 않는다.
 
+2026-07-21 local R5 gate는 [EVD-20260721-023](../evidence/2026-07.md#evd-20260721-023--generation-pinned-read-only-artifact-classifier)에서 통과했다. 이는 synthetic classifier matrix와 pinned official Storage testbench의 reader 경계를 합친 증거이며 staging authorization·lifecycle 또는 아래 전체 recovery checklist 완료를 뜻하지 않는다.
+
 - [ ] fake clock으로 lease exact-expiry boundary 재현
 - [ ] 두 request/sweeper의 concurrent claim winner 1명
 - [ ] recovery claim 대 `BeginCleanupTransition` 경계 경쟁에서 cleanup/recovery 중 허용된 winner만 1명

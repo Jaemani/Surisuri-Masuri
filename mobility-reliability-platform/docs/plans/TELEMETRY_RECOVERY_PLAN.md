@@ -227,6 +227,8 @@ coarse classification과 low-cardinality reason code를 분리한다. 복수 man
 
 이 단계는 object create/delete, receipt/index mutation, attempt completion, hold/reject/finalizer와 runtime wiring을 하지 않는다. R5 독립 완료 조건은 ADR-0018의 classification/reason matrix, strict manifest/raw validation, version inventory ambiguity, NotFound/error 분리, max+1 bound, privacy scan, official testbench와 clean CI다.
 
+2026-07-21 현재 provider-neutral classifier 구현과 local 독립 gate는 [EVD-20260721-023](../evidence/2026-07.md#evd-20260721-023--generation-pinned-read-only-artifact-classifier)에서 `verified`됐다. 이 상태는 request/grant 계약, HTTP GCS reader, strict content validator와 read-only orchestration을 합성한 **local R5 증거**다. current system recovery/integrity authorizer, startup composition, staging version·soft-delete semantics와 R6 이후 mutation은 포함하지 않으므로 runtime readiness는 계속 닫아 둔다.
+
 ### R6. Forward reconciler
 
 전제:
