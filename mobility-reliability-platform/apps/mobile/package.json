@@ -4,6 +4,7 @@
   "main": "index.ts",
   "dependencies": {
     "expo": "~57.0.7",
+    "expo-crypto": "~57.0.1",
     "expo-location": "~57.0.5",
     "expo-sqlite": "~57.0.1",
     "expo-status-bar": "~57.0.1",
@@ -12,15 +13,18 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "4.1.10"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "build": "expo export --platform android --output-dir dist/ci-android && expo export --platform ios --output-dir dist/ci-ios",
     "typecheck": "tsc --noEmit",
-    "check": "pnpm run typecheck"
+    "check": "pnpm run typecheck",
+    "test": "vitest run"
   },
   "private": true
 }

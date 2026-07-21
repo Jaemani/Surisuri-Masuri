@@ -52,7 +52,7 @@
         "capturedAt": { "type": "string", "format": "date-time" },
         "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
         "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
-        "horizontalAccuracyM": { "type": "number", "minimum": 0 },
+        "horizontalAccuracyM": { "type": ["number", "null"], "minimum": 0 },
         "altitudeM": { "type": ["number", "null"] },
         "speedMps": { "type": ["number", "null"], "minimum": 0 },
         "headingDegrees": { "type": ["number", "null"], "minimum": 0, "exclusiveMaximum": 360 },

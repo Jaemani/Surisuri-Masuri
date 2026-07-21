@@ -13,6 +13,9 @@ importers:
       expo:
         specifier: ~57.0.7
         version: 57.0.7(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(react-native@0.86.0(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
+      expo-crypto:
+        specifier: ~57.0.1
+        version: 57.0.1(expo@57.0.7)
       expo-location:
         specifier: ~57.0.5
         version: 57.0.5(expo@57.0.7)(typescript@6.0.3)
@@ -35,6 +38,9 @@ importers:
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(vite@8.1.5(@types/node@26.1.1)(terser@5.49.0)(yaml@2.9.0))
 
   packages/contracts:
     devDependencies:
@@ -2232,6 +2238,11 @@ packages:
     peerDependencies:
       expo: '*'
       react-native: '*'
+
+  expo-crypto@57.0.1:
+    resolution: {integrity: sha512-xwegXQw3ATgeL1ZuqbSNrGzOeG+zNeh6Z6DSJk825Qpa3TEQQ1kG3ioE1p3g/SNF373BAVz2iBKUTSytlIbBRA==}
+    peerDependencies:
+      expo: '*'
 
   expo-file-system@57.0.1:
     resolution: {integrity: sha512-w7/ERvQFrGP2apTO9lDtZ+O6JQIhfakL7+Xqzh+rfMO9B4LB4qwrz+YvLgir8KFRVX64JHBnRuYBVLY1oQZcqw==}
@@ -7131,6 +7142,10 @@ snapshots:
       react-native: 0.86.0(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.3)
     transitivePeerDependencies:
       - supports-color
+
+  expo-crypto@57.0.1(expo@57.0.7):
+    dependencies:
+      expo: 57.0.7(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(react-native@0.86.0(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
 
   expo-file-system@57.0.1(expo@57.0.7)(react-native@0.86.0(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.3)):
     dependencies:
