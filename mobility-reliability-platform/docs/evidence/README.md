@@ -70,9 +70,9 @@
 
 - 제품 업데이트는 관련 증거를 연결한다: [`../product-updates/`](../product-updates/)
 - 인시던트는 탐지·복구·재발 방지 증거를 연결한다: [`../incidents/`](../incidents/)
-- 사람 대상 리포트는 `실제` 주장별 증거를 연결한다: [`../reports/human/`](../reports/human/)
+- fixed·human 사람 대상 리포트는 `실제` 주장별 증거를 연결한다: [`../reports/fixed/`](../reports/fixed/), [`../reports/human/`](../reports/human/)
 - 중요한 검증 기준의 결정 근거는 [`../decisions/`](../decisions/)에 둔다.
-- 증거 항목에도 이를 사용한 문서를 역링크하여 고아 증거와 근거 없는 주장을 모두 찾을 수 있게 한다.
+- 증거 항목에도 이를 사용한 `UPD`, `INC`, `HR`, fixed `R` 문서를 역링크하여 고아 증거와 근거 없는 주장을 모두 찾을 수 있게 한다.
 
 ## 금지사항
 

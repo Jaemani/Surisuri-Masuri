@@ -78,7 +78,7 @@ WS7은 모든 단계의 결정·테스트·실패·화면을 병렬로 수집한
 
 **월말 게이트**
 
-- greenfield/IP 경계, 시스템 경계, telemetry event 초안, 위치 lifecycle이 문서화된다.
+- greenfield/IP 경계, 시스템 경계, telemetry event `v0.1` 초안, 위치 lifecycle이 문서화된다.
 - 발표 카드: 이전/신규 경계도, 모바일 흐름, 첫 주행 지도 또는 합성 재생.
 
 **진행이 막힌 경우의 독립 산출물**
@@ -123,6 +123,7 @@ WS7은 모든 단계의 결정·테스트·실패·화면을 병렬로 수집한
 
 **7월 1차 / R05**
 
+- 5월의 telemetry event `v0.1` 초안을 모바일·서버 fixture로 호환성 검증하고 versioned wire contract candidate를 동결한다.
 - strict telemetry decode, 요청 크기 제한, Firebase ID token/App Check 검증을 구성한다.
 - membership, device assignment, server trip, installation, consent revision authorizer를 만든다.
 - derived idempotency, client batch uniqueness, UUIDv7 server batch, receipt 상태 전이를 구현한다.
@@ -300,7 +301,7 @@ WS7은 모든 단계의 결정·테스트·실패·화면을 병렬로 수집한
 | R03 | 06-15 | background GPS·SQLite | [2026-06-15](../reports/fixed/2026-06-15.md) |
 | R04 | 06-30 | offline sync·배터리 | [2026-06-30](../reports/fixed/2026-06-30.md) |
 | R05 | 07-15 | Auth/App Check·ingest·멱등성 | [2026-07-15](../reports/fixed/2026-07-15.md) |
-| R06 | 07-31 | Storage·projection·privacy·cost | [2026-07-31](../reports/fixed/2026-07-31.md) |
+| R06 | 07-31 | Storage·fenced recovery·privacy·cost | [2026-07-31](../reports/fixed/2026-07-31.md) |
 | R07 | 08-15 | label·baseline·PyTorch | [2026-08-15](../reports/fixed/2026-08-15.md) |
 | R08 | 08-31 | ONNX·quantization·device | [2026-08-31](../reports/fixed/2026-08-31.md) |
 | R09 | 09-15 | event projection·import | [2026-09-15](../reports/fixed/2026-09-15.md) |
