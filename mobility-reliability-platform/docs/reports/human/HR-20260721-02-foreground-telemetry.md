@@ -54,6 +54,7 @@ audience: project owner
 | 실제 주장 | 증거 ID·링크 | 검증 상태 | 확인자·확인일 |
 | --- | --- | --- | --- |
 | 정책 테스트 65건·typecheck·Android/iOS bundle 통과 | [EVD-20260721-007](../../evidence/2026-07.md#evd-20260721-007--foreground-telemetry-정적정책-검증) | `generated` — 실기기 검토 전 | Codex / 2026-07-21 |
+| clean GitHub runner에서 install·check·build·test 통과 | [EVD-20260721-008](../../evidence/2026-07.md#evd-20260721-008--github-clean-runner-ci) | `verified` | GitHub Actions / 2026-07-21 |
 
 ## 결정·제품 변화·인시던트
 

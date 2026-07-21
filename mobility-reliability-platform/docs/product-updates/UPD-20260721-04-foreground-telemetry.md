@@ -47,6 +47,7 @@ reviewed_at: 2026-07-21
 | 모바일 TypeScript | `tsc --noEmit` | `pass` | [EVD-20260721-007](../evidence/2026-07.md#evd-20260721-007--foreground-telemetry-정적정책-검증) |
 | Expo project health | Expo Doctor 20개 검사 | `pass` | [EVD-20260721-007](../evidence/2026-07.md#evd-20260721-007--foreground-telemetry-정적정책-검증) |
 | Android·iOS JS bundle | Expo export 2개 platform | `pass` | [EVD-20260721-007](../evidence/2026-07.md#evd-20260721-007--foreground-telemetry-정적정책-검증) |
+| clean runner 재현 | GitHub Actions install·check·build·test | `pass` | [EVD-20260721-008](../evidence/2026-07.md#evd-20260721-008--github-clean-runner-ci) |
 | 실제 장비 GPS·SQLite 동작 | Android·iPhone 실기기 | `미검증` | WSL ADB·EAS 후속 gate |
 
 ## 배포와 롤백
@@ -69,7 +70,7 @@ reviewed_at: 2026-07-21
 ## 관련 기록
 
 - 결정: [ADR-0008](../decisions/ADR-0008-foreground-telemetry-slice.md)
-- 증거: [EVD-20260721-007](../evidence/2026-07.md#evd-20260721-007--foreground-telemetry-정적정책-검증)
+- 증거: [EVD-20260721-007](../evidence/2026-07.md#evd-20260721-007--foreground-telemetry-정적정책-검증), [EVD-20260721-008](../evidence/2026-07.md#evd-20260721-008--github-clean-runner-ci)
 - 인시던트: 해당 없음 — production·field 사용자 영향 없음
 - 사람 대상 리포트: [HR-20260721-02](../reports/human/HR-20260721-02-foreground-telemetry.md)
 - 대체하는 업데이트: 해당 없음
