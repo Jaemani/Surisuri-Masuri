@@ -199,5 +199,5 @@ Accepted lineage는 항상 `nil`이다. Expected path는 receipt immutable input
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 사전절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
 - 제품 업데이트: 해당 없음 — 결정 문서이며 runtime 변경 없음
-- 증거: 구현·검증 후 별도 EVD 연결
+- 증거: [EVD-20260721-024](../evidence/2026-07.md#evd-20260721-024--current-state-forward-recovery-authorization)
 - 인시던트: 해당 없음 — production·staging·field 영향 없음

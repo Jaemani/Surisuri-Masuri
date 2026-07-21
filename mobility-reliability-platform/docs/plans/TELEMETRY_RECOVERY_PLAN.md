@@ -229,6 +229,8 @@ coarse classification과 low-cardinality reason code를 분리한다. 복수 man
 
 2026-07-21 현재 provider-neutral classifier 구현과 local 독립 gate는 [EVD-20260721-023](../evidence/2026-07.md#evd-20260721-023--generation-pinned-read-only-artifact-classifier)에서 `verified`됐다. 이 상태는 request/grant 계약, HTTP GCS reader, strict content validator와 read-only orchestration을 합성한 **local R5 증거**다. current system recovery/integrity authorizer, startup composition, staging version·soft-delete semantics와 R6 이후 mutation은 포함하지 않으므로 runtime readiness는 계속 닫아 둔다.
 
+2026-07-21 current-state forward recovery authorizer와 read-only Firestore adapter도 [EVD-20260721-024](../evidence/2026-07.md#evd-20260721-024--current-state-forward-recovery-authorization)에서 local/Emulator `verified`됐다. Authoritative receipt, current beneficiary 관계·동의와 sweeper fence를 확인해 30초 이하 forward grant를 발급하며 consent withdrawal 뒤 새 grant는 0이다. Accepted-integrity authorizer, authorizer→classifier startup composition과 R6 action은 포함하지 않는다.
+
 ### R6. Forward reconciler
 
 전제:

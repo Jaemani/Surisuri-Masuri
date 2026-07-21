@@ -85,3 +85,4 @@
 | [HR-20260721-12](./HR-20260721-12-http-gcs-artifact-reader.md) | HTTP GCS artifact inventory reader | `draft` |
 | [HR-20260721-13](./HR-20260721-13-artifact-content-validator.md) | telemetry artifact content lineage validator | `draft` |
 | [HR-20260721-14](./HR-20260721-14-read-only-artifact-classifier.md) | generation-pinned read-only artifact classifier | `draft` |
+| [HR-20260721-15](./HR-20260721-15-current-forward-recovery-authorization.md) | current-state forward recovery authorization | `draft` |
