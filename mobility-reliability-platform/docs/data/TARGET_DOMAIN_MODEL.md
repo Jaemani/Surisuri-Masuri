@@ -360,13 +360,15 @@ manifest:
 manifest_version, payload_schema_version,
 tenant_id, device_id, trip_id, installation_id,
 batch_id, client_batch_id, body_hash, object_sha256,
+object_crc32c, object_size,
 compression(gzip), content_type(application/json), sample_count,
-first_recorded_at, last_recorded_at,
-object_path, object_generation, received_at,
+first_captured_at, last_captured_at,
+object_path, object_generation, object_metageneration,
+received_at, expires_at,
 validator_version, consent_revision_id, kms_key_version?
 ```
 
-manifest는 immutable object로 만들고 object generation precondition을 사용한다. 서버가 검증 후 작성하며 client 제공 manifest를 그대로 신뢰하지 않는다.
+manifest는 versioned struct의 compact UTF-8 JSON으로 canonicalize하고 immutable object로 만든다. raw와 manifest 모두 `DoesNotExist` precondition을 사용하며 SHA-256, CRC32C, size, generation과 metageneration을 검증한다. 서버가 검증 후 작성하며 client 제공 manifest를 그대로 신뢰하지 않는다. exact replay·collision·부분 실패 복구 계약은 [ADR-0016](../decisions/ADR-0016-immutable-telemetry-artifact-lineage.md)을 따른다.
 
 #### Firestore ingest receipt
 
@@ -376,7 +378,10 @@ manifest는 immutable object로 만들고 object generation precondition을 사�
 receipt_id, reservation_key, client_batch_key,
 batch_id, tenant_id, trip_id, device_id, installation_id,
 consent_revision_id, client_batch_id, body_hash, object_sha256,
-object_path, manifest_path, object_generation,
+object_crc32c, object_size, object_path,
+object_generation, object_metageneration,
+manifest_path, manifest_sha256, manifest_crc32c, manifest_size,
+manifest_generation, manifest_metageneration,
 status(reserved|stored|queued|projected|rejected|deleting|deleted),
 sample_count, accepted_count?, rejected_count?,
 rejection_code?, payload_schema_version, projector_version?, revision,

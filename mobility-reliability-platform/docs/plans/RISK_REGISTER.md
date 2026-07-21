@@ -25,7 +25,7 @@
 | RSK-07 | Firebase emulator 설정이 production에 유입 | critical/low | emulator env 존재, 서명검증 우회 | production startup fail-closed, config test, separate projects | guard wiring·startup test 없음 | active |
 | RSK-08 | Firebase token은 유효하나 membership이 취소됨 | high/medium | inactive/revoked member request | 매 batch server membership 검사, token 정책 ADR | inactive membership 허용 | active |
 | RSK-09 | client tenant/device/trip 주장 신뢰 | critical/medium | cross-tenant fixture가 write 성공 | server authorizer, path/field tenant consistency, Rules | deny matrix 미통과 | active |
-| RSK-10 | partial failure로 object/receipt 불일치 | high/medium | reserved age, orphan object, hash mismatch | 3-way Firestore transaction local 검증, generation precondition, lease·sweeper, DLQ | 실제 concurrency와 object recovery/replay test 실패 | active |
+| RSK-10 | partial failure로 object/manifest/receipt 불일치 | high/medium | reserved age, orphan object, hash·CRC·generation mismatch | 3-way Firestore transaction local 검증, ADR-0016 immutable artifact 계약, lease·sweeper, DLQ | actual Storage recovery/replay와 staging lifecycle 검증 실패 | active |
 | RSK-11 | Firestore 비용이 sample 수에 비례 | high/medium | write count가 sample count와 선형 | Storage batch, small receipt/projection, listener 제한 | sample별 write 0을 staging usage test로 확인하지 못함 | active |
 | RSK-12 | Docker context와 CI source 불일치 | high/medium | host test 통과·image compile 누락 | directory allowlist, Docker build CI, image smoke | 이미지에 새 adapter 누락 | active |
 | RSK-13 | WSL host tool 부재·네트워크 차이 | medium/high | Go/adb 부재, device가 localhost 실패 | fixed Docker, Windows ADB, host-gateway/Compose, WSL runbook | 검증 환경을 기록하지 않음 | active |

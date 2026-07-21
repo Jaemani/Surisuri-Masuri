@@ -60,6 +60,8 @@
 - UUID·시각·body hash는 transaction callback 전에 한 번만 만들고, Cloud Storage write는 commit 성공 뒤에만 실행한다.
 - 수집 시각과 기기 발생 시각을 분리한다.
 - raw sample은 Firestore 개별 문서가 아니라 압축 Storage object로 저장한다.
+- raw gzip과 canonical manifest는 각각 `DoesNotExist`로 생성하며 exact generation·SHA-256·CRC32C·size를 receipt에 고정한다.
+- raw 성공 뒤 manifest/finalizer가 실패하면 overwrite하지 않고 동일 bytes를 generation-pinned read로 검증한 뒤 전진한다.
 
 ### Domain Command API
 
@@ -78,7 +80,7 @@
 ### Data Platform
 
 - Firestore는 기관·기기·수리·점검·동의·receipt·현재 projection을 제공한다.
-- Cloud Storage는 pseudonymous raw batch를 보관하고 lifecycle rule을 적용한다.
+- Cloud Storage는 pseudonymous raw batch와 동일 계보의 immutable manifest를 보관하고 lifecycle rule을 적용한다.
 - BigQuery는 분석 필요가 증명된 뒤 날짜 partition과 tenant/device clustering으로 활성화한다.
 - 개인 식별정보와 기기·수리·위치 이벤트를 논리적으로 분리한다.
 - 원본 위치에는 TTL을 적용하고 파생 집계의 계보를 보존한다.

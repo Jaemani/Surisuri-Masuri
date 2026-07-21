@@ -63,7 +63,7 @@ audience: project team and technical reviewer
 | atomic admission interface와 Firestore adapter 코드가 존재하고 local fake seam race test·clean CI를 통과 | [EVD-20260721-014](../../evidence/2026-07.md#evd-20260721-014--원자적-telemetry-admission과-receipt-lineage) | `verified` — local contract와 clean CI 범위 | Codex / 2026-07-21 |
 | transaction retry에서 authorization을 재평가하고 철회 시 write를 중단 | [EVD-20260721-014](../../evidence/2026-07.md#evd-20260721-014--원자적-telemetry-admission과-receipt-lineage) | `verified` — fake retry seam 범위 | local fake seam / 2026-07-21 |
 | 두 key, 세 경로, replay/conflict와 receipt lineage가 고정됨 | [ADR-0015](../../decisions/ADR-0015-atomic-telemetry-admission.md) | `accepted` decision; runtime 증거 아님 | 문서 검토 필요 |
-| local Firestore SDK transaction이 concurrent same-batch를 한 receipt로 직렬화 | [EVD-20260721-015](../../evidence/2026-07.md#evd-20260721-015--firestore-admission-transaction-emulator-integration) | `generated` — local Emulator 통과, clean CI 대기 | Codex / 2026-07-21 |
+| local Firestore SDK transaction이 concurrent same-batch를 한 receipt로 직렬화 | [EVD-20260721-015](../../evidence/2026-07.md#evd-20260721-015--firestore-admission-transaction-emulator-integration) | `verified` — local Emulator와 clean CI 범위 | Codex / 2026-07-21 |
 | production admission이 활성화됨 | 확인 필요 — 현재 활성화하지 않음 | `미검증` | 해당 없음 |
 | Cloud Storage generation·manifest와 reserved receipt 복구가 동작함 | 확인 필요 — 현재 구현하지 않음 | `미검증` | 해당 없음 |
 
@@ -98,4 +98,5 @@ audience: project team and technical reviewer
 - [x] 참석자·사진·지출을 생성하거나 추정하지 않았다.
 - [x] 민감정보와 원본 GPS 좌표가 없다.
 - [x] EVD-20260721-014의 실제 명령·commit·CI 결과를 확인했다.
+- [x] EVD-20260721-015의 commit `36b4435`와 CI run `29821870648` 성공을 확인했다.
 - [ ] reviewer와 발행일을 사람이 확정했다.
