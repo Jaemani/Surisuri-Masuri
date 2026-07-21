@@ -6,6 +6,8 @@
 
 이 저장소는 기존 `soo-ri`, `soo-ri-admin`, `power_assist_device_helper_backend`를 포크하거나 연장하지 않습니다. 기존 자산은 요구사항, DB 형식, 수리 도메인을 이해하기 위한 참고 자료와 승인된 데이터 이관 원천으로만 사용합니다.
 
+과거 프로젝트 archive: [`techforimpact-archive/TFI_CAMPUS_25Spring_Soori-soori`](https://github.com/techforimpact-archive/TFI_CAMPUS_25Spring_Soori-soori). 신규 구현은 이 archive에 런타임 의존하지 않으며, 상표·UI·코드는 재사용하지 않습니다.
+
 ## 프로젝트 기간
 
 - 2026년 5월 1일 ~ 2026년 12월 31일
