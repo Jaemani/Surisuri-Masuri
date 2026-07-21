@@ -13,5 +13,6 @@
 
 ## 초기 계약
 
-- `telemetry-batch.v1.schema.json`: 모바일에서 게이트웨이로 보내는 GPS batch
+- `telemetry-batch.v2.schema.json`: 신규 모바일에서 게이트웨이로 보내는 GPS batch. 실제 동의 revision과 installation·trip을 참조하며 현재 ingest 대상이다.
+- `telemetry-batch.v1.schema.json`: 초기 설계 compatibility 기록. 사용자별 동의 revision을 식별하지 못하므로 production ingest 대상이 아니다.
 - `domain-event.v1.schema.json`: 검증 이후 내부 event log에 기록하는 공통 envelope

@@ -161,6 +161,10 @@ func TestAPIReturnsAcceptedAndReplayStatuses(t *testing.T) {
 			if !strings.Contains(response.Body.String(), `"receiptId"`) {
 				t.Fatalf("receipt response missing: %s", response.Body.String())
 			}
+			if !strings.Contains(response.Body.String(), `"batchId"`) ||
+				!strings.Contains(response.Body.String(), `"clientBatchId"`) {
+				t.Fatalf("batch correlation response missing: %s", response.Body.String())
+			}
 		})
 	}
 }
@@ -172,7 +176,7 @@ func TestAPIMapsIdempotencyConflict(t *testing.T) {
 		wantCode string
 	}{
 		{name: "idempotency", err: ingest.ErrIdempotencyConflict, wantCode: "idempotency_conflict"},
-		{name: "batch id", err: ingest.ErrBatchIDConflict, wantCode: "batch_conflict"},
+		{name: "client batch", err: ingest.ErrClientBatchConflict, wantCode: "client_batch_conflict"},
 		{name: "object", err: ingest.ErrObjectConflict, wantCode: "object_conflict"},
 	}
 	for _, test := range tests {
@@ -233,8 +237,8 @@ func successVerifier() PrincipalVerifier {
 
 func successPrincipal() ingest.Principal {
 	return ingest.Principal{
-		TenantID: "00000000-0000-4000-8000-000000000010",
-		ActorID:  "00000000-0000-4000-8000-000000000011",
+		FirebaseUID: "synthetic-firebase-uid",
+		AppID:       "synthetic-app-id",
 	}
 }
 
@@ -252,9 +256,11 @@ func successIngestor(replay bool) Ingestor {
 func successfulResult(batch telemetry.Batch, replay bool) ingest.Result {
 	return ingest.Result{
 		Receipt: ingest.Receipt{
-			ReceiptID:   batch.BatchID,
-			State:       ingest.ReceiptStored,
-			SampleCount: len(batch.Samples),
+			ReceiptID:     "01982015-4400-7000-8000-000000000001",
+			BatchID:       "01982015-4400-7000-8000-000000000001",
+			ClientBatchID: batch.ClientBatchID,
+			State:         ingest.ReceiptStored,
+			SampleCount:   len(batch.Samples),
 		},
 		Replay: replay,
 	}
@@ -270,7 +276,7 @@ func performJSON(handler http.Handler, payload []byte) *httptest.ResponseRecorde
 
 func validPayload(t *testing.T) []byte {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "..", "packages", "contracts", "fixtures", "telemetry-batch.valid.json")
+	path := filepath.Join("..", "..", "..", "..", "packages", "contracts", "fixtures", "telemetry-batch.v2.valid.json")
 	payload, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)

@@ -94,17 +94,17 @@ func TestServiceRejectsIdempotencyBodyConflict(t *testing.T) {
 	}
 }
 
-func TestServiceRejectsUnverifiedBatchIdentity(t *testing.T) {
+func TestServiceRejectsIncompleteVerifiedPrincipal(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
 	objects := newMemoryObjectStore()
 	service := mustService(t, receipts, objects, nil)
 	principal := matchingPrincipal(batch)
-	principal.ActorID = "00000000-0000-4000-8000-000000000099"
+	principal.AppID = ""
 
 	_, err := service.Ingest(context.Background(), principal, batch, raw)
-	if !errors.Is(err, ErrIdentityMismatch) {
-		t.Fatalf("identity error = %v", err)
+	if !errors.Is(err, ErrInvalidPrincipal) {
+		t.Fatalf("principal error = %v", err)
 	}
 	if len(receipts.receipts) != 0 || objects.putCount != 0 {
 		t.Fatal("identity mismatch wrote storage state")
@@ -121,6 +121,7 @@ func TestServiceRejectsUnauthorizedBatchScopeBeforeStorage(t *testing.T) {
 		authorizerFunc(func(context.Context, Principal, BatchScope) error {
 			return ErrBatchUnauthorized
 		}),
+		fixedBatchIDGenerator(),
 		nil,
 	)
 	if err != nil {
@@ -136,7 +137,7 @@ func TestServiceRejectsUnauthorizedBatchScopeBeforeStorage(t *testing.T) {
 	}
 }
 
-func TestServiceRejectsBatchIDReuseWithDifferentIdempotencyKey(t *testing.T) {
+func TestServiceRejectsClientBatchReuseAcrossInstallations(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
 	objects := newMemoryObjectStore()
@@ -148,8 +149,8 @@ func TestServiceRejectsBatchIDReuseWithDifferentIdempotencyKey(t *testing.T) {
 	}
 	rotatedRaw := bytes.Replace(
 		raw,
-		[]byte("session-001-batch-0001"),
-		[]byte("session-001-batch-rotated"),
+		[]byte(batch.InstallationID),
+		[]byte("9e98ed5b-ce6a-407f-90ba-b452150dc9db"),
 		1,
 	)
 	rotatedBatch, err := telemetry.DecodeBatch(bytes.NewReader(rotatedRaw))
@@ -157,8 +158,8 @@ func TestServiceRejectsBatchIDReuseWithDifferentIdempotencyKey(t *testing.T) {
 		t.Fatalf("DecodeBatch() error = %v", err)
 	}
 	_, err = service.Ingest(context.Background(), principal, rotatedBatch, rotatedRaw)
-	if !errors.Is(err, ErrBatchIDConflict) {
-		t.Fatalf("batch conflict error = %v", err)
+	if !errors.Is(err, ErrClientBatchConflict) {
+		t.Fatalf("client batch conflict error = %v", err)
 	}
 	if objects.putCount != 1 {
 		t.Fatalf("object writes = %d, want 1", objects.putCount)
@@ -192,9 +193,13 @@ func TestServicePersistsTerminalObjectConflict(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()
 	objects := newMemoryObjectStore()
-	objectPath := "telemetry/" + batch.TenantID + "/" + batch.SessionID + "/" + batch.BatchID + ".json.gz"
+	now := time.Date(2026, 7, 21, 6, 0, 0, 0, time.UTC)
+	objectPath := "telemetry/v2/tenants/" + batch.TenantID +
+		"/devices/" + batch.DeviceID +
+		"/trips/" + batch.TripID +
+		"/year=2026/month=07/day=21/01982015-4400-7000-8000-000000000001.json.gz"
 	objects.objects[objectPath] = storedObject{bodyHash: "different", content: []byte("different")}
-	service := mustService(t, receipts, objects, nil)
+	service := mustService(t, receipts, objects, func() time.Time { return now })
 	principal := matchingPrincipal(batch)
 
 	for attempt := 0; attempt < 2; attempt++ {
@@ -203,7 +208,7 @@ func TestServicePersistsTerminalObjectConflict(t *testing.T) {
 			t.Fatalf("attempt %d error = %v", attempt+1, err)
 		}
 	}
-	receipt := receipts.receipts[batch.TenantID+":"+batch.IdempotencyKey]
+	receipt := receipts.receipts[deriveReservationKey(batch)]
 	if receipt.State != ReceiptRejected || receipt.RejectionCode != "object_conflict" {
 		t.Fatalf("receipt = %#v", receipt)
 	}
@@ -224,17 +229,25 @@ func TestDeterministicGZIP(t *testing.T) {
 	}
 }
 
+func TestDerivedReservationKeyMatchesCrossLanguageContract(t *testing.T) {
+	batch, _ := validBatch(t)
+	const expected = "b8443d7fe776ca88dc5e738732a31419aad494de9313d71f60d4893c75157023"
+	if actual := deriveReservationKey(batch); actual != expected {
+		t.Fatalf("deriveReservationKey() = %q, want %q", actual, expected)
+	}
+}
+
 type memoryReceiptStore struct {
-	mu                 sync.Mutex
-	receipts           map[string]Receipt
-	batchReservations  map[string]string
-	failNextMarkStored bool
+	mu                      sync.Mutex
+	receipts                map[string]Receipt
+	clientBatchReservations map[string]string
+	failNextMarkStored      bool
 }
 
 func newMemoryReceiptStore() *memoryReceiptStore {
 	return &memoryReceiptStore{
-		receipts:          make(map[string]Receipt),
-		batchReservations: make(map[string]string),
+		receipts:                make(map[string]Receipt),
+		clientBatchReservations: make(map[string]string),
 	}
 }
 
@@ -246,7 +259,7 @@ func (s *memoryReceiptStore) Reserve(
 	defer s.mu.Unlock()
 
 	if current, ok := s.receipts[reservation.ReservationKey]; ok {
-		if current.BodyHash != reservation.BodyHash || current.BatchKey != reservation.BatchKey {
+		if current.BodyHash != reservation.BodyHash || current.ClientBatchKey != reservation.ClientBatchKey {
 			return current, ReservationConflict, nil
 		}
 		if current.State == ReceiptStored {
@@ -257,23 +270,24 @@ func (s *memoryReceiptStore) Reserve(
 		}
 		return current, ReservationReplayPending, nil
 	}
-	if _, ok := s.batchReservations[reservation.BatchKey]; ok {
-		return Receipt{}, ReservationBatchConflict, nil
+	if _, ok := s.clientBatchReservations[reservation.ClientBatchKey]; ok {
+		return Receipt{}, ReservationClientBatchConflict, nil
 	}
 
 	receipt := Receipt{
 		ReservationKey: reservation.ReservationKey,
-		BatchKey:       reservation.BatchKey,
+		ClientBatchKey: reservation.ClientBatchKey,
 		ReceiptID:      reservation.ReceiptID,
 		TenantID:       reservation.TenantID,
 		BatchID:        reservation.BatchID,
+		ClientBatchID:  reservation.ClientBatchID,
 		BodyHash:       reservation.BodyHash,
 		State:          ReceiptReserved,
 		CreatedAt:      reservation.CreatedAt,
 		UpdatedAt:      reservation.CreatedAt,
 	}
 	s.receipts[reservation.ReservationKey] = receipt
-	s.batchReservations[reservation.BatchKey] = reservation.ReservationKey
+	s.clientBatchReservations[reservation.ClientBatchKey] = reservation.ReservationKey
 	return receipt, ReservationCreated, nil
 }
 
@@ -380,6 +394,7 @@ func mustService(
 		receipts,
 		objects,
 		authorizerFunc(func(context.Context, Principal, BatchScope) error { return nil }),
+		fixedBatchIDGenerator(),
 		now,
 	)
 	if err != nil {
@@ -394,13 +409,25 @@ func (f authorizerFunc) Authorize(ctx context.Context, principal Principal, scop
 	return f(ctx, principal, scope)
 }
 
-func matchingPrincipal(batch telemetry.Batch) Principal {
-	return Principal{TenantID: batch.TenantID, ActorID: batch.ActorID}
+type batchIDGeneratorFunc func() (string, error)
+
+func (f batchIDGeneratorFunc) NewID() (string, error) {
+	return f()
+}
+
+func fixedBatchIDGenerator() ServerBatchIDGenerator {
+	return batchIDGeneratorFunc(func() (string, error) {
+		return "01982015-4400-7000-8000-000000000001", nil
+	})
+}
+
+func matchingPrincipal(_ telemetry.Batch) Principal {
+	return Principal{FirebaseUID: "synthetic-firebase-uid", AppID: "synthetic-app-id"}
 }
 
 func validBatch(t *testing.T) (telemetry.Batch, []byte) {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "..", "packages", "contracts", "fixtures", "telemetry-batch.valid.json")
+	path := filepath.Join("..", "..", "..", "..", "packages", "contracts", "fixtures", "telemetry-batch.v2.valid.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)

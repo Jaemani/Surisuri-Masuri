@@ -3,6 +3,7 @@
 - 상태: accepted
 - 결정일: 2026-07-21
 - 관련 결정: [ADR-0007](./ADR-0007-firebase-first-hybrid.md)
+- 후속 identity·reference 계약: [ADR-0010](./ADR-0010-authenticated-telemetry-references.md)
 
 ## 맥락
 
@@ -21,10 +22,10 @@
 - Go 표준 라이브러리 HTTP 경계와 순수 ingest service를 우선 구현한다.
 - request body는 제한된 크기로 읽고 unknown field·trailing JSON을 거부한다.
 - duplicate JSON key와 올바르지 않은 UTF-8을 거부해 parser 간 해석 차이를 막는다.
-- batch는 최대 500 samples이며 wire schema의 ID·시각·좌표·optional sensor 범위를 검증한다.
-- tenant와 actor는 payload를 신뢰하지 않고 verifier가 반환한 principal과 일치하는지 다시 확인한다.
-- 별도 authorizer가 서버 상태에서 기기·세션 소유권과 현재 유효한 정밀위치 동의를 확인하기 전에는 receipt를 예약하지 않는다.
-- idempotency key와 batch ID는 모두 tenant 범위에서 하나의 transaction으로 고유성을 확인한다. 같은 key·batch·body hash는 replay이고, 어느 한 식별자라도 다른 조합으로 재사용되면 terminal conflict다.
+- gateway가 허용하는 v2 batch는 최대 500 samples이며 wire schema의 ID·시각·좌표·optional sensor 범위를 검증한다.
+- Firebase UID와 App ID는 header token verifier가 만든 principal에만 두고 raw payload에 넣지 않는다.
+- 별도 authorizer가 서버 상태에서 membership, 기기 배정, server trip, installation과 현재 유효한 정밀위치 consent revision을 확인하기 전에는 receipt를 예약하지 않는다.
+- 서버가 파생한 idempotency key와 client batch ID는 tenant 범위에서 하나의 transaction으로 같은 server batch에 연결한다. 같은 key·client batch·body hash는 replay이고, 어느 한 식별자라도 다른 조합으로 재사용되면 terminal conflict다.
 - object 경로에 다른 content가 이미 있으면 receipt를 `rejected`로 기록하고 `409`로 종료해 무한 재시도를 막는다.
 - 오류 응답과 application log에 좌표·원문 body를 포함하지 않는다.
 - production Firebase ID token·App Check verifier, Firestore receipt와 Cloud Storage adapter가 없으면 ingest executable은 요청을 허용하지 않는다.

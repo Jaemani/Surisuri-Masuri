@@ -16,29 +16,29 @@ import (
 )
 
 const (
-	SchemaVersionV1 = "telemetry-batch.v1"
+	SchemaVersionV2 = "telemetry-batch.v2"
 	SourcePhoneGPS  = "phone_gps"
 	MaxSamples      = 500
 )
 
-// Batch is the telemetry-batch.v1 JSON wire type.
+// Batch is the telemetry-batch.v2 JSON wire type.
 type Batch struct {
-	SchemaVersion    string   `json:"schemaVersion"`
-	BatchID          string   `json:"batchId"`
-	IdempotencyKey   string   `json:"idempotencyKey"`
-	TenantID         string   `json:"tenantId"`
-	ActorID          string   `json:"actorId"`
-	MobilityDeviceID string   `json:"mobilityDeviceId"`
-	SessionID        string   `json:"sessionId"`
-	ConsentVersion   string   `json:"consentVersion"`
-	SentAt           string   `json:"sentAt"`
-	Samples          []Sample `json:"samples"`
+	SchemaVersion     string   `json:"schemaVersion"`
+	ClientBatchID     string   `json:"clientBatchId"`
+	TenantID          string   `json:"tenantId"`
+	DeviceID          string   `json:"deviceId"`
+	TripID            string   `json:"tripId"`
+	ClientSessionID   string   `json:"clientSessionId"`
+	InstallationID    string   `json:"installationId"`
+	ConsentRevisionID string   `json:"consentRevisionId"`
+	SentAt            string   `json:"sentAt"`
+	Samples           []Sample `json:"samples"`
 }
 
 // Sample is one smartphone GPS observation in a Batch. Pointers on required
 // numeric fields preserve the difference between an omitted field and zero.
 type Sample struct {
-	SampleID            string         `json:"sampleId"`
+	ClientSampleID      string         `json:"clientSampleId"`
 	Sequence            *int64         `json:"sequence"`
 	CapturedAt          string         `json:"capturedAt"`
 	Latitude            *float64       `json:"latitude"`
@@ -152,31 +152,31 @@ func DecodeBatch(r io.Reader) (Batch, error) {
 }
 
 // Validate returns the first contract violation in deterministic wire order.
-// A nil result means the batch satisfies telemetry-batch.v1.
+// A nil result means the batch satisfies telemetry-batch.v2.
 func (b Batch) Validate() *ValidationError {
-	if b.SchemaVersion != SchemaVersionV1 {
+	if b.SchemaVersion != SchemaVersionV2 {
 		return invalid("schemaVersion", "const")
 	}
-	if !isUUID(b.BatchID) {
-		return invalid("batchId", "uuid")
+	if !IsUUID(b.ClientBatchID) {
+		return invalid("clientBatchId", "uuid")
 	}
-	if length := utf8.RuneCountInString(b.IdempotencyKey); length < 16 || length > 128 {
-		return invalid("idempotencyKey", "length")
-	}
-	if !isUUID(b.TenantID) {
+	if !IsUUID(b.TenantID) {
 		return invalid("tenantId", "uuid")
 	}
-	if !isUUID(b.ActorID) {
-		return invalid("actorId", "uuid")
+	if !IsUUID(b.DeviceID) {
+		return invalid("deviceId", "uuid")
 	}
-	if !isUUID(b.MobilityDeviceID) {
-		return invalid("mobilityDeviceId", "uuid")
+	if !IsUUID(b.TripID) {
+		return invalid("tripId", "uuid")
 	}
-	if !isUUID(b.SessionID) {
-		return invalid("sessionId", "uuid")
+	if !IsUUID(b.ClientSessionID) {
+		return invalid("clientSessionId", "uuid")
 	}
-	if length := utf8.RuneCountInString(b.ConsentVersion); length < 1 || length > 64 {
-		return invalid("consentVersion", "length")
+	if !IsUUID(b.InstallationID) {
+		return invalid("installationId", "uuid")
+	}
+	if !IsUUID(b.ConsentRevisionID) {
+		return invalid("consentRevisionId", "uuid")
 	}
 	if !isDateTime(b.SentAt) {
 		return invalid("sentAt", "date_time")
@@ -198,8 +198,8 @@ func (s Sample) validate(index int) *ValidationError {
 		return fmt.Sprintf("samples[%d].%s", index, name)
 	}
 
-	if !isUUID(s.SampleID) {
-		return invalid(field("sampleId"), "uuid")
+	if !IsUUID(s.ClientSampleID) {
+		return invalid(field("clientSampleId"), "uuid")
 	}
 	if s.Sequence == nil {
 		return invalid(field("sequence"), "required")
@@ -347,7 +347,10 @@ func validActivityHint(value string) bool {
 	}
 }
 
-func isUUID(value string) bool {
+// IsUUID validates the canonical textual shape used by wire identifiers.
+// Individual contracts separately decide whether an ID is client-generated
+// UUIDv4 or server-generated UUIDv7.
+func IsUUID(value string) bool {
 	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
 		return false
 	}

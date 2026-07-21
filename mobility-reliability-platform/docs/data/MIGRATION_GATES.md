@@ -194,7 +194,7 @@ source_snapshot_hash, mapping_version, reviewed_by?, reviewed_at?
 1. 모바일은 SQLite outbox에서 제한 크기 batch를 만든다.
 2. Go Cloud Run이 Firebase ID token, App Check, membership, consent를 검증한다.
 3. 서버가 payload schema, sample sequence/time/range, tenant를 검증한다.
-4. Storage에 `{batchId}.ndjson.zst`를 generation precondition으로 생성한다.
+4. Storage에 `telemetry-batch.v2` JSON을 deterministic gzip한 `{batchId}.json.gz`를 generation precondition으로 생성한다.
 5. immutable `{batchId}.manifest.json`을 생성한다.
 6. Firestore `/ingestReceipts/{batchId}`에 path/hash/status/count만 기록한다.
 7. 비동기 projector가 `/trips/{tripId}` summary/current projection을 제한된 write로 갱신한다.
@@ -220,7 +220,7 @@ source_snapshot_hash, mapping_version, reviewed_by?, reviewed_at?
 
 **멱등성**
 
-- ingest key는 `sha256(tenant_id | installation_id | client_batch_id | payload_schema_version)`다.
+- ingest key는 `sha256(payload_schema_version + U+001F + tenant_id + U+001F + installation_id + U+001F + client_batch_id)`의 lowercase hex다.
 - 수리/점검/동의 command도 `Idempotency-Key + body_hash` receipt를 가진다.
 - 같은 key/같은 body와 같은 key/다른 body를 concurrency test한다.
 

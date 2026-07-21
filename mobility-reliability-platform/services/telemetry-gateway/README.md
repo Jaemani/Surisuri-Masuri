@@ -4,11 +4,11 @@
 
 현재 구현된 kernel 책임:
 
-- duplicate key·invalid UTF-8까지 거부하는 strict `telemetry-batch.v1` decode와 최대 500 sample 검증
+- duplicate key·invalid UTF-8까지 거부하는 strict `telemetry-batch.v2` decode와 최대 500 sample 검증
 - request body 2MiB 제한과 좌표값이 없는 안정적 오류 응답
-- verifier principal과 payload tenant/actor 재검증
-- 기기·세션·현재 정밀위치 동의를 서버 상태로 검사하는 authorizer 계약
-- tenant 범위 idempotency key와 batch ID를 함께 고유화하는 replay/conflict 계약
+- Firebase UID·App ID를 raw body와 분리한 verifier principal
+- membership·기기 배정·server trip·installation·현재 정밀위치 동의를 서버 상태로 검사하는 authorizer 계약
+- client 문자열 없이 파생한 idempotency key, client batch ID와 server UUIDv7 batch ID를 분리한 replay/conflict 계약
 - 결정론적 gzip object와 receipt 상태 전이 interface
 - 늦은 retry에서 object를 중복 생성하지 않는 `PutIfAbsent`와 terminal rejection 계약
 - Cloud Run용 timeout·graceful shutdown·non-root distroless image

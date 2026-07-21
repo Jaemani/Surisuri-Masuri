@@ -8,36 +8,42 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/telemetry"
 )
 
 var (
-	ErrIdentityMismatch    = errors.New("verified identity does not match batch")
+	ErrInvalidPrincipal    = errors.New("verified principal is incomplete")
 	ErrBatchUnauthorized   = errors.New("verified principal is not authorized for the batch scope")
 	ErrIdempotencyConflict = errors.New("idempotency key reused with a different body")
-	ErrBatchIDConflict     = errors.New("batch id reused with a different idempotency key or body")
+	ErrClientBatchConflict = errors.New("client batch id reused in a different installation or body")
 	ErrObjectConflict      = errors.New("object path already contains different content")
 )
 
 type Principal struct {
-	TenantID string
-	ActorID  string
+	FirebaseUID string
+	AppID       string
 }
 
 // BatchScope contains only identifiers needed for a server-side authorization
 // decision. Coordinates and other telemetry values are deliberately excluded.
 type BatchScope struct {
-	TenantID         string
-	ActorID          string
-	MobilityDeviceID string
-	SessionID        string
-	ConsentVersion   string
+	TenantID          string
+	DeviceID          string
+	TripID            string
+	ClientSessionID   string
+	InstallationID    string
+	ConsentRevisionID string
 }
 
 type BatchAuthorizer interface {
 	Authorize(context.Context, Principal, BatchScope) error
+}
+
+type ServerBatchIDGenerator interface {
+	NewID() (string, error)
 }
 
 type ReceiptState string
@@ -50,10 +56,11 @@ const (
 
 type Receipt struct {
 	ReservationKey string
-	BatchKey       string
+	ClientBatchKey string
 	ReceiptID      string
 	TenantID       string
 	BatchID        string
+	ClientBatchID  string
 	BodyHash       string
 	ObjectPath     string
 	SampleCount    int
@@ -66,21 +73,21 @@ type Receipt struct {
 type ReservationStatus string
 
 const (
-	ReservationCreated        ReservationStatus = "created"
-	ReservationReplayPending  ReservationStatus = "replay_pending"
-	ReservationReplayComplete ReservationStatus = "replay_complete"
-	ReservationReplayRejected ReservationStatus = "replay_rejected"
-	ReservationConflict       ReservationStatus = "idempotency_conflict"
-	ReservationBatchConflict  ReservationStatus = "batch_conflict"
+	ReservationCreated             ReservationStatus = "created"
+	ReservationReplayPending       ReservationStatus = "replay_pending"
+	ReservationReplayComplete      ReservationStatus = "replay_complete"
+	ReservationReplayRejected      ReservationStatus = "replay_rejected"
+	ReservationConflict            ReservationStatus = "idempotency_conflict"
+	ReservationClientBatchConflict ReservationStatus = "client_batch_conflict"
 )
 
 type Reservation struct {
 	ReservationKey string
-	BatchKey       string
+	ClientBatchKey string
 	ReceiptID      string
 	TenantID       string
-	IdempotencyKey string
 	BatchID        string
+	ClientBatchID  string
 	BodyHash       string
 	CreatedAt      time.Time
 }
@@ -99,6 +106,7 @@ type Service struct {
 	receipts   ReceiptStore
 	objects    ObjectStore
 	authorizer BatchAuthorizer
+	batchIDs   ServerBatchIDGenerator
 	now        func() time.Time
 }
 
@@ -111,15 +119,22 @@ func NewService(
 	receipts ReceiptStore,
 	objects ObjectStore,
 	authorizer BatchAuthorizer,
+	batchIDs ServerBatchIDGenerator,
 	now func() time.Time,
 ) (*Service, error) {
-	if receipts == nil || objects == nil || authorizer == nil {
-		return nil, errors.New("ingest stores and authorizer are required")
+	if receipts == nil || objects == nil || authorizer == nil || batchIDs == nil {
+		return nil, errors.New("ingest stores, authorizer and batch id generator are required")
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{receipts: receipts, objects: objects, authorizer: authorizer, now: now}, nil
+	return &Service{
+		receipts:   receipts,
+		objects:    objects,
+		authorizer: authorizer,
+		batchIDs:   batchIDs,
+		now:        now,
+	}, nil
 }
 
 func (s *Service) Ingest(
@@ -131,16 +146,16 @@ func (s *Service) Ingest(
 	if validationErr := batch.Validate(); validationErr != nil {
 		return Result{}, validationErr
 	}
-	if principal.TenantID == "" || principal.ActorID == "" ||
-		principal.TenantID != batch.TenantID || principal.ActorID != batch.ActorID {
-		return Result{}, ErrIdentityMismatch
+	if principal.FirebaseUID == "" || principal.AppID == "" {
+		return Result{}, ErrInvalidPrincipal
 	}
 	if err := s.authorizer.Authorize(ctx, principal, BatchScope{
-		TenantID:         batch.TenantID,
-		ActorID:          batch.ActorID,
-		MobilityDeviceID: batch.MobilityDeviceID,
-		SessionID:        batch.SessionID,
-		ConsentVersion:   batch.ConsentVersion,
+		TenantID:          batch.TenantID,
+		DeviceID:          batch.DeviceID,
+		TripID:            batch.TripID,
+		ClientSessionID:   batch.ClientSessionID,
+		InstallationID:    batch.InstallationID,
+		ConsentRevisionID: batch.ConsentRevisionID,
 	}); err != nil {
 		if errors.Is(err, ErrBatchUnauthorized) {
 			return Result{}, ErrBatchUnauthorized
@@ -151,16 +166,23 @@ func (s *Service) Ingest(
 	bodyDigest := sha256.Sum256(rawBody)
 	bodyHash := hex.EncodeToString(bodyDigest[:])
 	now := s.now().UTC()
-	receiptID := batch.BatchID
-	reservationKey := principal.TenantID + ":" + batch.IdempotencyKey
-	batchKey := principal.TenantID + ":" + batch.BatchID
+	serverBatchID, err := s.batchIDs.NewID()
+	if err != nil {
+		return Result{}, fmt.Errorf("generate batch id: %w", err)
+	}
+	if !telemetry.IsUUID(serverBatchID) {
+		return Result{}, errors.New("generated batch id is not a UUID")
+	}
+	receiptID := serverBatchID
+	reservationKey := deriveReservationKey(batch)
+	clientBatchKey := batch.TenantID + ":" + batch.ClientBatchID
 	receipt, status, err := s.receipts.Reserve(ctx, Reservation{
 		ReservationKey: reservationKey,
-		BatchKey:       batchKey,
+		ClientBatchKey: clientBatchKey,
 		ReceiptID:      receiptID,
-		TenantID:       principal.TenantID,
-		IdempotencyKey: batch.IdempotencyKey,
-		BatchID:        batch.BatchID,
+		TenantID:       batch.TenantID,
+		BatchID:        serverBatchID,
+		ClientBatchID:  batch.ClientBatchID,
 		BodyHash:       bodyHash,
 		CreatedAt:      now,
 	})
@@ -170,8 +192,8 @@ func (s *Service) Ingest(
 	switch status {
 	case ReservationConflict:
 		return Result{}, ErrIdempotencyConflict
-	case ReservationBatchConflict:
-		return Result{}, ErrBatchIDConflict
+	case ReservationClientBatchConflict:
+		return Result{}, ErrClientBatchConflict
 	case ReservationReplayComplete:
 		return Result{Receipt: receipt, Replay: true}, nil
 	case ReservationReplayRejected:
@@ -185,11 +207,19 @@ func (s *Service) Ingest(
 	if err != nil {
 		return Result{}, fmt.Errorf("compress batch: %w", err)
 	}
+	if receipt.CreatedAt.IsZero() || !telemetry.IsUUID(receipt.BatchID) {
+		return Result{}, errors.New("reserved receipt is missing stable batch identity")
+	}
+	receivedAt := receipt.CreatedAt.UTC()
 	objectPath := fmt.Sprintf(
-		"telemetry/%s/%s/%s.json.gz",
-		principal.TenantID,
-		batch.SessionID,
-		batch.BatchID,
+		"telemetry/v2/tenants/%s/devices/%s/trips/%s/year=%04d/month=%02d/day=%02d/%s.json.gz",
+		batch.TenantID,
+		batch.DeviceID,
+		batch.TripID,
+		receivedAt.Year(),
+		receivedAt.Month(),
+		receivedAt.Day(),
+		receipt.BatchID,
 	)
 	if err := s.objects.PutIfAbsent(ctx, objectPath, compressed, bodyHash); err != nil {
 		if errors.Is(err, ErrObjectConflict) {
@@ -217,6 +247,17 @@ func (s *Service) Ingest(
 		return Result{}, fmt.Errorf("complete receipt: %w", err)
 	}
 	return Result{Receipt: receipt, Replay: status == ReservationReplayPending}, nil
+}
+
+func deriveReservationKey(batch telemetry.Batch) string {
+	material := strings.Join([]string{
+		batch.SchemaVersion,
+		batch.TenantID,
+		batch.InstallationID,
+		batch.ClientBatchID,
+	}, "\x1f")
+	digest := sha256.Sum256([]byte(material))
+	return hex.EncodeToString(digest[:])
 }
 
 func rejectionError(code string) error {

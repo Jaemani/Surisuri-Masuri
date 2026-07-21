@@ -7,6 +7,9 @@
 !services/telemetry-gateway/cmd/server/
 !services/telemetry-gateway/cmd/server/main.go
 !services/telemetry-gateway/internal/
+!services/telemetry-gateway/internal/identity/
+!services/telemetry-gateway/internal/identity/uuidv7.go
+!services/telemetry-gateway/internal/identity/uuidv7_test.go
 !services/telemetry-gateway/internal/httpapi/
 !services/telemetry-gateway/internal/httpapi/handler.go
 !services/telemetry-gateway/internal/httpapi/handler_test.go
@@ -19,4 +22,4 @@
 !packages/
 !packages/contracts/
 !packages/contracts/fixtures/
-!packages/contracts/fixtures/telemetry-batch.valid.json
+!packages/contracts/fixtures/telemetry-batch.v2.valid.json

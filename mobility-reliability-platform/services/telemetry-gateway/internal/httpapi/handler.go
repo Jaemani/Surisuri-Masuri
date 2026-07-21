@@ -114,14 +114,14 @@ func (a *API) ingestBatch(w http.ResponseWriter, r *http.Request) {
 	result, err := a.ingestor.Ingest(r.Context(), principal, batch, rawBody)
 	if err != nil {
 		switch {
-		case errors.Is(err, ingest.ErrIdentityMismatch):
-			writeError(w, http.StatusForbidden, "identity_mismatch", "")
+		case errors.Is(err, ingest.ErrInvalidPrincipal):
+			writeError(w, http.StatusForbidden, "invalid_principal", "")
 		case errors.Is(err, ingest.ErrBatchUnauthorized):
 			writeError(w, http.StatusForbidden, "batch_unauthorized", "")
 		case errors.Is(err, ingest.ErrIdempotencyConflict):
 			writeError(w, http.StatusConflict, "idempotency_conflict", "")
-		case errors.Is(err, ingest.ErrBatchIDConflict):
-			writeError(w, http.StatusConflict, "batch_conflict", "")
+		case errors.Is(err, ingest.ErrClientBatchConflict):
+			writeError(w, http.StatusConflict, "client_batch_conflict", "")
 		case errors.Is(err, ingest.ErrObjectConflict):
 			writeError(w, http.StatusConflict, "object_conflict", "")
 		default:
@@ -135,10 +135,12 @@ func (a *API) ingestBatch(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, map[string]any{
-		"receiptId":   result.Receipt.ReceiptID,
-		"state":       result.Receipt.State,
-		"sampleCount": result.Receipt.SampleCount,
-		"replay":      result.Replay,
+		"receiptId":     result.Receipt.ReceiptID,
+		"batchId":       result.Receipt.BatchID,
+		"clientBatchId": result.Receipt.ClientBatchID,
+		"state":         result.Receipt.State,
+		"sampleCount":   result.Receipt.SampleCount,
+		"replay":        result.Replay,
 	})
 }
 

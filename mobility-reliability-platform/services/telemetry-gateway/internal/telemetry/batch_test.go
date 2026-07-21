@@ -9,7 +9,7 @@ import (
 )
 
 func TestDecodeAndValidateFixture(t *testing.T) {
-	payload := readFixture(t, "telemetry-batch.valid.json")
+	payload := readFixture(t, "telemetry-batch.v2.valid.json")
 
 	batch, err := DecodeBatch(bytes.NewReader(payload))
 	if err != nil {
@@ -18,7 +18,7 @@ func TestDecodeAndValidateFixture(t *testing.T) {
 	if validationErr := batch.Validate(); validationErr != nil {
 		t.Fatalf("Batch.Validate() error = %v", validationErr)
 	}
-	if batch.SchemaVersion != SchemaVersionV1 {
+	if batch.SchemaVersion != SchemaVersionV2 {
 		t.Fatalf("SchemaVersion = %q", batch.SchemaVersion)
 	}
 	if len(batch.Samples) != 1 || batch.Samples[0].Latitude == nil {
@@ -28,7 +28,7 @@ func TestDecodeAndValidateFixture(t *testing.T) {
 
 func TestDecodeBatchRejectsUnknownFields(t *testing.T) {
 	payload := strings.Replace(
-		string(readFixture(t, "telemetry-batch.valid.json")),
+		string(readFixture(t, "telemetry-batch.v2.valid.json")),
 		`"source": "phone_gps"`,
 		`"source": "phone_gps", "unexpectedCoordinateMetadata": true`,
 		1,
@@ -41,7 +41,7 @@ func TestDecodeBatchRejectsUnknownFields(t *testing.T) {
 }
 
 func TestDecodeBatchRejectsTrailingJSON(t *testing.T) {
-	payload := append(readFixture(t, "telemetry-batch.valid.json"), []byte(` {"another":true}`)...)
+	payload := append(readFixture(t, "telemetry-batch.v2.valid.json"), []byte(` {"another":true}`)...)
 
 	_, err := DecodeBatch(bytes.NewReader(payload))
 	if err == nil || !strings.Contains(err.Error(), "trailing_json") {
@@ -51,7 +51,7 @@ func TestDecodeBatchRejectsTrailingJSON(t *testing.T) {
 
 func TestDecodeBatchRejectsDuplicateKeys(t *testing.T) {
 	payload := strings.Replace(
-		string(readFixture(t, "telemetry-batch.valid.json")),
+		string(readFixture(t, "telemetry-batch.v2.valid.json")),
 		`"source": "phone_gps"`,
 		`"source": "phone_gps", "source": "phone_gps"`,
 		1,
@@ -64,8 +64,13 @@ func TestDecodeBatchRejectsDuplicateKeys(t *testing.T) {
 }
 
 func TestDecodeBatchRejectsInvalidUTF8(t *testing.T) {
-	payload := readFixture(t, "telemetry-batch.valid.json")
-	payload = bytes.Replace(payload, []byte("location-consent.v1"), []byte{'v', 0xff}, 1)
+	payload := readFixture(t, "telemetry-batch.v2.valid.json")
+	payload = bytes.Replace(
+		payload,
+		[]byte("79db4fe2-525f-4fc5-9ea3-ccf2f2a78d75"),
+		[]byte{'v', 0xff},
+		1,
+	)
 
 	_, err := DecodeBatch(bytes.NewReader(payload))
 	if err == nil || !strings.Contains(err.Error(), "invalid_utf8") {
@@ -149,7 +154,7 @@ func TestValidateBounds(t *testing.T) {
 
 func TestDecodeBatchRejectsNaNAsInvalidJSON(t *testing.T) {
 	payload := strings.Replace(
-		string(readFixture(t, "telemetry-batch.valid.json")),
+		string(readFixture(t, "telemetry-batch.v2.valid.json")),
 		`"latitude": 37.5665`,
 		`"latitude": NaN`,
 		1,
@@ -179,7 +184,7 @@ func TestValidationErrorDoesNotExposeCoordinateValue(t *testing.T) {
 
 func TestHorizontalAccuracyAllowsExplicitNullButRequiresField(t *testing.T) {
 	payload := strings.Replace(
-		string(readFixture(t, "telemetry-batch.valid.json")),
+		string(readFixture(t, "telemetry-batch.v2.valid.json")),
 		`"horizontalAccuracyM": 8.5`,
 		`"horizontalAccuracyM": null`,
 		1,
@@ -201,7 +206,7 @@ func TestHorizontalAccuracyAllowsExplicitNullButRequiresField(t *testing.T) {
 
 func TestActivityHintRejectsExplicitNull(t *testing.T) {
 	payload := strings.Replace(
-		string(readFixture(t, "telemetry-batch.valid.json")),
+		string(readFixture(t, "telemetry-batch.v2.valid.json")),
 		`"activityHint": "wheeled"`,
 		`"activityHint": null`,
 		1,
@@ -222,7 +227,7 @@ func (b *Batch) HorizontalAccuracyUnsetForTest() {
 
 func validBatch(t *testing.T) Batch {
 	t.Helper()
-	batch, err := DecodeBatch(bytes.NewReader(readFixture(t, "telemetry-batch.valid.json")))
+	batch, err := DecodeBatch(bytes.NewReader(readFixture(t, "telemetry-batch.v2.valid.json")))
 	if err != nil {
 		t.Fatalf("DecodeBatch() error = %v", err)
 	}

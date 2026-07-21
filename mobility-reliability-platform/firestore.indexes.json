@@ -4,32 +4,32 @@
       "collectionGroup": "repairs",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "deviceId", "order": "ASCENDING" },
-        { "fieldPath": "occurredAt", "order": "DESCENDING" }
+        { "fieldPath": "device_id", "order": "ASCENDING" },
+        { "fieldPath": "occurred_at", "order": "DESCENDING" }
       ]
     },
     {
       "collectionGroup": "inspections",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "deviceId", "order": "ASCENDING" },
-        { "fieldPath": "startedAt", "order": "DESCENDING" }
+        { "fieldPath": "device_id", "order": "ASCENDING" },
+        { "fieldPath": "started_at", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "tripSessions",
+      "collectionGroup": "trips",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "deviceId", "order": "ASCENDING" },
-        { "fieldPath": "startedAt", "order": "DESCENDING" }
+        { "fieldPath": "device_id", "order": "ASCENDING" },
+        { "fieldPath": "started_at", "order": "DESCENDING" }
       ]
     },
     {
       "collectionGroup": "reports",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "deviceId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        { "fieldPath": "device_id", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
       ]
     }
   ],

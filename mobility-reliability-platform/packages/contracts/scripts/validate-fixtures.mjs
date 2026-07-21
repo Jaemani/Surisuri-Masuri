@@ -28,13 +28,25 @@ async function getValidator(schemaPath) {
 
 const cases = [
   {
-    name: 'valid telemetry batch',
+    name: 'valid telemetry batch v2',
+    schema: 'schemas/telemetry-batch.v2.schema.json',
+    fixture: 'fixtures/telemetry-batch.v2.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid telemetry batch v2',
+    schema: 'schemas/telemetry-batch.v2.schema.json',
+    fixture: 'fixtures/telemetry-batch.v2.invalid.json',
+    expected: false,
+  },
+  {
+    name: 'valid telemetry batch v1 compatibility fixture',
     schema: 'schemas/telemetry-batch.v1.schema.json',
     fixture: 'fixtures/telemetry-batch.valid.json',
     expected: true,
   },
   {
-    name: 'invalid telemetry batch',
+    name: 'invalid telemetry batch v1 compatibility fixture',
     schema: 'schemas/telemetry-batch.v1.schema.json',
     fixture: 'fixtures/telemetry-batch.invalid.json',
     expected: false,
