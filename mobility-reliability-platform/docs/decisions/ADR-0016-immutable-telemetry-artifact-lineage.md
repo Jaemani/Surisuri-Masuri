@@ -155,7 +155,7 @@ reserved receipt
 - raw bytes, 저장 metadata와 control-plane 상태의 의미가 분리되고 worker·삭제·ML dataset이 exact generation을 참조할 수 있다.
 - 재시도는 overwrite가 아니라 동일 bytes의 검증 가능한 replay가 된다.
 - Storage read-after-collision 때문에 replay 비용이 늘지만 정상 신규 수신은 object 2회 write와 receipt finalizer만 사용한다.
-- raw 성공 후 manifest가 장기간 실패하면 orphan raw object가 남는다. lease owner, fencing token, reserved receipt sweeper와 generation-pinned orphan cleanup은 다음 차단 게이트다.
+- raw 성공 후 manifest가 장기간 실패하면 orphan raw object가 남는다. lease owner, fencing token, reserved receipt sweeper와 generation-pinned orphan cleanup의 후속 계약은 [ADR-0017](./ADR-0017-fenced-ingest-recovery.md)에서 확정했으며 아직 구현 차단 게이트다.
 - `DoesNotExist`와 generation은 bucket 내부 overwrite만 막으며 잘못된 IAM, lifecycle, retention 설정을 증명하지 않는다.
 - canonical JSON은 Go struct와 manifest version에 결합된다. field 의미나 encoding을 바꿀 때 manifest version과 fixture를 함께 올린다.
 - rollback은 기존 artifact를 덮어쓰는 방식이 아니다. 새 adapter 배포를 중지하고 reserved receipt를 보존한 채 검증된 이전 reader/reconciler로 복구한다.
@@ -168,6 +168,8 @@ reserved receipt
 - Firestore finalizer의 전체 artifact lineage와 손상 fixture 검증
 - lease/fencing/sweeper 및 receipt expiry 전후 orphan reconciliation
 - staging IAM 최소권한, lifecycle·retention drift와 generation-pinned 삭제 drill
+
+후속 lease·fencing·forward/expiry recovery 상태 machine은 [ADR-0017](./ADR-0017-fenced-ingest-recovery.md)을 따른다.
 
 ## 연결 문서
 

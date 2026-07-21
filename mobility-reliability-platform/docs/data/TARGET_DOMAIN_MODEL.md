@@ -54,8 +54,12 @@
     /observations/{observationId}
   /trips/{tripId}                              # metadata/summary only
   /ingestReceipts/{batchId}                    # server-only write
+    /recoveryAttempts/{attemptId}              # 좌표 없는 복구 감사 ledger
   /ingestIdempotency/{derivedKey}              # server-only read/write
   /ingestClientBatches/{derivedKey}            # server-only client-batch uniqueness
+  /ingestCleanupTargets/{cleanupId}             # exact-generation 삭제 target
+  /ingestIntegrityFindings/{findingId}          # accepted/rejected 상태 보존형 finding
+  /ingestPurgeJobs/{receiptId}                  # bounded linkage purge coordinator
   /consentRevisions/{consentRevisionId}
   /consentStates/{derivedId}                   # 현재 동의 projection, server-only
   /alerts/{alertId}
@@ -382,13 +386,100 @@ object_crc32c, object_size, object_path,
 object_generation, object_metageneration,
 manifest_path, manifest_sha256, manifest_crc32c, manifest_size,
 manifest_generation, manifest_metageneration,
-status(reserved|stored|queued|projected|rejected|deleting|deleted),
-sample_count, accepted_count?, rejected_count?,
+status(reserved|stored|queued|projected|rejected|cleanup_pending|expired|recovery_hold|deleting|deleted),
+expected_sample_count, sample_count?,
+first_captured_at, last_captured_at, validator_version,
+fencing_token,
+lease_owner_id?, lease_owner_kind?,
+lease_acquired_at?, lease_heartbeat_at?, lease_expires_at?,
+recovery_attempt_count, next_recovery_at?, last_recovery_code?,
+cleanup_quiescence_until?,
+cleanup_mode?(reservation_expiry|artifact_retention|explicit_deletion|security_approved_rejected),
+cleanup_origin_status?(reserved|recovery_hold|stored|queued|projected|rejected),
+next_integrity_check_at?, hold_reason?, hold_review_due_at?,
+accepted_count?, rejected_count?,
 rejection_code?, payload_schema_version, projector_version?, revision,
-created_at, updated_at, stored_at?, projected_at?, expires_at
+created_at, updated_at, stored_at?, projected_at?,
+reservation_deadline, artifact_expires_at,
+receipt_retention_floor, purge_eligible_at?
 ```
 
 receipt는 control plane 상태이며 GPS sample을 포함하지 않는다. Stage 1 client direct read/write는 모두 거절하고 gateway가 안전한 receipt DTO만 반환한다.
+
+- 신규 HTTP reservation은 initial lease를 같은 transaction에서 만들고 `fencing_token=1`로 시작한다. takeover마다 정확히 1 증가하고 terminal 상태에서도 감소·재사용하지 않는다.
+- active lease의 owner·token·deadline이 일치하는 worker만 finalizer를 실행한다. lease field가 일부만 있으면 손상 상태다.
+- 신규 receipt의 `next_recovery_at`은 initial `lease_expires_at`이며 renew·takeover·safe release와 같은 transaction에서 새 lease expiry 또는 backoff로 갱신한다.
+- 이미 stored+동일 전체 lineage 또는 rejected+동일 code인 finalizer replay는 상태·revision을 바꾸지 않고 기존 receipt를 반환할 수 있다. 실제 mutation에는 live fence가 필수다.
+- manifest 재구성에 필요한 expected sample count·capture bounds·validator version은 최초 reservation에서 고정하고 이후 current deployment 값으로 바꾸지 않는다.
+- recovery runtime은 receipt의 `validator_version`을 explicit decoder/validator/manifest-builder registry에서 찾아 사용한다. 알 수 없는 version은 current code로 대체하지 않고 hold한다.
+- reservation 때 `reservation_deadline < artifact_expires_at`과 `receipt_retention_floor`를 고정하고 `purge_eligible_at`은 비워 둔다. terminal cleanup·감사 완료 transaction이 두 index와 receipt에 같은 purge eligibility를 설정한다. eligibility 뒤 bounded purge job이 nested attempt와 linked cleanup target·integrity finding을 먼저 제거하고, 마지막 transaction만 두 index와 receipt를 함께 삭제한다.
+- manifest v1의 기존 `expires_at` field는 `artifact_expires_at` 의미로만 읽고 reservation deadline이나 receipt purge에 사용하지 않는다.
+- `recovery_hold`는 reserved-origin의 손상·불가능한 artifact ordering을 위한 사람 검토 상태이며 일반 retry가 자동 해제하지 않는다. accepted/rejected receipt는 integrity finding 때문에 이 상태로 downgrade하지 않는다.
+- reserved-origin 만료 전 hold는 `now <= hold_review_due_at < artifact_expires_at`을 가져야 한다. 만료 뒤 처음 발견된 reserved finding은 `hold_review_due_at=now`로 기록하고 즉시 held cleanup 대상이 된다. 어느 hold도 artifact lifecycle을 자동 연장하지 않는다.
+- `cleanup_pending`은 `BeginCleanupTransition` 또는 `BeginHeldCleanup`이 token을 증가시키고 forward lease를 fence-out한 뒤 늦은 Storage write의 quiet period를 기다리는 reserved-origin 상태다. 일반 finalizer와 accepted/rejected cleanup은 이 상태로 전환할 수 없다. `expired`는 reserved-origin partial artifact cleanup 완료 또는 version-aware empty 확인 뒤에만 사용한다.
+- accepted `stored|queued|projected` cleanup은 `deleting -> deleted`를 사용하며 동일 lineage replay는 모든 accepted lifecycle 상태에서 complete 의미다. rejected receipt는 cleanup target 진행과 무관하게 `rejected`와 replay-rejected 의미를 유지한다.
+- stored/rejected transition은 `next_integrity_check_at`을 설정한다. 별도 bounded integrity auditor가 이 cursor와 Storage Inventory로 stored-missing·rejected-artifact를 찾으며 reserved sweeper query가 이 역할을 대신하지 않는다.
+
+`/ingestReceipts/{batchId}/recoveryAttempts/{attemptId}`:
+
+```text
+attempt_id, tenant_id, receipt_id,
+owner_kind(request|sweeper|cleanup), fencing_token, worker_version,
+status(started|completed|failed),
+classification?, action?, outcome?, error_class?,
+object_path?, object_generation?,
+manifest_path?, manifest_generation?,
+started_at, completed_at?
+```
+
+recovery attempt는 좌표·raw body·Firebase UID·App ID·credential token을 포함하지 않는 감사·운영 ledger다. expired lease를 takeover한 request와 sweeper/cleanup claim은 claim transaction에서 `started` attempt를 만들고 후속 분류를 별도 fenced update한다. 상태 원장은 receipt이며 attempt completion write 실패를 이유로 이미 commit된 receipt 상태를 되돌리지 않는다. forward recovery와 expiry cleanup은 다른 mode와 완료 조건을 사용한다. 자세한 계약은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)을 따른다.
+
+Firestore는 parent receipt 삭제 시 `recoveryAttempts`를 cascade delete하지 않는다. attempt는 독립 TTL로 먼저 지우지 않고 receipt의 `purge_eligible_at` 이후 bounded purge job이 document name cursor로 지운다. terminal purge가 시작된 receipt에는 새 attempt 생성을 금지한다.
+
+`/ingestIntegrityFindings/{findingId}`:
+
+```text
+finding_id, tenant_id, receipt_id, receipt_revision,
+origin_status(stored|queued|projected|rejected),
+reason(stored_missing|lineage_mismatch|rejected_artifact|provider_unavailable),
+severity, status(open|cleanup_approved|resolved|escalated),
+evidence_hashes[], ownership_verified?, approval_id?,
+found_at, review_due_at, resolved_at?
+```
+
+accepted/rejected receipt의 integrity 문제는 status를 `recovery_hold`로 바꾸지 않고 finding으로 기록한다. finding에는 좌표·raw body·UID/App ID를 넣지 않는다. rejected artifact cleanup은 `ownership_verified=true`와 사람의 보안 `approval_id` 없이는 시작할 수 없다. linked finding도 receipt 최종 purge 전에 bounded 삭제 또는 승인된 최소 증거로 축약한다.
+
+`/ingestCleanupTargets/{cleanupId}`:
+
+```text
+cleanup_id, tenant_id, receipt_id, reservation_key,
+mode(reservation_expiry|artifact_retention|explicit_deletion|security_approved_rejected),
+cleanup_origin_status(reserved|recovery_hold|stored|queued|projected|rejected),
+receipt_revision, fencing_token,
+object_path?, object_generation?, object_sha256?,
+manifest_path?, manifest_generation?, manifest_sha256?,
+status(planned|raw_deleted|manifest_deleted|completed|failed|hold),
+raw_delete_result?, manifest_delete_result?, error_class?,
+created_at, updated_at, completed_at?, worker_version
+```
+
+cleanup target은 delete 전에 transaction으로 생성하며 이후 mode, origin status, path나 generation을 새 latest 값으로 교체하지 않는다. raw exact generation을 먼저 삭제하고 manifest exact generation을 다음에 삭제한다. transient/permission/quota 오류를 NotFound로 바꾸지 않으며, target과 receipt lineage가 완전하지 않으면 delete를 실행하지 않는다. rejected origin은 exact ownership evidence와 별도 보안 승인 ID가 없으면 target 자체를 만들지 않는다.
+
+reserved-origin expiry cleanup은 receipt를 `cleanup_pending`으로 바꾸고 모든 forward lease를 fence-out한 뒤 `cleanup_quiescence_until`까지 기다린다. accepted retention cleanup은 receipt를 `deleting`으로 바꾸며, rejected cleanup은 receipt status를 유지한다. 모든 경로는 immutable `cleanup_origin_status`를 기록하고 quiet period를 최대 lease와 Storage operation timeout 합보다 길게 둔다. 삭제 뒤 version-aware live generation을 재검사하며 새 generation이 보이면 원 target을 바꾸지 않고 finding 또는 별도 linked target으로 분리한다.
+
+`/ingestPurgeJobs/{receiptId}`:
+
+```text
+receipt_id, receipt_revision, linkage_hash,
+status(planned|attempts_purging|targets_purging|findings_purging|ready|linkage_deleted|failed),
+attempt_cursor?, attempt_deleted_count,
+target_cursor?, target_deleted_count,
+finding_cursor?, finding_deleted_count,
+verified_empty_at?, linkage_deleted_at?, purge_job_expires_at,
+created_at, updated_at, error_class?
+```
+
+purge job은 receipt가 terminal이고 `purge_eligible_at <= now`일 때만 생성한다. `recoveryAttempts`, `ingestCleanupTargets`, `ingestIntegrityFindings`를 bounded·resumable page로 먼저 제거하고 세 query가 empty임을 증명한 뒤 `ready`가 된다. 마지막 transaction은 job의 receipt revision/linkage hash, 두 uniqueness index와 receipt를 재검증하고 세 linkage 문서만 원자 삭제한다. job에는 좌표·UID·object path를 넣지 않고 최소 count·hash·완료시각만 자체 retention까지 보존한다.
 
 ### 9. 위치 보존기간
 
@@ -398,9 +489,10 @@ Stage 1 제안값이며 실증 전 개인정보 영향평가와 기관 계약으
 - 마스킹된 route artifact가 필요한 경우: 기본 **90일**, 별도 derived Storage prefix와 manifest로 관리한다.
 - Firestore trip summary: 서비스 관계 종료 또는 정책상 보존기간까지. 원본 위치가 없어도 재식별 위험이 있는 field는 최소화한다.
 - Stage 2 익명 집계: 최대 **24개월**, 소수 사용자 셀 억제와 k-threshold를 적용한다.
-- 동의 철회/삭제 요청은 미래 수집을 즉시 중단하고 Firestore metadata, Storage object/manifest, Stage 2 BigQuery row/delete job을 하나의 deletion workflow로 추적한다.
+- 동의 철회는 미래 수집과 pending forward recovery를 즉시 중단한다. 기존 artifact 삭제는 동의 문구·법적 보존과 별개일 수 있으므로 철회 자체를 자동삭제 trigger로 사용하지 않는다.
+- 명시적 삭제 요청 또는 승인된 retention expiry가 있을 때만 Firestore metadata, Storage object/manifest, 활성화된 Stage 2 dataset을 generation/dataset lineage가 있는 deletion workflow로 추적한다.
 
-`expires_at`은 receipt와 manifest에 기록하고 lifecycle policy drift를 모니터링한다. 삭제 완료 시 위치나 PII가 아닌 범위·건수·object generation만 deletion receipt로 남긴다.
+`artifact_expires_at`은 receipt와 manifest에 기록하고 lifecycle policy drift를 모니터링한다. forward processing의 `reservation_deadline`은 그보다 앞선다. `purge_eligible_at`은 cleanup·감사 완료 전 null이며, 완료 transaction이 `receipt_retention_floor`와 audit window를 반영해 두 index와 receipt에 함께 설정한다. nested attempt, cleanup target과 integrity finding purge가 끝나기 전 receipt를 삭제하지 않는다. production 기간값은 개인정보 보존 승인과 staging 검증 전에는 확정된 운영값으로 주장하지 않는다. 삭제 완료 시 위치나 PII가 아닌 범위·건수·object generation만 deletion receipt로 남긴다.
 
 ### 10. 동의 `/consentRevisions/{consentRevisionId}`
 
@@ -494,12 +586,15 @@ validation_status, validation_codes[], created_at
 - 앱 설치마다 `installation_id`, 세션마다 `client_session_id`, batch마다 `client_batch_id`, sample마다 `client_sample_id`를 앱에서 생성한다.
 - ingest idempotency key는 decoded request 값으로 계산한 `sha256(schemaVersion + U+001F + tenantId + U+001F + installationId + U+001F + clientBatchId)`의 lowercase hex다.
 - Cloud Run은 첫 reservation에서 server UUIDv7 `batch_id`를 만들고, Firestore transaction으로 `/ingestIdempotency/{derivedKey}`, `/ingestClientBatches/{sha256(tenant_id + U+001F + client_batch_id)}`와 `/ingestReceipts/{batchId}`를 함께 create한다.
-- 두 index는 `tenant_id`, 두 derived key, `receipt_id == batch_id`, `installation_id`, `client_batch_id`, `payload_schema_version`, `body_hash`, 생성·만료시각의 최소 linkage를 함께 가진다. 일부 index나 receipt가 빠졌거나 linkage가 다르면 새 문서를 보완 생성하지 않고 dependency 오류로 닫는다.
+- 두 index는 `tenant_id`, 두 derived key, `receipt_id == batch_id`, `installation_id`, `client_batch_id`, `payload_schema_version`, `body_hash`, 생성시각, `receipt_retention_floor`, nullable `purge_eligible_at`의 최소 linkage를 함께 가진다. 일부 index나 receipt가 빠졌거나 linkage가 다르면 새 문서를 보완 생성하지 않고 dependency 오류로 닫는다.
 - transaction callback은 authorization exact read를 index·receipt 조회보다 먼저 수행하고 retry마다 현재 snapshot을 다시 평가한다. callback 안에서는 UUID·시각 생성, Storage, 로그, 외부 호출을 금지한다. 자세한 상태 판정은 [ADR-0015](../decisions/ADR-0015-atomic-telemetry-admission.md)를 따른다.
 - 동일 key/동일 body hash는 기존 receipt를 반환한다.
 - 동일 key/다른 body hash는 `409 IDEMPOTENCY_CONFLICT`로 거절하고 audit event를 남긴다.
 - Go Storage write는 `storage.Conditions{DoesNotExist: true}` precondition으로 overwrite를 막는다. 충돌 object 비교는 조건이 없는 새 handle로 generation·hash·size·CRC를 확인하며 `GenerationMatch: 0`을 직접 구성하지 않는다.
-- receipt 생성 후 object write 전에 실패한 상태를 sweeper가 복구할 수 있도록 명시적 상태 machine과 retry lease를 둔다.
+- 신규 receipt와 initial request lease는 같은 admission transaction에서 생성한다. existing pending replay는 active lease이면 Storage에 접근하지 않고, expired lease takeover는 fencing token을 증가시킨다.
+- receipt 생성 후 object write 전에 실패한 상태를 sweeper가 복구할 수 있도록 명시적 상태 machine, current-consent recovery authorization과 retry lease를 둔다. raw가 없으면 sweeper는 payload를 재구성하지 않고 client replay를 기다린다.
+- manifest가 있으면 version-aware inventory에서 generation candidate가 정확히 하나인지 먼저 확인한다. bytes가 동일해 보여도 복수 candidate면 자동 선택하지 않는다. 유일한 manifest generation을 pin하고 내부 raw generation을 exact read하며, manifest가 없을 때만 raw candidate generation을 발견 즉시 pin한다.
+- 만료 전 forward reconciliation과 만료 후 cleanup을 분리한다. cleanup은 immutable target에 exact generation을 먼저 기록한 뒤 raw→manifest 순서로 조건부 삭제하며 latest path/prefix 삭제를 금지한다.
 - 수리/점검/동의 command도 `Idempotency-Key + body_hash` receipt를 server-only collection에 저장한다. 보존기간은 최소 30일이며 최대 offline 지연보다 길어야 한다.
 
 ## 이벤트, projection, 재처리, DLQ

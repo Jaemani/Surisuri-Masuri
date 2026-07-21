@@ -140,7 +140,7 @@ status, revision, created_at, updated_at, expires_at
 - authorization과 최초 receipt/index 생성 사이 TOCTOU를 같은 Firestore transaction 경계로 줄였다.
 - local Firestore Emulator concurrent same-batch에서 한 3-way document set만 남는 직렬화를 검증했다. 이는 production 부하·네트워크·ADC/IAM의 증거가 아니다.
 - Firestore commit과 Cloud Storage write는 분산 transaction이 아니다. receipt가 `reserved`인 채 남거나 object가 저장된 뒤 `MarkStored`가 실패할 수 있다.
-- pending replay 여러 개가 같은 object write를 시도할 수 있다. Storage `DoesNotExist`는 overwrite를 막지만 lease owner·fencing token과 sweeper 복구가 후속으로 필요하다.
+- pending replay 여러 개가 같은 object write를 시도할 수 있다. Storage `DoesNotExist`는 overwrite를 막지만 처리 소유권은 보호하지 않으며, 후속 lease owner·fencing token과 sweeper 계약은 [ADR-0017](./ADR-0017-fenced-ingest-recovery.md)에서 확정했다. 구현 전이라는 제한은 유지된다.
 - 만료 직전 `reserved` replay가 admission을 통과한 뒤 Storage 처리 중 만료되면 finalizer는 막히지만 orphan object가 생길 수 있다. object/manifest에 원 receipt 만료시각을 보존하고 lease deadline·fencing·orphan cleanup을 구현하기 전에는 runtime을 열지 않는다.
 - 이 결정 작성 시점의 ObjectStore 한계는 [ADR-0016](./ADR-0016-immutable-telemetry-artifact-lineage.md)에서 raw·manifest 전체 계보를 반환하는 artifact store와 finalizer 계약으로 확장했다. runtime wiring 전이라는 운영 한계는 유지된다.
 - consent 철회가 transaction commit 뒤에 발생하면 이미 승인·저장된 object를 자동 취소하지 않는다. 이후 수집 차단과 삭제 workflow를 별도로 적용한다.

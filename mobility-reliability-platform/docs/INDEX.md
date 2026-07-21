@@ -10,10 +10,11 @@
 4. [8개월 로드맵](./ROADMAP.md) — 2026년 5월~12월 월별 기술 게이트
 5. [마스터 실행계획](./plans/MASTER_EXECUTION_PLAN.md) — 작업흐름, 의존성, 반월 단위 실행과 완료 조건
 6. [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md) — 테스트 수준, KPI, 실기기·현장 증거 규칙
-7. [정기보고·회의 운영계획](./plans/REPORTING_AND_MEETING_PLAN.md) — 월 2회, 총 16회 계획 보고와 실제 기록 방법
-8. [데이터·ML·AI 실행계획](./plans/DATA_ML_AI_PLAN.md) — 데이터 계보, 두 모델, 근거형 보고서 에이전트
-9. [릴리스·파일럿·최종 데모 계획](./plans/RELEASE_PILOT_DEMO_PLAN.md) — 환경 승격, 현장 도입, 발표·포트폴리오 증거
-10. [위험 등록부](./plans/RISK_REGISTER.md) — 현재 위험, 탐지 신호, 대응과 차단 조건
+7. [Telemetry 복구 실행계획](./plans/TELEMETRY_RECOVERY_PLAN.md) — lease, fencing, sweeper, generation-pinned recovery
+8. [정기보고·회의 운영계획](./plans/REPORTING_AND_MEETING_PLAN.md) — 월 2회, 총 16회 계획 보고와 실제 기록 방법
+9. [데이터·ML·AI 실행계획](./plans/DATA_ML_AI_PLAN.md) — 데이터 계보, 두 모델, 근거형 보고서 에이전트
+10. [릴리스·파일럿·최종 데모 계획](./plans/RELEASE_PILOT_DEMO_PLAN.md) — 환경 승격, 현장 도입, 발표·포트폴리오 증거
+11. [위험 등록부](./plans/RISK_REGISTER.md) — 현재 위험, 탐지 신호, 대응과 차단 조건
 
 ## 2. 질문별 기준 문서
 
@@ -23,6 +24,7 @@
 | 무엇을 만들고 무엇을 만들지 않는가 | [프로젝트 헌장](./PROJECT_CHARTER.md) | [로드맵](./ROADMAP.md) |
 | 5~12월에 언제 무엇을 판단하는가 | [마스터 실행계획](./plans/MASTER_EXECUTION_PLAN.md) | [정기리포트 16개](./reports/fixed/README.md) |
 | Firebase, Go, domain command와 worker의 책임은 무엇인가 | [시스템 아키텍처](./architecture/SYSTEM_ARCHITECTURE.md) | [ADR-0007](./decisions/ADR-0007-firebase-first-hybrid.md), [ADR-0011](./decisions/ADR-0011-domain-command-worker-boundaries.md) |
+| pending receipt를 누가 어떻게 복구하는가 | [Telemetry 복구 실행계획](./plans/TELEMETRY_RECOVERY_PLAN.md) | [ADR-0017](./decisions/ADR-0017-fenced-ingest-recovery.md), [ADR-0016](./decisions/ADR-0016-immutable-telemetry-artifact-lineage.md) |
 | 데이터 구조와 이관 기준은 무엇인가 | [Target Domain Model](./data/TARGET_DOMAIN_MODEL.md) | [Legacy Inventory](./data/LEGACY_DATA_INVENTORY.md), [Migration Gates](./data/MIGRATION_GATES.md) |
 | ML·AI가 무엇을 판단하고 무엇을 하지 않는가 | [데이터·ML·AI 계획](./plans/DATA_ML_AI_PLAN.md) | [ADR-0006](./decisions/ADR-0006-model-and-llm-responsibility.md) |
 | 어떤 결과를 완료로 인정하는가 | [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md) | [증거 인덱스](./evidence/README.md) |
@@ -30,6 +32,7 @@
 | 실제 제품에서 무엇이 바뀌었는가 | [제품 업데이트](./product-updates/README.md) | [월별 증거](./evidence/2026-07.md) |
 | 심각한 장애가 있었는가 | [인시던트 정책](./incidents/README.md) | 해당 `INC-*` 문서 |
 | WSL과 실기기에서 어떻게 실행하는가 | [WSL Runbook](./development/WSL_RUNBOOK.md) | 앱·서비스별 README |
+| telemetry orphan·stale receipt를 어떻게 분류하는가 | [Reconciliation Runbook](./development/TELEMETRY_RECONCILIATION_RUNBOOK.md) | [ADR-0017](./decisions/ADR-0017-fenced-ingest-recovery.md) |
 
 ## 3. 계획과 실제의 분리
 
@@ -55,6 +58,7 @@
 - active tenant·beneficiary·installation·trip·assignment·current consent를 교차 검사하는 pure authorization policy와 Firestore exact-read adapter의 local synthetic 검증. executable에는 미연결
 - 위 authorization을 replay·conflict 조회보다 먼저 재평가하고 두 uniqueness index와 최초 receipt를 같은 Firestore transaction에서 생성하는 admission adapter의 local fake-seam 및 Firestore Emulator concurrent same-batch 검증. ADC/IAM·production은 미검증이며 executable에는 미연결
 - raw deterministic gzip과 canonical manifest를 `DoesNotExist`로 저장하고 exact hash·CRC·size·generation을 Firestore receipt에 고정하는 artifact adapter/finalizer의 local race·official testbench 검증. staging IAM·lifecycle·runtime은 미검증
+- pending reservation lease·fencing·forward reconciliation·expiry cleanup은 ADR-0017과 실행계획만 accepted 상태이며 아직 구현 증거가 없음
 - server-only current consent projection의 Firebase client direct read/write 차단
 - Firestore client read를 own-person 또는 `case_worker`·`tenant_admin` 운영 범위로 제한하고 tenant/person query constraint를 고정한 local Rules Emulator 검증. production Rules에는 미배포
 - adapter 미구성 상태에서 `/healthz=200`, `/readyz`와 ingest는 `503`

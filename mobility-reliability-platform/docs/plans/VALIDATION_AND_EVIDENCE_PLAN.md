@@ -63,7 +63,12 @@ reviewer / reviewed_at
 | token enforcement | ID token과 App Check 중 하나라도 없거나 invalid면 write 0 | missing, duplicate, combined, expired/invalid, unlisted app |
 | scope authorization | inactive membership, 미배정 기기, 타 tenant, 무효 trip/동의는 write 0 | cross-tenant, revoked/expired, device mismatch, consent withdrawn |
 | idempotency | 같은 key/body는 같은 receipt, 같은 key/다른 body는 409 | concurrent retry, app restart, reordered batch |
+| lease/fencing | active owner 1명, takeover 뒤 stale token mutation 0 | concurrent claim, exact expiry, renew-vs-takeover, stale stored/rejected finalizer |
 | receipt/object lineage | hash, count, batch ID, path, generation 불일치 0 | object write 후 receipt 실패, receipt reserve 후 timeout |
+| receipt recovery | valid raw-only/complete만 forward 완료, 추정 복구·latest fallback 0 | no artifact, manifest-only, 동일/상이 bytes의 복수 manifest generation, metadata drift, stored-missing, consent withdrawal, unknown validator |
+| expiry cleanup | cleanup transition/claim winner 1, origin별 replay 의미 보존, 완료 후 live generation 0, terminal evidence 전 receipt/index purge 0 | recovery claim-vs-begin-cleanup, stale finalizer, accepted deletion replay, rejected 무승인 cleanup, late Storage create, concurrent cleanup, raw-delete crash, manifest-delete crash, pre/post-expiry hold, soft-delete |
+| receipt purge | nested attempt·cleanup target·integrity finding orphan 0, 세 집합 empty 증거 뒤 마지막 linkage transaction 1 | transaction limit 초과 attempt, page crash/restart, concurrent target/finding create, parent-first delete |
+| conservative time | consent/deadline acceptance는 max clock, 조기 cleanup 방지는 min clock, 허용 skew 초과 mutation 0 | app clock ±offset, exact deadline/expiry, read-time reversal |
 | Firestore write shape | GPS sample별 document write 0 | 최대 sample batch, repeated upload |
 | privacy logging | token·PII·정밀좌표 검출 0 | validation error, SDK error, crash, trace export |
 

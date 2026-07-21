@@ -1,0 +1,369 @@
+# Telemetry Reservation Recovery 실행계획
+
+## 1. 문서 성격
+
+이 문서는 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)을 구현하기 위한 작업 분해와 검증 기준이다. 아래 항목은 계획이며 코드·배포·운영 성과를 의미하지 않는다. 실제 결과는 `docs/evidence/`, 사람용 설명은 `docs/reports/human/`, runtime에 연결된 변화만 `docs/product-updates/`, 실제 SEV 영향만 `docs/incidents/`에 기록한다.
+
+## 2. 목표와 비목표
+
+### 목표
+
+- 한 `reserved` receipt를 동시에 처리할 owner를 한 명으로 제한한다.
+- lease takeover 뒤 stale worker의 모든 Firestore mutation을 fencing token으로 차단한다.
+- 최초 reservation에 canonical manifest 재검증에 필요한 immutable input을 보존한다.
+- raw-only, raw+manifest, manifest-only, no-artifact, stored-missing을 generation-pinned 방식으로 분류한다.
+- 만료 전 forward reconciliation과 만료 후 exact-generation cleanup을 분리한다.
+- current consent 철회 뒤 pending recovery가 새 artifact를 만들지 않게 한다.
+- WSL2 local, Firestore Emulator, official Storage testbench와 GitHub clean runner에서 재현 가능한 crash/race evidence를 남긴다.
+
+### 이번 gate의 비목표
+
+- production Firebase/GCP 배포 또는 실제 GPS 수집 활성화
+- path·prefix·latest object 기준 대량 삭제
+- receipt 없는 bucket object의 자동 삭제
+- operator 승인 없는 `recovery_hold` 해제
+- stored-missing artifact의 추정 재생성
+- Cloud Scheduler·Cloud Run IAM 검증 전 readiness 활성화
+- projector, ML dataset, 알림과의 연결
+
+## 3. 구현 단위와 의존성
+
+```text
+R1 immutable reservation input
+  └─> R2 lease/fence domain contract
+        └─> R3 Firestore atomic lease + fenced finalizer
+              ├─> R4 HTTP request ownership
+              └─> R5 read-only artifact classifier
+                    └─> R6 forward reconciler
+                          └─> R7 bounded sweeper + attempt ledger
+                                └─> R8 expiry cleanup target
+                                      └─> R9 staging/runbook gate
+```
+
+- R1~R4가 없으면 동일 request replay가 계속 Storage에 진입한다.
+- R5 없이 sweeper가 write/delete를 수행하지 않는다.
+- R6은 `reservation_deadline` 전만 허용한다.
+- R8은 R6과 다른 mode·claim·상태 전이를 사용한다.
+- R9 전에는 executable adapter wiring과 readiness를 열지 않는다.
+
+## 4. 단계별 작업
+
+### R1. Immutable reservation input
+
+대상:
+
+- `internal/ingest.Reservation`, `Receipt`
+- Firestore receipt와 두 ingest index DTO·validator·fixtures
+- Target Domain Model과 golden manifest fixture
+
+추가 필드:
+
+```text
+expected_sample_count
+first_captured_at
+last_captured_at
+validator_version
+reservation_deadline
+artifact_expires_at
+receipt_retention_floor
+purge_eligible_at?  # reservation 때 null
+```
+
+불변조건:
+
+- sample count는 telemetry max 범위 안이다.
+- first/last captured time은 payload validation 결과와 일치한다.
+- validator version은 비어 있지 않고 reservation 뒤 바뀌지 않는다.
+- `created_at < reservation_deadline < artifact_expires_at`이고 receipt retention floor가 유효하다.
+- `purge_eligible_at`은 terminal cleanup·감사 완료 전 null이며 완료 transaction이 두 index와 receipt에 함께 설정한다. 실제 linkage 삭제 전에는 nested attempt와 linked cleanup target·integrity finding을 bounded purge job으로 먼저 제거한다.
+- 기존 `expires_at` 필드는 의미를 겹쳐 쓰지 않고 migration/compatibility 결정 후 제거 또는 명시적 alias로 제한한다.
+
+완료 증거:
+
+- create/decode/round-trip test
+- 기존 index `expires_at` 의미를 retention floor/nullable purge eligibility로 분리한 linkage·subcollection purge test
+- 필드 하나씩 누락·변조한 fail-closed table test
+- immutable reservation input과 exact `StoredArtifact` lineage를 함께 넣으면 동일 canonical manifest bytes가 생성되는 golden test
+
+### R2. Lease와 fence domain contract
+
+추가 type 후보:
+
+```go
+type LeaseOwner struct {
+    ID   string
+    Kind LeaseOwnerKind
+}
+
+type LeaseProposal struct {
+    Owner    LeaseOwner
+    Duration time.Duration
+}
+
+type LeaseFence struct {
+    OwnerID  string
+    Token    int64
+    ExpiresAt time.Time
+}
+```
+
+status를 다음처럼 분리한다.
+
+```text
+created_lease_acquired
+replay_lease_acquired
+replay_in_progress
+replay_complete
+replay_rejected
+replay_recovery_hold
+replay_expired
+idempotency_conflict
+client_batch_conflict
+```
+
+완료 증거:
+
+- invalid UUID, kind, token, duration, timestamp ordering 거부
+- replay-in-progress가 “artifact 처리 권한 있음”으로 해석되지 않는 service test
+- accepted `stored|queued|projected|deleting|deleted`는 동일 lineage replay에 `replay_complete`, rejected는 승인된 side cleanup 중에도 `replay_rejected`를 유지
+- cleanup 시작 시 `cleanup_mode`와 `cleanup_origin_status`가 고정되고 이후 변경되지 않는 invariant test
+- client input에 owner/fence field가 존재하지 않는 wire-contract test
+
+### R3. Firestore atomic lease와 fenced finalizer
+
+신규 reservation transaction:
+
+1. current authorization exact read
+2. 두 index read
+3. 신규 index 2개와 `reserved` receipt 생성
+4. 같은 receipt에 initial owner, `fencing_token=1`, lease timestamps와 `next_recovery_at=lease_expires_at` 기록
+
+pending replay transaction:
+
+1. current authorization 재평가
+2. 3-way linkage·receipt state·deadline 검증
+3. active lease면 read-only `replay_in_progress`
+4. expired lease면 owner 교체, token·receipt revision +1
+
+모든 `RenewLease`, `ReleaseLease`와 실제 forward 상태를 바꾸는 `MarkStored`, `MarkRejected`, `MarkRecoveryHold`는 owner ID·token·deadline을 transaction에서 확인한다. 단, deadline이 지난 receipt에는 유효 forward fence가 존재할 수 없으므로 `BeginCleanupTransition`을 별도 claim primitive로 둔다. 이 transaction만 `reserved + reservation_deadline <= cleanupNow + active lease 없음 + 3-way linkage 정상`을 확인한다. 여기서 조기 삭제를 막는 `cleanupNow=min(application UTC, transaction read time)`이다. 조건을 만족하면 token·revision을 정확히 1 증가시켜 `cleanup_pending`, `cleanup_mode=reservation_expiry`, `cleanup_origin_status=reserved`와 quiet-period 기준을 원자 기록한다. reserved-origin hold는 `BeginHeldCleanup`, accepted receipt는 `BeginAcceptedDeletion`, rejected artifact는 명시적 보안 승인 전용 `BeginRejectedArtifactCleanup`으로 분리한다. 이미 accepted+동일 전체 lineage 또는 rejected+동일 code인 read-only finalizer replay는 update·revision 증가 없이 기존 receipt를 반환하며 active lease를 요구하지 않는다.
+
+필수 경쟁 테스트:
+
+| 경쟁 | 기대 결과 |
+| --- | --- |
+| 신규 동일 batch 2개 | acquired 1, in-progress 1, receipt/index 각 1 |
+| expired lease takeover 2개 | token +1 winner 1 |
+| renew 대 takeover | transaction commit 순서에 맞는 owner 하나 |
+| old token finalizer 대 new claim | old finalizer update 0 |
+| old token reject 대 new stored | reject update 0 |
+| `now == lease_expires_at` | 기존 owner 만료, takeover 허용 |
+| deadline보다 긴 lease | claim 거부 |
+| deadline 전 recovery claim 대 `BeginCleanupTransition` | recovery claim만 허용 |
+| deadline 경계/후 recovery claim 대 `BeginCleanupTransition` | cleanup transition winner 1, recovery lease 0 |
+| stale forward finalizer 대 cleanup transition | cleanup 상태 유지, stale update 0 |
+| accepted deletion 대 동일 batch replay | replay-complete, Storage call 0 |
+| rejected artifact cleanup 요청, 승인/ownership 없음 | receipt rejected 유지, target/delete 0 |
+| 승인된 rejected artifact cleanup 대 replay | receipt rejected 및 replay-rejected 유지 |
+
+Firestore index 계획:
+
+- server sweeper query용 `status ASC, next_recovery_at ASC, __name__ ASC`
+- tenant별 query를 택하면 collection index, 전체 service worker면 collection-group index를 명시한다.
+- 같은 due time은 document name tie-breaker와 `(next_recovery_at, __name__)` cursor로 deterministic page한다.
+- claim loss는 현재 owner의 due time을 건드리지 않고, processing failure/safe release만 bounded backoff로 `next_recovery_at`을 갱신한다.
+- candidate query는 advisory이며 실제 소유권은 transaction claim만 결정한다.
+
+### R4. HTTP request ownership
+
+- request마다 server UUID owner를 transaction 밖에서 한 번 생성한다.
+- acquired 상태에서만 deterministic gzip과 `StoreBatch`를 실행한다.
+- in-progress는 artifact adapter call 0을 보장하고 pending receipt와 bounded retry hint를 반환한다.
+- transient error 뒤 safe release가 성공하면 backoff를 기록한다.
+- context timeout으로 release 여부가 불명확하면 lease expiry가 takeover를 허용한다.
+- lease remaining threshold 아래에서는 manifest/finalizer 전 heartbeat한다.
+- raw exact bytes conflict만 현재 fence owner가 terminal reject할 수 있다.
+
+HTTP status는 mobile retry contract와 함께 별도 test로 고정한다. 구현 편의를 위해 200 replay와 202 pending을 같은 의미로 섞지 않는다.
+
+### R5. Generation-pinned read-only classifier
+
+public artifact recovery port는 write port와 분리한다.
+
+```text
+InspectExpectedArtifacts
+PinManifestGeneration
+ReadManifestGeneration
+PinReferencedRawGeneration
+ReadRawGenerationCompressed
+ClassifyAgainstReceipt
+```
+
+검증 순서:
+
+1. version-aware inventory에서 manifest candidate가 하나인지 확인한다. bytes가 동일해 보여도 candidate가 복수면 hold하고 유일할 때만 pin·strict decode한다.
+2. manifest의 raw generation을 exact read한다.
+3. manifest가 없을 때만 raw deterministic path의 candidate generation을 pin한다.
+4. read 전후 attrs·metageneration·metadata drift를 확인한다.
+5. gzip bytes digest와 decompressed strict payload를 receipt immutable input과 비교한다.
+6. permission, quota, timeout, malformed attrs는 `missing`으로 바꾸지 않는다.
+7. receipt `validator_version`을 explicit decoder/validator/manifest-builder registry에서 찾고 unknown version은 hold한다.
+
+classifier output 후보:
+
+```text
+none
+valid_raw_only
+valid_complete
+manifest_only
+raw_content_conflict
+metadata_conflict
+generation_drift
+stored_missing
+unavailable
+```
+
+이 단계는 object create/delete와 receipt mutation을 하지 않는다.
+
+### R6. Forward reconciler
+
+전제:
+
+- 현재 fence owner
+- `now < lease_expires_at`
+- `now < reservation_deadline`
+- current system recovery authorization valid
+- classifier 결과가 `valid_raw_only` 또는 `valid_complete`
+
+동작:
+
+- raw-only: validated raw generation을 이용해 reservation의 pinned validator version으로 canonical manifest를 생성하고 `DoesNotExist` write한다.
+- validator registry는 current와 아직 deadline/cleanup이 끝나지 않은 prior version decoder·manifest builder를 함께 보존한다. unknown version은 current code로 fallback하지 않는다.
+- complete: raw와 manifest cross-lineage를 다시 확인한다.
+- 두 경우 모두 같은 fence로 `MarkStored`한다.
+- manifest-only, metadata conflict, generation drift는 `recovery_hold`로 보낸다.
+- no-artifact는 `awaiting_client_replay` backoff 후 release한다.
+- consent invalid는 새 artifact write 0, `recovery_hold(consent_invalid)`다. 철회 자체는 기존 artifact 자동삭제 trigger가 아니며 명시적 삭제 요청 또는 승인된 retention expiry만 cleanup을 시작한다.
+- reserved-origin 만료 전 hold는 reason과 `now <= hold_review_due_at < artifact_expires_at`을 기록하고 reserved query에서 제외한다. 이미 만료된 뒤 처음 발견된 reserved finding은 `hold_review_due_at=now`와 즉시 cleanup 필요 상태로 기록한다. review 미완료 상태로 retention expiry가 오면 `BeginHeldCleanup`을 통해 exact-generation cleanup으로 넘긴다. accepted integrity finding은 receipt를 hold/expired로 downgrade하지 않고 `deleting/deleted` workflow를, rejected artifact는 상태를 유지한 채 ownership 증명·보안 승인 workflow를 사용한다. ambiguous lineage나 provider 실패로 삭제할 수 없으면 alert를 유지하고 incident 기준으로 escalate한다.
+
+### R7. Bounded sweeper와 recovery attempt ledger
+
+worker 한 회 실행 제한:
+
+- page size, max pages, per-receipt deadline, total run deadline을 config로 제한한다.
+- poison receipt 한 개의 실패가 다음 receipt를 막지 않는다.
+- exponential backoff에는 상한과 deterministic test용 jitter seam을 둔다.
+- candidate count, claim won/lost, classification, action, latency, hold count를 metric으로 낸다.
+- 로그와 attempt document에 body·좌표·UID/App ID를 넣지 않는다.
+- `stored`·`rejected`는 reserved query로 찾지 않는다. `next_integrity_check_at`과 version-aware Storage Inventory를 사용하는 별도 bounded integrity-audit cursor로 stored-missing·rejected-artifact를 검사한다.
+
+recovery attempt document:
+
+```text
+attempt_id, tenant_id, receipt_id,
+owner_kind, fencing_token, worker_version,
+status(started|completed|failed),
+classification?, action?, outcome?, error_class?,
+object_path?, object_generation?,
+manifest_path?, manifest_generation?,
+started_at, completed_at?
+```
+
+expired lease를 takeover한 request와 sweeper/cleanup claim은 claim transaction에서 `started` attempt와 count 증가를 함께 기록한다. 최초 request는 recovery attempt가 아니다. completion ledger write 실패가 receipt의 이미 성공한 finalizer를 rollback할 수 없으므로, receipt revision과 correlation ID로 재구성 가능한 운영 규칙을 둔다.
+
+### R8. Expiry·integrity cleanup과 bounded purge
+
+forward sweeper와 별도 mode로 구현한다.
+
+1. `BeginCleanupTransition` transaction이 `reserved`, deadline 경과, active lease 없음과 3-way linkage를 확인하고 token·revision +1, `cleanup_pending`, `cleanup_mode=reservation_expiry`, `cleanup_origin_status=reserved`를 원자 기록한다. 일반 forward finalizer는 이 전환을 수행할 수 없다.
+2. `cleanup_quiescence_until = max(last lease expiry, transition time) + late-write grace`를 고정한다. grace는 최대 lease+Storage operation timeout보다 길다.
+3. quiet period 뒤 owner kind `cleanup`으로 별도 lease를 claim한다.
+4. version-aware classifier로 artifact를 찾는다.
+5. 삭제 전 immutable target document에 path·generation·hash·삭제 순서를 기록한다.
+6. raw exact generation을 먼저 조건부 삭제한다.
+7. manifest exact generation을 삭제한다.
+8. 두 deletion outcome과 NotFound 의미를 target에 기록하고 live generation을 다시 검사한다.
+9. linked late generation이 없고 target·receipt linkage가 완전할 때만 receipt를 `expired`로 전환한다. 발견되면 hold 또는 별도 linked target으로 분리한다.
+10. reserved-origin `recovery_hold`는 retention expiry가 오면 `BeginHeldCleanup` transaction으로 `cleanup_pending`에 진입하고 `cleanup_origin_status=recovery_hold`를 고정한다. accepted `stored|queued|projected` finding은 승인된 lifecycle/deletion evidence를 대조한 뒤 `BeginAcceptedDeletion`으로 `deleting -> deleted`를 사용하며 replay-complete를 보존한다. rejected artifact는 receipt를 `rejected`로 유지하고 exact ownership과 명시적 보안 승인이 있을 때만 side cleanup target을 만든다.
+11. terminal cleanup·감사 완료 뒤에만 두 index와 receipt의 `purge_eligible_at`을 같은 transaction에서 설정한다. linkage 문서는 독립 TTL로 삭제하지 않는다.
+12. eligibility가 도달하면 top-level purge job을 만들고 terminal receipt에서 새 attempt/cleanup target/integrity finding 생성을 차단한다. receipt 하위 `recoveryAttempts`를 `__name__` cursor로 bounded·resumable 삭제한 뒤 `receipt_id`로 연결된 cleanup target과 integrity finding도 bounded 삭제한다.
+13. 세 집합을 재조회해 empty를 증명하고 삭제 수·cursor·receipt revision을 purge job에 기록한다. 그 뒤 마지막 transaction만 job 완료 증거와 3-way linkage를 재검증하고 두 uniqueness index와 receipt를 함께 삭제한다. attempt 수가 transaction limit을 넘어도 한 번에 cascade 삭제하지 않는다.
+14. purge job에는 위치·UID·object path 없이 hash·count·완료시각만 남기고 자체 retention 뒤 제거한다.
+
+이번 구현에서 actual delete까지 진행할지는 staging retention/IAM 결정 뒤 확정한다. 그 전에는 dry-run target 생성과 read-only 검증까지만 허용한다.
+
+### R9. Staging과 운영 gate
+
+- 별도 staging Firebase/GCP project
+- Cloud Scheduler caller identity와 Cloud Run `run.invoker`
+- gateway service account의 Firestore·Storage 최소권한
+- bucket versioning, lifecycle, retention, soft-delete retention/restore window, KMS 실제 값과 `deleted` 판정 의미
+- Firestore composite index와 TTL가 receipt/index/cleanup 근거를 먼저 지우지 않는지 확인
+- application clock과 Firestore read time offset metric, 허용 skew 초과 fail-closed fault test
+- consent/deadline acceptance는 `max(application UTC, transaction read time)`, 조기 cleanup 방지는 `min(...)`을 사용하는 경계 test
+- crash injection과 alert sink
+- operator hold 조회·승인·삭제 runbook
+- 비용: candidate query/read/write, replay bytes, attempt ledger 월 예상량
+
+## 5. Crash·artifact 상태 matrix
+
+| crash 지점/상태 | 다음 worker가 가져야 할 사실 | 허용 행동 | 성공 기준 |
+| --- | --- | --- | --- |
+| receipt commit 전 | 문서 0 또는 transaction retry | request 재시도 | partial 3-way 문서 0 |
+| receipt+lease 뒤 raw 전 | payload는 client에만 있음, next recovery는 lease expiry | client replay 대기 | sweeper 누락·artifact write 0 |
+| raw write 성공 뒤 응답 유실 | raw exact generation | replay 검증 또는 raw-only forward | overwrite 0 |
+| raw 뒤 manifest 전 crash | valid raw-only | manifest 생성 후 fenced stored | 같은 raw generation 유지 |
+| manifest 뒤 finalizer 전 crash | valid complete | fenced finalizer | object/manifest generation 유지 |
+| finalizer commit 뒤 응답 유실 | stored full lineage | identical replay | revision 불필요 증가 0 |
+| lease takeover 뒤 old worker 재개 | old token | 모든 Firestore mutation 거절 | winner state 유지 |
+| manifest-only | invalid ordering/data loss | hold | raw create 0, stored 전환 0 |
+| stored-missing, artifact expiry 전 | exact generation NotFound | high-severity finding | 최신 generation fallback 0 |
+| stored-missing, artifact expiry 후 | exact generation NotFound + lifecycle/deletion evidence | 정상 deletion workflow 대조 또는 integrity cleanup | 정상 lifecycle을 false data-loss로 경보 0 |
+| deadline 뒤 partial artifact | cleanup_pending fence와 quiet period | 이후 pinned cleanup handoff | late recreate·forward write/finalize 0 |
+| purge 대상 receipt에 attempt 다수 | terminal receipt와 bounded cursor | attempt/target 선삭제 후 마지막 3-way linkage 삭제 | orphan subcollection/target 0 |
+
+## 6. 검증 명령과 환경
+
+host Go가 없는 현재 WSL2에서는 Go 1.26.5 Docker image와 named module/build cache를 사용한다. 모든 local command는 저장소 `AGENTS.md`에 따라 `rtk` prefix를 사용한다.
+
+검증 묶음:
+
+- pure domain/table/property tests
+- `go test -race ./...`, `go vet ./...`, `go mod tidy -diff`
+- Firestore Emulator concurrent claim/takeover/stale finalizer
+- pinned official Cloud Storage testbench generation read와 조건부 delete
+- Firebase Rules server-only collection deny regression
+- workspace check, document links, Android/iOS export
+- container build와 `/readyz=503` fail-closed smoke
+- GitHub clean runner
+
+실제 staging 전에는 `generated`, clean CI 뒤에는 `verified`로 evidence 상태를 바꾸되 production·field 완료로 표현하지 않는다.
+
+## 7. 문서·Git 전달 규칙
+
+- 결정 변경: `ADR-0017`과 Target Domain Model
+- 구현 상태·검증: 월별 EVD
+- 사람이 읽을 기술 결과: 별도 HR
+- runtime route·사용자 흐름 연결 전 Product Update 없음
+- production·field 영향이 없으면 Incident 없음
+- 구현 전 결정 문서 commit, 구현+local evidence commit, clean CI evidence 확정 commit으로 분리한다.
+- commit마다 `Jaemani / leejaeman0227@gmail.com`, `main`, `origin`을 확인한다.
+- 운영 분류·hold·cleanup 재개 절차는 [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)을 따른다.
+
+## 8. 종료 조건
+
+local gate 완료는 다음을 모두 만족할 때다.
+
+- stale fence mutation 0
+- active lease 중복 artifact call 0
+- valid raw-only와 complete recovery 성공
+- no-artifact의 추정 복구 0
+- manifest-only/stored-missing의 자동 재생성·삭제 0
+- consent invalid forward write 0
+- cleanup 전 quiet period와 삭제 후 live-generation 재검사로 late orphan 0
+- recovery attempt와 cleanup target을 먼저 비운 뒤 마지막 3-way linkage 삭제, orphan 0
+- bounded sweeper가 poison candidate 뒤에도 진행
+- recovery ledger privacy scan 위반 0
+- Firestore Emulator와 official Storage testbench race test 통과
+- clean CI 통과
+
+staging/pilot gate는 별도이며 IAM·lifecycle·retention·Scheduler·실제 ADC·alert·operator runbook이 없으면 계속 차단한다.

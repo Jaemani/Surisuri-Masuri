@@ -15,7 +15,7 @@
 | --- | --- | --- | --- | --- |
 | 5월 | Greenfield Definition | IP 경계, 제품 헌장, 모바일 정보구조, GPS vertical slice 설계 | 신규 아키텍처와 모바일 흐름 | R01, R02 |
 | 6월 | Reliable Mobile Capture | Android/iOS 권한, background GPS, SQLite 이벤트 로그, offline sync | 비행기 모드 복구와 배터리·정확도 비교 | R03, R04 |
-| 7월 | Trusted Telemetry Platform | Go Cloud Run ingest, idempotency, Firestore receipt, Cloud Storage batch, 위치 필터·보존정책 | 정제 전후 경로와 부하·중복·비용 테스트 | R05, R06 |
+| 7월 | Trusted Telemetry Platform | Go Cloud Run ingest, idempotency, Firestore receipt, Cloud Storage batch, fenced recovery, 위치 필터·보존정책 | 정제 전후 경로와 부하·중복·복구·비용 테스트 | R05, R06 |
 | 8월 | On-device Data Quality ML | 라벨링, 규칙 baseline, PyTorch 시계열 모델, ONNX 배포 | confusion matrix와 모바일 추론 | R07, R08 |
 | 9월 | Asset State & Reliability | 이벤트 projection, 수리 importer, 부품 상태, 생존분석 baseline | 기기 타임라인과 위험곡선 | R09, R10 |
 | 10월 | Calibrated Decision Support | calibration, abstention, 수리사 피드백, fact store, AI 보고서 | 근거 클릭형 위험 설명과 평가표 | R11, R12 |
@@ -40,6 +40,7 @@
 
 - Cloud Run 수집 경계가 Firebase Auth/App Check, 계약 위반 batch와 tenant 위반 요청을 거부한다.
 - 중복 전송·순서 역전·부분 실패가 재현 가능하게 테스트된다.
+- active lease owner 하나와 단조 증가 fencing token으로 stale finalizer가 차단되고, raw-only/no-artifact/manifest-only/stored-missing 복구 분류와 deadline cleanup 전환 경쟁이 검증된다.
 - Firestore에는 GPS sample을 개별 문서로 쓰지 않고 receipt와 파생 상태만 저장한다.
 - Cloud Storage 원본 batch와 BigQuery/파생 집계의 보존·삭제 정책이 분리된다.
 

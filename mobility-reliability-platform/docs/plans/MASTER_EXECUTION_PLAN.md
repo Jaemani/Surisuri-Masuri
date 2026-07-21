@@ -131,13 +131,15 @@ WS7은 모든 단계의 결정·테스트·실패·화면을 병렬로 수집한
 
 - deterministic gzip Cloud Storage object와 Firestore receipt transaction을 연결한다.
 - partial failure, replay, conflict, concurrent retry, storage precondition을 검증한다.
+- pending receipt에 request lease와 fencing token을 적용하고, stale finalizer·raw-only·manifest-only·stored-missing crash matrix를 검증한다.
+- 만료 전 forward reconciliation과 만료 후 generation-pinned cleanup target을 분리한다. deadline cleanup은 별도 fenced transition으로 시작하고, receipt purge는 nested attempt·cleanup target·integrity finding을 먼저 비운 뒤 마지막 linkage transaction으로 끝낸다.
 - GPS 품질 flag, 시작·도착 마스킹, lifecycle·deletion lineage, 비용 계측을 설계한다.
 - BigQuery 활성화 여부는 실제 분석 query와 비용 실험으로만 판단한다.
 
 **월말 게이트**
 
 - 무인증·앱 무결성 실패·tenant 위반·동의 위반 batch가 write 전에 차단된다.
-- sample별 Firestore write가 0이고 object/receipt 계보가 일치한다.
+- sample별 Firestore write가 0이고 object/receipt 계보가 일치하며 stale fence mutation이 0이다.
 - 발표 카드: 401/403/409/503 failure matrix, raw→receipt→projection 계보, 중복 10회 테스트.
 
 **진행이 막힌 경우의 독립 산출물**

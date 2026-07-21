@@ -24,6 +24,7 @@
                      └──> Firestore: domain event / receipt / metadata
                                       │
                                       └──> [Async Workers]
+                                           receipt reconciler / expiry cleanup
                                            projector / importer / feature / fact / report
                                            │
                                            ├──> current device/part state
@@ -52,6 +53,8 @@
 
 ### Telemetry Gateway
 
+다음 목록은 target architecture다. lease·fencing·reconciler·expiry cleanup 항목은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)에 accepted됐지만 아직 runtime에 구현·연결되지 않았다.
+
 - 비즈니스 CRUD를 모두 담당하는 범용 백엔드가 아니다.
 - 모바일 텔레메트리의 인증, 계약 검증, 멱등성, receipt만 책임진다.
 - Firebase ID token과 App Check를 확인한 뒤 request의 `tenantId` 후보 scope를 active membership, 기기 배정, trip, installation, consent로 authorize한다.
@@ -62,6 +65,9 @@
 - raw sample은 Firestore 개별 문서가 아니라 압축 Storage object로 저장한다.
 - raw gzip과 canonical manifest는 각각 `DoesNotExist`로 생성하며 exact generation·SHA-256·CRC32C·size를 receipt에 고정한다.
 - raw 성공 뒤 manifest/finalizer가 실패하면 overwrite하지 않고 동일 bytes를 generation-pinned read로 검증한 뒤 전진한다.
+- 신규 reservation과 initial request lease는 같은 Firestore transaction에서 만들고, pending replay는 active lease가 있으면 Storage에 접근하지 않는다.
+- lease takeover마다 receipt의 fencing token을 증가시키며 renew·release·stored/rejected finalizer는 현재 owner와 token이 일치할 때만 허용한다.
+- reservation 처리 deadline, raw/manifest lifecycle expiry와 receipt purge 시점을 분리해 cleanup 근거가 artifact보다 먼저 사라지지 않게 한다. parent receipt 삭제 전 bounded purge job이 nested recovery attempt와 linked cleanup target·integrity finding을 먼저 제거하고, 마지막 transaction만 두 uniqueness index와 receipt를 함께 삭제한다.
 
 ### Domain Command API
 
@@ -73,7 +79,12 @@
 
 ### Async Workers
 
+receipt reconciler와 expiry cleanup은 target 책임이며 현재 배포 worker가 아니다.
+
 - Cloud Tasks/Pub/Sub의 at-least-once 전달을 전제로 projection, importer, feature, fact, report job을 처리한다.
+- receipt reconciler는 stale `reserved` 후보를 bounded query로 찾되 Firestore transaction claim을 유일한 소유권 판정으로 사용한다.
+- forward reconciler는 current consent를 다시 확인하고 valid raw-only/raw+manifest만 generation-pinned 방식으로 완료한다. raw 없음, manifest-only, stored-missing을 추정 복구하지 않는다.
+- expiry cleanup은 forward recovery와 분리하고 immutable deletion target에 exact generation을 고정한 뒤 raw→manifest 순서로만 처리한다.
 - worker는 idempotency, checkpoint, DLQ, replay mode를 가지며 replay 중 FCM·외부 호출을 실행하지 않는다.
 - worker/runtime version, service account, trigger, retry, rollback을 독립 배포 단위로 기록한다.
 
