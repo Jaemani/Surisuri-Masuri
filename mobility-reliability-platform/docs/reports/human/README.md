@@ -83,3 +83,4 @@
 | [HR-20260721-10](./HR-20260721-10-recovery-claims-cleanup-transition.md) | recovery claim·cleanup transition | `draft` |
 | [HR-20260721-11](./HR-20260721-11-read-only-artifact-classifier-contract.md) | read-only artifact classifier 계약 | `draft` |
 | [HR-20260721-12](./HR-20260721-12-http-gcs-artifact-reader.md) | HTTP GCS artifact inventory reader | `draft` |
+| [HR-20260721-13](./HR-20260721-13-artifact-content-validator.md) | telemetry artifact content lineage validator | `draft` |
