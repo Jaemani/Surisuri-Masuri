@@ -8,6 +8,7 @@ import {
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 
 const projectId = 'demo-mobility-reliability';
+const consentStateDocumentId = 'a'.repeat(64);
 const rulesPath = new URL('../../../firestore.rules', import.meta.url);
 const storageRulesPath = new URL('../../../storage.rules', import.meta.url);
 
@@ -169,6 +170,7 @@ describe('server-owned mutation boundary', () => {
       'tenants/tenant-a/devices/device-1',
       'tenants/tenant-a/deviceAssignments/assignment-1',
       'tenants/tenant-a/consentRevisions/consent-1',
+      `tenants/tenant-a/consentStates/${consentStateDocumentId}`,
       'tenants/tenant-a/trips/trip-1',
       'tenants/tenant-a/ingestReceipts/batch-1',
       'tenants/tenant-a/ingestIdempotency/key-1',
@@ -201,6 +203,29 @@ describe('server-owned mutation boundary', () => {
       tenant_id: 'tenant-a',
       trip_id: 'trip-2'
     }));
+  });
+
+  test('current consent states deny direct client reads', async () => {
+    await seedMembership('tenant-a', 'member-a');
+    await seedDocument(
+      `tenants/tenant-a/consentStates/${consentStateDocumentId}`,
+      {
+        tenant_id: 'tenant-a',
+        person_id: 'person-1',
+        purpose_code: 'precise_location',
+        status: 'granted'
+      }
+    );
+    const db = testEnvironment.authenticatedContext('member-a').firestore();
+
+    await assertFails(
+      getDoc(
+        doc(
+          db,
+          `tenants/tenant-a/consentStates/${consentStateDocumentId}`
+        )
+      )
+    );
   });
 
   test('ingest receipts and idempotency records deny client reads and writes', async () => {

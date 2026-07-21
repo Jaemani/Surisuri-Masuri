@@ -6,14 +6,16 @@ ID `demo-mobility-reliability`.
 
 ## Boundary
 
-- An active document at `/tenants/{tenantId}/members/{uid}` establishes tenant
+- An active document at `/tenants/{tenantId}/memberships/{uid}` establishes tenant
   membership. Roles are read from that document, not trusted from client data.
 - Active tenant members may read tenant-owned product data.
-- Only `repairer`, `case_worker`, and `tenant_admin` members may create or
-  update repairs and inspections.
-- Tenant and membership documents, ingest receipts, device-state projections,
-  reports, and devices are written by trusted server code only. Firebase Admin
-  SDK calls bypass Firestore client rules.
+- Stage 1 clients cannot directly create, update, or delete domain documents,
+  including repairs and inspections. Mutations go through authenticated backend
+  commands.
+- Tenant and membership documents, app installations, current consent states,
+  ingest receipts, device-state projections, reports, and devices are written
+  by trusted server code only. Firebase Admin SDK calls bypass Firestore client
+  rules.
 - Cloud Storage denies every client read and write. Raw telemetry is written by
   the Cloud Run service account through trusted server credentials; bucket IAM
   remains a deployment responsibility.

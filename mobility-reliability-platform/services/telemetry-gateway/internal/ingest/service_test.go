@@ -137,6 +137,23 @@ func TestServiceRejectsUnauthorizedBatchScopeBeforeStorage(t *testing.T) {
 	}
 }
 
+func TestCapturedAtBoundsUsesTimeOrderInsteadOfSampleOrder(t *testing.T) {
+	batch, _ := validBatch(t)
+	original := batch.Samples[0]
+	middle := original
+	middle.CapturedAt = "2026-07-21T08:20:00Z"
+	first := original
+	first.CapturedAt = "2026-07-21T08:10:00Z"
+	batch.Samples = []telemetry.Sample{original, middle, first}
+
+	gotFirst, gotLast := capturedAtBounds(batch)
+	wantFirst := time.Date(2026, time.July, 21, 8, 10, 0, 0, time.UTC)
+	wantLast := time.Date(2026, time.July, 21, 8, 29, 50, 0, time.UTC)
+	if !gotFirst.Equal(wantFirst) || !gotLast.Equal(wantLast) {
+		t.Fatalf("capturedAtBounds() = %s, %s", gotFirst, gotLast)
+	}
+}
+
 func TestServiceRejectsClientBatchReuseAcrossInstallations(t *testing.T) {
 	batch, raw := validBatch(t)
 	receipts := newMemoryReceiptStore()

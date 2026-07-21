@@ -27,8 +27,9 @@ type Principal struct {
 	AppID       string
 }
 
-// BatchScope contains only identifiers needed for a server-side authorization
-// decision. Coordinates and other telemetry values are deliberately excluded.
+// BatchScope contains only identifiers and sample time bounds needed for a
+// server-side authorization decision. Coordinates and all other telemetry
+// values are deliberately excluded.
 type BatchScope struct {
 	TenantID          string
 	DeviceID          string
@@ -36,6 +37,8 @@ type BatchScope struct {
 	ClientSessionID   string
 	InstallationID    string
 	ConsentRevisionID string
+	FirstCapturedAt   time.Time
+	LastCapturedAt    time.Time
 }
 
 type BatchAuthorizer interface {
@@ -149,6 +152,7 @@ func (s *Service) Ingest(
 	if principal.FirebaseUID == "" || principal.AppID == "" {
 		return Result{}, ErrInvalidPrincipal
 	}
+	firstCapturedAt, lastCapturedAt := capturedAtBounds(batch)
 	if err := s.authorizer.Authorize(ctx, principal, BatchScope{
 		TenantID:          batch.TenantID,
 		DeviceID:          batch.DeviceID,
@@ -156,6 +160,8 @@ func (s *Service) Ingest(
 		ClientSessionID:   batch.ClientSessionID,
 		InstallationID:    batch.InstallationID,
 		ConsentRevisionID: batch.ConsentRevisionID,
+		FirstCapturedAt:   firstCapturedAt,
+		LastCapturedAt:    lastCapturedAt,
 	}); err != nil {
 		if errors.Is(err, ErrBatchUnauthorized) {
 			return Result{}, ErrBatchUnauthorized
@@ -247,6 +253,21 @@ func (s *Service) Ingest(
 		return Result{}, fmt.Errorf("complete receipt: %w", err)
 	}
 	return Result{Receipt: receipt, Replay: status == ReservationReplayPending}, nil
+}
+
+func capturedAtBounds(batch telemetry.Batch) (time.Time, time.Time) {
+	first, _ := time.Parse(time.RFC3339, batch.Samples[0].CapturedAt)
+	last := first
+	for i := 1; i < len(batch.Samples); i++ {
+		capturedAt, _ := time.Parse(time.RFC3339, batch.Samples[i].CapturedAt)
+		if capturedAt.Before(first) {
+			first = capturedAt
+		}
+		if capturedAt.After(last) {
+			last = capturedAt
+		}
+	}
+	return first, last
 }
 
 func deriveReservationKey(batch telemetry.Batch) string {

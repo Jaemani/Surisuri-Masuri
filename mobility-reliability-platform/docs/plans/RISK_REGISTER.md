@@ -42,6 +42,7 @@
 | RSK-24 | 계획 보고가 실제 성과처럼 오해됨 | high/medium | 증거 없는 완료 문장, 참석 정보 자동 생성 | fixed plan/actual 분리, EVD link, human review | 근거 없는 공식 제출 | active |
 | RSK-25 | 공개 발표에서 개인정보·기관정보 노출 | critical/medium | screenshot/영상/지도 scan 검출 | synthetic demo, masking, artifact review, access controls | 공개 artifact privacy review 실패 | watch |
 | RSK-26 | 복지관과 수리소 간 권한을 tenant membership으로 잘못 단순화 | critical/medium | 수리사를 타 기관 member로 중복 등록하거나 QR만으로 상세 이력 접근 | server-only dataAccessGrant, purpose·대상·만료·철회·audit, backend command only | active grant 없는 cross-org 조회·write 성공 | active |
+| RSK-27 | active membership만으로 tenant 내 타인의 민감 domain projection을 client가 직접 조회 | critical/high | beneficiary가 다른 사람의 trip·동의·배정·alert read 성공 | tenant active 확인, owner/role별 get/list matrix 또는 purpose-limited backend DTO, Emulator regression | client read matrix와 query constraint 미확정 | active |
 
 ## 3. 즉시 관리할 상위 위험
 

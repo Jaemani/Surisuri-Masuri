@@ -20,14 +20,16 @@
 - Firebase UID·App ID principal 분리와 App ID allowlist
 - invalid `401`, unlisted app `403`, verifier provider failure `503` 오류 계약
 - production SDK factory의 emulator 환경변수 fail-closed 검사
+- tenant·beneficiary membership·app installation·server trip·exact 기기 배정·현재 정밀위치 동의를 교차 검사하는 pure policy
+- 좌표/body 없이 bounded exact path만 읽는 Firestore authorization snapshot adapter
+- pseudonymous current-consent state ID와 sample 최소·최대 시각 검사
 
 아직 구현하지 않은 production adapter:
 
-- tenant membership 및 기기·세션·동의 authorizer
-- Firestore receipt store
+- authorization read와 3-way idempotency/receipt create를 결합한 Firestore transaction
 - Cloud Storage object store와 lifecycle
 
-verifier를 포함한 production adapter가 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
+verifier와 read-only authorizer가 아직 `cmd/server`에 주입되지 않았고 원자적 receipt·Storage adapter도 없어 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
 
 ## WSL2에서 검사
 
