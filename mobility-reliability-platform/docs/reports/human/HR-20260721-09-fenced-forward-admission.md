@@ -17,7 +17,7 @@ audience: project team and technical reviewer
 ## 한눈에 보기
 
 - 이번 회차의 사전 목적: 동일한 `reserved` receipt를 여러 request가 동시에 처리하지 못하게 하고, lease takeover 뒤 stale worker가 Firestore 상태를 변경하지 못하게 한다.
-- 보고 기준일의 실제 상태: ADR-0017 실행계획의 R1 immutable reservation input, R2 lease/fence domain contract와 R3 중 최초 lease·active replay·expired takeover·fenced finalizer forward path가 local worktree에 구현됐다.
+- 보고 기준일의 실제 상태: ADR-0017 실행계획의 R1 immutable reservation input, R2 lease/fence domain contract와 R3 중 최초 lease·active replay·expired takeover·fenced finalizer forward path가 `main`에 반영되고 local·clean CI 검증을 통과했다.
 - 가장 중요한 차이 또는 위험: `RenewLease`, 별도 `ClaimRecoveryLease`, attempt ledger, generation-pinned classifier/reconciler, bounded sweeper와 cleanup transition은 아직 없다. executable startup에도 연결하지 않아 readiness와 ingest는 계속 `503`이어야 한다.
 - 사람에게 필요한 결정·확인: 이번 local evidence와 clean CI를 확인한 뒤 R4 HTTP status/retry 계약과 R3 잔여 primitive 중 무엇을 다음 구현 단위로 고정할지 검토해야 한다.
 
@@ -60,7 +60,7 @@ audience: project team and technical reviewer
 | 실제 주장 | 증거 ID·링크 | 검증 상태 | 확인자·확인일 |
 | --- | --- | --- | --- |
 | lease·fencing·cleanup의 전체 목표와 불변조건이 결정됨 | [ADR-0017](../../decisions/ADR-0017-fenced-ingest-recovery.md) | `accepted` decision; 구현 증거 아님 | 문서 검토 필요 |
-| R1/R2와 R3 forward path가 local worktree와 test에서 관찰됨 | [EVD-20260721-017](../../evidence/2026-07.md) | `generated` — 최신 전체 local gate와 clean CI 확인 전 | 사람 검토 필요 |
+| R1/R2와 R3 forward path가 local test와 clean CI에서 관찰됨 | [EVD-20260721-017](../../evidence/2026-07.md) | `verified` — local/clean CI 범위, staging 아님 | 사람 검토 필요 |
 | recovery 전체 R1~R9가 구현되고 staging에서 동작함 | 확인 필요 — 현재 해당하지 않음 | `미검증` | 해당 없음 |
 | executable이 인증된 production telemetry를 처리함 | 확인 필요 — 현재 활성화하지 않음 | `미검증` | 해당 없음 |
 
@@ -95,5 +95,5 @@ audience: project team and technical reviewer
 - [x] local test 실패를 사용자 영향 인시던트로 기록하지 않았다.
 - [x] 참석자·사진·지출을 생성하거나 추정하지 않았다.
 - [x] 민감정보와 원본 GPS 좌표가 없다.
-- [ ] EVD-20260721-017의 최신 전체 local gate와 clean CI 결과를 확인했다.
+- [x] EVD-20260721-017의 최신 전체 local gate와 clean CI 결과를 확인했다.
 - [ ] reviewer와 발행일을 사람이 확정했다.
