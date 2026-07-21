@@ -12,9 +12,10 @@
 6. [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md) — 테스트 수준, KPI, 실기기·현장 증거 규칙
 7. [Telemetry 복구 실행계획](./plans/TELEMETRY_RECOVERY_PLAN.md) — lease, fencing, sweeper, generation-pinned recovery
 8. [정기보고·회의 운영계획](./plans/REPORTING_AND_MEETING_PLAN.md) — 월 2회, 총 16회 계획 보고와 실제 기록 방법
-9. [데이터·ML·AI 실행계획](./plans/DATA_ML_AI_PLAN.md) — 데이터 계보, 두 모델, 근거형 보고서 에이전트
-10. [릴리스·파일럿·최종 데모 계획](./plans/RELEASE_PILOT_DEMO_PLAN.md) — 환경 승격, 현장 도입, 발표·포트폴리오 증거
-11. [위험 등록부](./plans/RISK_REGISTER.md) — 현재 위험, 탐지 신호, 대응과 차단 조건
+9. [리포트 운영 인덱스](./reports/README.md) — fixed 사전작성본과 human 요청 리포트의 상태·발행 경계
+10. [데이터·ML·AI 실행계획](./plans/DATA_ML_AI_PLAN.md) — 데이터 계보, 두 모델, 근거형 보고서 에이전트
+11. [릴리스·파일럿·최종 데모 계획](./plans/RELEASE_PILOT_DEMO_PLAN.md) — 환경 승격, 현장 도입, 발표·포트폴리오 증거
+12. [위험 등록부](./plans/RISK_REGISTER.md) — 현재 위험, 탐지 신호, 대응과 차단 조건
 
 ## 2. 질문별 기준 문서
 
@@ -28,7 +29,7 @@
 | 데이터 구조와 이관 기준은 무엇인가 | [Target Domain Model](./data/TARGET_DOMAIN_MODEL.md) | [Legacy Inventory](./data/LEGACY_DATA_INVENTORY.md), [Migration Gates](./data/MIGRATION_GATES.md) |
 | ML·AI가 무엇을 판단하고 무엇을 하지 않는가 | [데이터·ML·AI 계획](./plans/DATA_ML_AI_PLAN.md) | [ADR-0006](./decisions/ADR-0006-model-and-llm-responsibility.md) |
 | 어떤 결과를 완료로 인정하는가 | [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md) | [증거 인덱스](./evidence/README.md) |
-| 정기보고와 회의록을 어떻게 작성하는가 | [보고·회의 계획](./plans/REPORTING_AND_MEETING_PLAN.md) | [문서 운영 정책](./DOCUMENTATION_POLICY.md) |
+| 정기보고와 회의록을 어떻게 작성하는가 | [보고·회의 계획](./plans/REPORTING_AND_MEETING_PLAN.md) | [리포트 운영 인덱스](./reports/README.md), [문서 운영 정책](./DOCUMENTATION_POLICY.md) |
 | 실제 제품에서 무엇이 바뀌었는가 | [제품 업데이트](./product-updates/README.md) | [월별 증거](./evidence/2026-07.md) |
 | 심각한 장애가 있었는가 | [인시던트 정책](./incidents/README.md) | 해당 `INC-*` 문서 |
 | WSL과 실기기에서 어떻게 실행하는가 | [WSL Runbook](./development/WSL_RUNBOOK.md) | 앱·서비스별 README |

@@ -13,6 +13,10 @@
 - `DoesNotExist`, exact generation read, SHA-256·CRC32C·size 검증을 사용하는 Cloud Storage adapter
 - raw·manifest의 path/hash/checksum/size/generation 전체를 고정하는 Firestore receipt finalizer
 - raw 충돌만 terminal rejection으로, manifest 충돌은 복구 가능한 reserved 상태로 유지하는 단계별 오류 계약
+- reserved receipt의 최초 lease, active replay 차단, 만료 takeover와 단조 증가 fencing token
+- current fence를 요구하는 `MarkStored`·`MarkRejected`와 safe lease release
+- request lease 갱신, sweeper 전용 recovery claim, recovery attempt `started` 원장과 reserved-origin cleanup transition
+- replay authorization의 receipt read-time coherence와 deadline·clock skew·revision overflow fail-closed 검사
 - Cloud Run용 timeout·graceful shutdown·non-root distroless image
 
 구현됐지만 executable에 아직 연결하지 않은 adapter 기반:
@@ -31,10 +35,12 @@
 
 아직 구현하지 않은 production 운영 경계:
 
-- reserved receipt lease·fencing·sweeper와 orphan reconciliation
-- staging bucket IAM·lifecycle·retention·generation-pinned 삭제 drill
+- generation-pinned read-only artifact classifier와 Storage version inventory adapter
+- classifier 결과를 소비하는 forward reconciler, attempt completion/failure와 bounded sweeper runtime
+- cleanup lease·target, generation-pinned delete, nested ledger purge와 accepted deletion auditor
+- staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 
-verifier, authorization/admission transaction과 artifact store가 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. Firestore transaction은 local Emulator에서, Storage generation/replay는 official testbench에서 검증했지만 ADC/IAM·staging lifecycle 증거는 아닙니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
+verifier, authorization/admission transaction, artifact store와 recovery control plane이 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. Firestore transaction은 local Emulator에서, Storage generation/replay는 official testbench에서 검증했지만 ADC/IAM·staging lifecycle 증거는 아닙니다. lease claim은 artifact read 권한이 아니며 current authorization과 classifier가 연결되기 전에는 worker나 scheduler를 활성화하지 않습니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
 
 ## WSL2에서 검사
 
