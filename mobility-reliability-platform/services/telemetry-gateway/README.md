@@ -45,7 +45,7 @@
 - cleanup lease·target, generation-pinned delete, nested ledger purge와 accepted deletion auditor
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 
-verifier, authorization/admission transaction, artifact store, artifact inventory reader와 recovery control plane이 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. Firestore transaction은 local Emulator에서, write-side Storage generation/replay는 official testbench에서 검증했지만 ADC/IAM·staging lifecycle 증거는 아닙니다. 새 read-side inventory reader는 WSL2 Docker의 fake backend·local synthetic test만 통과했으며 official Storage testbench·staging·runtime은 미검증입니다. lease claim은 artifact read 권한이 아니며 current authorization과 classifier가 연결되기 전에는 worker나 scheduler를 활성화하지 않습니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
+verifier, authorization/admission transaction, artifact store, artifact inventory reader와 recovery control plane이 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. Firestore transaction은 local Emulator에서, write-side Storage generation/replay는 official testbench에서 검증했지만 ADC/IAM·staging lifecycle 증거는 아닙니다. 새 read-side inventory reader는 WSL2 Docker fake backend와 clean runner synthetic test만 통과했으며 read-side official Storage testbench·staging·runtime은 미검증입니다. lease claim은 artifact read 권한이 아니며 current authorization과 classifier가 연결되기 전에는 worker나 scheduler를 활성화하지 않습니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
 
 ## WSL2에서 검사
 

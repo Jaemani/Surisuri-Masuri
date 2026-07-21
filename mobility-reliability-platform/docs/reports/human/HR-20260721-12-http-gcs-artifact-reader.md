@@ -17,9 +17,9 @@ audience: project team and technical reviewer
 ## 한눈에 보기
 
 - 이번 회차의 사전 목적: ADR-0018의 provider-neutral read port를 HTTP Cloud Storage adapter로 구현하고, exact path의 모든 일반·soft-deleted generation을 bounded inventory로 관찰한 뒤 exact generation만 읽는 경계를 만든다.
-- 보고 기준일의 실제 상태: 현재 worktree에서 HTTP-only factory, 분리된 `Versions`/`SoftDeleted` query, exact structural validation, generation+metageneration precondition, bounded raw/manifest read와 typed provider error가 구현됐다. WSL2 Docker의 local synthetic 전체 Go gate는 통과했다.
-- 가장 중요한 차이 또는 위험: evidence와 구현 commit은 pending이다. fake backend가 query·error 계약을 검증했지만 official Storage testbench, staging bucket과 Cloud Run runtime에서는 확인하지 않았다.
-- 사람에게 필요한 결정·확인: 구현 diff와 EVD-020을 검토하고 commit·clean CI 이후 official HTTP Storage integration 증분으로 진행할지 확정한다.
+- 보고 기준일의 실제 상태: HTTP-only factory, 분리된 `Versions`/`SoftDeleted` query, exact structural validation, generation+metageneration precondition, bounded raw/manifest read와 typed provider error가 `main`에 구현됐다. WSL2 Docker의 local synthetic 전체 Go gate와 GitHub clean CI를 통과했다.
+- 가장 중요한 차이 또는 위험: fake backend가 query·error 계약을 검증했지만 read-side official Storage testbench, staging bucket과 Cloud Run runtime에서는 확인하지 않았다. clean CI의 Storage 단계는 기존 write-side test만 실행했다.
+- 사람에게 필요한 결정·확인: EVD-020의 범위를 검토하고 official HTTP Storage integration 증분으로 진행할지 확정한다.
 
 ## 1. 계획
 
@@ -43,14 +43,14 @@ audience: project team and technical reviewer
 | bounded observation | `local 통과` | inventory `limit+1`, read `maxBytes+1`, overflow 시 truncated 또는 typed limit error | 대형 실제 object·pagination 비용 | WSL2 Docker / synthetic |
 | exact read | `local 구현` | generation과 metageneration 조건, manifest uncompressed/raw compressed flag 분리 | official HTTP compressed byte parity | WSL2 Docker / fake backend |
 | error boundary | `local 통과` | direct 404와 list 404 분리, permission/quota/timeout/cancel/unavailable/precondition typed mapping | 실제 provider별 응답 matrix | WSL2 Docker / synthetic |
-| 전체 Go gate | `local 통과` | gofmt, module tidy/verify, vet, race test, server build exit 0 | commit·clean CI | WSL2 Docker / Go 1.26.5 |
+| 전체 Go gate | `local·clean CI 통과` | gofmt, module tidy/verify, vet, race test, server build와 container fail-closed smoke 통과 | read-side official testbench | WSL2 Docker + GitHub runner |
 | classifier/runtime | `미구현·미연결` | reader는 provider-neutral port만 구현 | grant authorizer, validator, classification, worker wiring | 해당 없음 |
 
 ## 3. 근거
 
 | 실제 주장 | 증거 ID·링크 | 검증 상태 | 환경·확인 |
 | --- | --- | --- | --- |
-| exact version inventory와 bounded reader adapter가 현재 worktree에 존재함 | [EVD-20260721-020](../../evidence/2026-07.md#evd-20260721-020--http-only-gcs-generation-inventory-reader) | `generated` | WSL2 Docker local synthetic / commit pending |
+| exact version inventory와 bounded reader adapter가 `main`에서 local·clean CI gate를 통과함 | [EVD-20260721-020](../../evidence/2026-07.md#evd-20260721-020--http-only-gcs-generation-inventory-reader) | `verified` | WSL2 Docker local synthetic + GitHub runner |
 | request/grant와 strict manifest decoder 선행 계약 | [EVD-20260721-019](../../evidence/2026-07.md#evd-20260721-019--read-only-artifact-classification-계약과-strict-manifest-decoder) | `verified` | local + clean CI |
 | reader가 따라야 할 권한·transport·분류 경계 | [ADR-0018](../../decisions/ADR-0018-generation-pinned-read-only-classifier.md) | `accepted` | 설계 결정 |
 
@@ -80,12 +80,12 @@ ArtifactInventoryReader
 - 결정 유지: raw read는 HTTP transport의 compressed-byte flag가 필요하므로 arbitrary client/bucket injection을 production constructor에 열지 않는다.
 - 열린 위험: `SoftDeleted:true`와 version query 조합, HTTP metageneration precondition과 raw compressed byte는 official testbench에서 별도 확인해야 한다.
 - 열린 위험: reader capability 자체는 authorization이 아니다. trusted authorizer와 classifier composition 전에는 scheduler나 worker에 주입할 수 없다.
-- 열린 위험: EVD-020은 현재 commit이 없는 generated evidence이므로 외부 발행이나 완료 주장에 사용할 수 없다.
+- 열린 위험: EVD-020은 local synthetic·clean CI 증거이며 actual read-side provider·IAM·lifecycle 완료 주장에 사용할 수 없다.
 
 ## 6. 다음 작업
 
-1. 사람 검토 후 구현·문서 commit을 고정하고 clean CI를 확인한다.
-2. pinned official Storage testbench에서 일반/noncurrent/soft-deleted generation inventory와 exact read precondition을 검증한다.
+1. pinned official Storage testbench에서 exact raw/manifest read와 metageneration precondition을 검증한다.
+2. testbench가 지원하지 않는 version/soft-delete 의미는 staging bucket에서 별도 검증한다.
 3. manifest-first cross-lineage validator와 raw compressed digest·bounded decompression·strict payload registry를 구현한다.
 4. current system authorization grant와 classifier composition을 구현하되 runtime readiness는 계속 닫아 둔다.
 
@@ -103,5 +103,5 @@ ArtifactInventoryReader
 - [x] official testbench·staging·runtime 미검증을 명시했다.
 - [x] 참석자·사진·지출·사용자 수를 생성하지 않았다.
 - [x] Product Update 또는 Incident를 만들지 않았다.
-- [ ] 구현 commit과 clean CI를 연결한다.
+- [x] 구현 commit과 clean CI를 연결했다.
 - [ ] reviewer와 `issued_at`을 사람이 확정한다.
