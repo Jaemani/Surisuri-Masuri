@@ -24,7 +24,7 @@
 | 무엇을 만들고 무엇을 만들지 않는가 | [프로젝트 헌장](./PROJECT_CHARTER.md) | [로드맵](./ROADMAP.md) |
 | 5~12월에 언제 무엇을 판단하는가 | [마스터 실행계획](./plans/MASTER_EXECUTION_PLAN.md) | [정기리포트 16개](./reports/fixed/README.md) |
 | Firebase, Go, domain command와 worker의 책임은 무엇인가 | [시스템 아키텍처](./architecture/SYSTEM_ARCHITECTURE.md) | [ADR-0007](./decisions/ADR-0007-firebase-first-hybrid.md), [ADR-0011](./decisions/ADR-0011-domain-command-worker-boundaries.md) |
-| pending receipt를 누가 어떻게 복구하는가 | [Telemetry 복구 실행계획](./plans/TELEMETRY_RECOVERY_PLAN.md) | [ADR-0017](./decisions/ADR-0017-fenced-ingest-recovery.md), [forward path 리포트](./reports/human/HR-20260721-09-fenced-forward-admission.md), [claim·cleanup transition 리포트](./reports/human/HR-20260721-10-recovery-claims-cleanup-transition.md), [ADR-0016](./decisions/ADR-0016-immutable-telemetry-artifact-lineage.md) |
+| pending receipt를 누가 어떻게 복구하는가 | [Telemetry 복구 실행계획](./plans/TELEMETRY_RECOVERY_PLAN.md) | [ADR-0017](./decisions/ADR-0017-fenced-ingest-recovery.md), [ADR-0018](./decisions/ADR-0018-generation-pinned-read-only-classifier.md), [forward path 리포트](./reports/human/HR-20260721-09-fenced-forward-admission.md), [claim·cleanup transition 리포트](./reports/human/HR-20260721-10-recovery-claims-cleanup-transition.md), [ADR-0016](./decisions/ADR-0016-immutable-telemetry-artifact-lineage.md) |
 | 데이터 구조와 이관 기준은 무엇인가 | [Target Domain Model](./data/TARGET_DOMAIN_MODEL.md) | [Legacy Inventory](./data/LEGACY_DATA_INVENTORY.md), [Migration Gates](./data/MIGRATION_GATES.md) |
 | ML·AI가 무엇을 판단하고 무엇을 하지 않는가 | [데이터·ML·AI 계획](./plans/DATA_ML_AI_PLAN.md) | [ADR-0006](./decisions/ADR-0006-model-and-llm-responsibility.md) |
 | 어떤 결과를 완료로 인정하는가 | [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md) | [증거 인덱스](./evidence/README.md) |

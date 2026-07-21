@@ -23,11 +23,14 @@
 3. 두 uniqueness index와 receipt의 3-way linkage·revision·state·deadline을 확인한다.
 4. active lease가 있으면 owner를 추정해 빼앗지 않고 expiry와 heartbeat를 확인한다.
 5. recovery claim transaction이 반환한 owner/fence가 없으면 Storage 작업을 하지 않는다.
-6. manifest가 있으면 manifest generation을 먼저 pin하고 내부 raw generation을 따른다.
-7. manifest가 없을 때만 raw path의 candidate를 발견 즉시 generation으로 고정한다.
-8. permission, quota, timeout, malformed attrs를 NotFound로 기록하지 않는다.
-9. 분류 결과와 허용 action을 recovery attempt에 남긴다.
-10. hold·data-loss 후보는 자동 retry/delete를 중지하고 사람 검토로 escalation한다.
+6. claim을 artifact permission으로 사용하지 않는다. pending forward recovery는 current tenant·installation·trip·assignment·precise-location consent의 system authorization과 grant/fence binding이 성공해야 하며, 그 전에는 Storage call을 만들지 않는다.
+7. manifest exact path의 version-aware inventory를 먼저 읽는다. candidate가 복수면 bytes를 비교해 권위 generation을 고르지 않는다.
+8. manifest candidate가 유일하면 exact generation을 pin하고 내부 raw exact generation만 따른다.
+9. manifest candidate가 없을 때만 raw path의 version-aware inventory를 읽고 유일 candidate를 고정한다.
+10. permission, quota, timeout, malformed provider response를 NotFound로 기록하지 않는다. inventory 뒤 exact generation이 사라진 경우도 no-artifact가 아니라 drift다.
+11. read 전후 exact attrs·metageneration을 비교하고 strict manifest/raw validation을 수행한다.
+12. R5는 분류 결과를 반환하기만 한다. 이후 R6/R7 orchestration caller가 현재 fence를 다시 확인하고 허용 action과 attempt completion을 기록하며, classifier 자체는 recovery attempt를 수정하지 않는다.
+13. hold·data-loss 후보는 자동 retry/delete를 중지하고 사람 검토로 escalation한다.
 
 ## 4. 분류별 운영 판단
 
@@ -37,7 +40,7 @@
 | valid raw-only | payload/receipt 재검증, manifest 생성, fenced finalizer | 새 manifest 금지, raw exact target만 계획 | deadline 근접 |
 | valid complete | cross-lineage 후 fenced finalizer | raw→manifest exact target 계획 | finalizer 반복 실패 |
 | manifest-only | write 0, hold | verified manifest exact target만 별도 승인 | 즉시 integrity review |
-| raw content conflict | exact bytes·recompression·body hash 증거 후 fenced reject | 소유 불명 object 자동삭제 금지 | security/integrity review |
+| raw content conflict | exact bytes 자체 digest·decompressed body hash·strict lineage 위반 증거 후 fenced reject; recompression mismatch 단독 reject 금지 | 소유 불명 object 자동삭제 금지 | security/integrity review |
 | metadata conflict | reject 금지, hold | delete 금지 | provider/IAM review |
 | generation drift | 재조회로 latest 선택 금지, hold | delete 금지 | versioning/lifecycle review |
 | stored-missing, artifact expiry 전 | downstream 차단, finding | 자동삭제 금지 | high severity integrity alert |
@@ -92,6 +95,8 @@ planned
 - eligibility 뒤 purge job은 receipt 하위 attempt와 linked cleanup target·integrity finding을 bounded cursor로 먼저 삭제한다. 세 집합이 empty임을 증명한 뒤에만 마지막 transaction으로 두 index와 receipt를 함께 삭제한다. Firestore parent delete가 subcollection을 지운다고 가정하지 않는다.
 
 ## 8. Local/CI 검증 체크리스트
+
+R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0018-generation-pinned-read-only-classifier.md)을 따른다. 아래 목록은 이후 reconciler·cleanup까지 포함한 전체 recovery checklist이며 R5 하나의 완료 조건으로 해석하지 않는다.
 
 - [ ] fake clock으로 lease exact-expiry boundary 재현
 - [ ] 두 request/sweeper의 concurrent claim winner 1명

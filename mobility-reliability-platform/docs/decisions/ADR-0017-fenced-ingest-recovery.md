@@ -168,7 +168,7 @@ raw/manifest 존재 여부와 검증 결과에 따른 행동은 다음과 같다
 | `reservation_deadline`이 지난 receipt | fenced transaction으로 `cleanup_pending` 전환 후 late-write quiet period 시작 | manifest 생성, `stored` 승격, 즉시 삭제 |
 
 - raw exact 검증은 gzip bytes SHA-256·CRC32C·size뿐 아니라 decompressed body hash, strict telemetry schema, tenant/device/trip/installation/consent/client batch, sample count와 captured bounds까지 확인한다.
-- sweeper가 terminal raw content conflict로 분류하려면 exact generation 전체 compressed bytes, deterministic recompression과 decompressed body hash까지 확인해야 한다. Content-Type, Cache-Control, custom metadata 또는 metageneration만 다른 경우에는 reject하지 않는다.
+- sweeper가 terminal raw content conflict로 분류하려면 exact generation 전체 compressed bytes의 자체 digest, decompressed body hash와 strict payload lineage 위반을 확인해야 한다. deterministic recompression은 [ADR-0018](./ADR-0018-generation-pinned-read-only-classifier.md)의 pinned codec profile이 유효할 때 provenance 보조 검사로만 사용하며, recompression mismatch 하나만으로 reject하지 않는다. Content-Type, Cache-Control, custom metadata 또는 metageneration만 다른 경우에도 reject하지 않는다.
 - manifest exact 검증은 raw generation·hash·CRC·size와 receipt expected lineage를 교차 확인한다.
 - recovery runtime은 `validator_version`으로 strict decoder, validator와 canonical manifest builder를 선택하는 explicit registry를 가진다. 어떤 version도 그 version을 참조하는 reservation의 deadline·cleanup이 끝나기 전에 제거하지 않는다. unknown/retired version은 current validator로 대체하지 않고 `recovery_hold(validator_unavailable)`로 보낸다.
 - receipt가 없는 bucket object는 이 receipt-driven sweeper가 자동 삭제하지 않는다. Storage Inventory/prefix audit로 별도 발견하고 manual hold 후 처리한다.
