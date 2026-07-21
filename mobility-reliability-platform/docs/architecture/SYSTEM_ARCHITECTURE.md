@@ -8,22 +8,26 @@
 
 ```text
 [Mobile App]
-  React Native UI
-  Native location lifecycle
-  SQLite event outbox
-  ONNX quality inference
-          │ versioned batch + idempotency key
-          ▼
-[Firebase / GCP Boundary]
-  Firebase Auth + App Check
-  Go Cloud Run schema / tenant / idempotency validation
+  React Native UI / Native location lifecycle
+  SQLite event outbox / ONNX quality inference
           │
-          ├──> Cloud Storage: compressed raw GPS batches + lifecycle
-          └──> Firestore: receipt / metadata / current projection
-                         │
-                         ├── projector ──> device/part current state
-                         ├── feature job ─> Storage or optional BigQuery
-                         └── fact job ───> evidence-backed facts
+          ├── domain command ──> [Domain Command API]
+          │                       session/trip, repair, inspection, consent
+          │
+          └── versioned batch ─> [Go Telemetry Gateway]
+                                  server-derived idempotency / receipt
+                     │
+[Firebase / GCP Boundary]
+  Firebase Auth + App Check + membership authorization
+                     │
+                     ├──> Cloud Storage: compressed raw GPS batches + lifecycle
+                     └──> Firestore: domain event / receipt / metadata
+                                      │
+                                      └──> [Async Workers]
+                                           projector / importer / feature / fact / report
+                                           │
+                                           ├──> current device/part state
+                                           └──> Storage or optional BigQuery
                     │
           ┌─────────┴─────────┐
           ▼                   ▼
@@ -50,10 +54,24 @@
 
 - 비즈니스 CRUD를 모두 담당하는 범용 백엔드가 아니다.
 - 모바일 텔레메트리의 인증, 계약 검증, 멱등성, receipt만 책임진다.
-- Firebase ID token과 App Check를 확인한 뒤 tenant membership을 서버에서 결정한다.
-- 동일한 `tenant_id + idempotency_key`는 동일한 결과를 반환한다.
+- Firebase ID token과 App Check를 확인한 뒤 request의 `tenantId` 후보 scope를 active membership, 기기 배정, trip, installation, consent로 authorize한다.
+- `schemaVersion`, `tenantId`, `installationId`, `clientBatchId`로 서버가 파생한 같은 key와 동일 body는 기존 receipt를 반환한다.
 - 수집 시각과 기기 발생 시각을 분리한다.
 - raw sample은 Firestore 개별 문서가 아니라 압축 Storage object로 저장한다.
+
+### Domain Command API
+
+- telemetry gateway와 분리된 control-plane API다.
+- 인증된 session-start/stop을 통해 server UUIDv7 `tripId`를 발급하고 offline `clientSessionId`와 연결한다.
+- 수리·점검·부품 교체·동의 revision·제한된 본인정보 조회 command를 처리한다.
+- ID token, App Check, membership, role, 사람·기기 관계, 목적을 검사하고 immutable domain event를 생성한다.
+- 초기 배포 후보는 Firebase Functions v2 callable/HTTPS이며 구현 전 별도 ADR에서 runtime과 공통 authorization policy 공유 방식을 확정한다.
+
+### Async Workers
+
+- Cloud Tasks/Pub/Sub의 at-least-once 전달을 전제로 projection, importer, feature, fact, report job을 처리한다.
+- worker는 idempotency, checkpoint, DLQ, replay mode를 가지며 replay 중 FCM·외부 호출을 실행하지 않는다.
+- worker/runtime version, service account, trigger, retry, rollback을 독립 배포 단위로 기록한다.
 
 ### Data Platform
 

@@ -6,7 +6,7 @@
 
 이 저장소는 기존 `soo-ri`, `soo-ri-admin`, `power_assist_device_helper_backend`를 포크하거나 연장하지 않습니다. 기존 자산은 요구사항, DB 형식, 수리 도메인을 이해하기 위한 참고 자료와 승인된 데이터 이관 원천으로만 사용합니다.
 
-과거 프로젝트 archive: [`techforimpact-archive/TFI_CAMPUS_25Spring_Soori-soori`](https://github.com/techforimpact-archive/TFI_CAMPUS_25Spring_Soori-soori). 신규 구현은 이 archive에 런타임 의존하지 않으며, 상표·UI·코드는 재사용하지 않습니다.
+과거 프로젝트 참조 경로: [`techforimpact-archive/TFI_CAMPUS_25Spring_Soori-soori`](https://github.com/techforimpact-archive/TFI_CAMPUS_25Spring_Soori-soori). 신규 구현은 이 archive에 런타임 의존하지 않으며, 상표·UI·코드는 재사용하지 않습니다. 저장소 접근 가능 여부와 권한은 별도로 확인합니다.
 
 ## 프로젝트 기간
 
@@ -69,4 +69,4 @@ docs/
 4. 모델 성능보다 재현 가능한 평가와 불확실성 공개
 5. 발표 가능한 시각 결과와 실제 운영 증거의 동시 확보
 
-상세 범위는 [프로젝트 헌장](docs/PROJECT_CHARTER.md), 월별 게이트는 [8개월 로드맵](docs/ROADMAP.md), 시스템 경계는 [아키텍처](docs/architecture/SYSTEM_ARCHITECTURE.md)를 확인합니다.
+전체 기준 문서와 읽는 순서는 [문서 인덱스](docs/INDEX.md)에서 확인합니다. 상세 범위는 [프로젝트 헌장](docs/PROJECT_CHARTER.md), 월별 게이트는 [8개월 로드맵](docs/ROADMAP.md), 시스템 경계는 [아키텍처](docs/architecture/SYSTEM_ARCHITECTURE.md)를 따릅니다.

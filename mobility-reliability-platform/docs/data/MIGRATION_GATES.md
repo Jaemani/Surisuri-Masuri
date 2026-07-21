@@ -194,10 +194,11 @@ source_snapshot_hash, mapping_version, reviewed_by?, reviewed_at?
 1. 모바일은 SQLite outbox에서 제한 크기 batch를 만든다.
 2. Go Cloud Run이 Firebase ID token, App Check, membership, consent를 검증한다.
 3. 서버가 payload schema, sample sequence/time/range, tenant를 검증한다.
-4. Storage에 `telemetry-batch.v2` JSON을 deterministic gzip한 `{batchId}.json.gz`를 generation precondition으로 생성한다.
-5. immutable `{batchId}.manifest.json`을 생성한다.
-6. Firestore `/ingestReceipts/{batchId}`에 path/hash/status/count만 기록한다.
-7. 비동기 projector가 `/trips/{tripId}` summary/current projection을 제한된 write로 갱신한다.
+4. Firestore transaction이 서버 파생 idempotency index, client-batch uniqueness index, UUIDv7 `batchId`의 `reserved` receipt를 함께 생성한다.
+5. Storage에 `telemetry-batch.v2` JSON을 deterministic gzip한 `{batchId}.json.gz`를 `DoesNotExist` generation precondition으로 생성한다.
+6. immutable `{batchId}.manifest.json`을 생성하고 receipt에 path/hash/generation/count를 기록해 `stored` 또는 후속 queue 상태로 전환한다.
+7. 중간 실패는 같은 reservation과 object identity로 retry/sweeper가 복구하며 새 batch/object를 만들지 않는다.
+8. 비동기 projector가 `/trips/{tripId}` summary/current projection을 제한된 write로 갱신한다.
 
 **필수 검사**
 
@@ -220,7 +221,7 @@ source_snapshot_hash, mapping_version, reviewed_by?, reviewed_at?
 
 **멱등성**
 
-- ingest key는 `sha256(payload_schema_version + U+001F + tenant_id + U+001F + installation_id + U+001F + client_batch_id)`의 lowercase hex다.
+- ingest key는 decoded request 값으로 계산한 `sha256(schemaVersion + U+001F + tenantId + U+001F + installationId + U+001F + clientBatchId)`의 lowercase hex다.
 - 수리/점검/동의 command도 `Idempotency-Key + body_hash` receipt를 가진다.
 - 같은 key/같은 body와 같은 key/다른 body를 concurrency test한다.
 
@@ -288,6 +289,8 @@ source_count = accepted_count + quarantined_count + rejected_count
 **필수 Rules test**
 
 - tenant A token으로 tenant B의 모든 control collection read/write 거절.
+- 유효한 cross-org grant가 없는 repair shop이 복지관 tenant의 기기·수리 정보를 조회·기록하는 요청 거절.
+- active membership과 목적·대상·만료가 유효한 grant를 모두 만족한 backend command만 허용하고 client direct cross-tenant write는 항상 거절.
 - 비회원, revoked/expired membership 접근 거절.
 - client의 membership/role/tenant 변경 거절.
 - `privatePeople`, receipt, prediction raw field, event, DLQ, crosswalk direct write 거절.

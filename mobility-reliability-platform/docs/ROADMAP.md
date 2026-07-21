@@ -1,5 +1,7 @@
 # 2026년 5–12월 기술 로드맵
 
+이 문서는 월별 기술 게이트의 기준선이다. 반월 단위 작업·의존성·완료 정의는 [마스터 실행계획](./plans/MASTER_EXECUTION_PLAN.md), 테스트와 성취 판단은 [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md), 월 2회 운영은 [정기보고·회의 운영계획](./plans/REPORTING_AND_MEETING_PLAN.md)을 따른다.
+
 ## 운영 방식
 
 - 매월 하나의 기술 게이트를 통과한다.
