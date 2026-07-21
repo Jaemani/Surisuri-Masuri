@@ -233,24 +233,29 @@ coarse classification과 low-cardinality reason code를 분리한다. 복수 man
 
 ### R6. Forward reconciler
 
+구체적인 protocol, capability 경계와 action matrix는 [ADR-0020](../decisions/ADR-0020-two-pass-forward-reconciliation.md)을 기준으로 한다. 이 절의 항목이 ADR-0020보다 넓거나 모호하면 ADR-0020의 fail-closed 규칙을 우선한다.
+
 전제:
 
 - 현재 fence owner
 - `now < lease_expires_at`
 - `now < reservation_deadline`
 - current system recovery authorization valid
-- classifier 결과가 `valid_raw_only` 또는 `valid_complete`
+- classifier request/result 계약이 유효하고 action matrix가 해당 결과를 명시적으로 허용함
 
 동작:
 
-- raw-only: validated raw generation을 이용해 reservation의 pinned validator version으로 canonical manifest를 생성하고 `DoesNotExist` write한다.
+- raw-only: validated raw generation을 이용해 reservation의 pinned validator version으로 canonical manifest를 생성하고 별도 opaque manifest-repair capability로 `DoesNotExist` write한다. raw create·rewrite·delete는 0이다.
 - validator registry는 current와 아직 deadline/cleanup이 끝나지 않은 prior version decoder·manifest builder를 함께 보존한다. unknown version은 current code로 fallback하지 않는다.
-- complete: raw와 manifest cross-lineage를 다시 확인한다.
-- 두 경우 모두 같은 fence로 `MarkStored`한다.
+- complete: fresh current authorization과 두 번째 full classifier pass로 raw와 manifest cross-lineage를 다시 확인한다.
+- raw-only도 manifest create 뒤 fresh current authorization과 두 번째 full classifier pass를 수행한다. 두 경우 모두 두 번째 결과가 exact `valid_complete`이고 pinned lineage가 앞선 증거와 일치한 뒤, final action 전용 opaque grant와 같은 Firestore transaction 안의 current 관계·동의 재평가까지 성공할 때만 같은 current fence로 `MarkStored`한다.
 - manifest-only, metadata conflict, generation drift는 `recovery_hold`로 보낸다.
-- no-artifact는 `awaiting_client_replay` backoff 후 release한다.
+- no-artifact는 `awaiting_client_replay` code와 bounded backoff로 release한다.
 - consent invalid는 새 artifact write 0, `recovery_hold(consent_invalid)`다. 철회 자체는 기존 artifact 자동삭제 trigger가 아니며 명시적 삭제 요청 또는 승인된 retention expiry만 cleanup을 시작한다.
 - reserved-origin 만료 전 hold는 reason과 `now <= hold_review_due_at < artifact_expires_at`을 기록하고 reserved query에서 제외한다. 이미 만료된 뒤 처음 발견된 reserved finding은 `hold_review_due_at=now`와 즉시 cleanup 필요 상태로 기록한다. review 미완료 상태로 retention expiry가 오면 `BeginHeldCleanup`을 통해 exact-generation cleanup으로 넘긴다. accepted integrity finding은 receipt를 hold/expired로 downgrade하지 않고 `deleting/deleted` workflow를, rejected artifact는 상태를 유지한 채 ownership 증명·보안 승인 workflow를 사용한다. ambiguous lineage나 provider 실패로 삭제할 수 없으면 alert를 유지하고 incident 기준으로 escalate한다.
+- receipt state를 바꾸는 stored/rejected/hold/release는 current attempt completion과 같은 Firestore transaction에 기록한다. 응답 유실 또는 과거 partial ledger는 receipt revision과 recovery correlation으로 idempotent하게 재구성한다.
+- planner는 initial/confirmation/post-manifest-confirmation phase를 입력으로 받는다. Manifest create 뒤에는 exact complete만 stored로 진행하며 raw-only 재복구, none release와 raw conflict reject로 되돌아가지 않는다. Transient provider 오류만 release하고 나머지는 hold한다.
+- cancellation·crash로 action이 없었던 started attempt는 current fence에서 bounded failed로 닫거나, 다음 claim transaction이 expired prior attempt를 `failed/lease_expired`로 닫은 뒤 새 attempt를 시작한다.
 
 ### R7. Bounded sweeper와 recovery attempt ledger
 
