@@ -81,3 +81,4 @@
 | [HR-20260721-08](./HR-20260721-08-immutable-artifact-lineage.md) | immutable artifact lineage | `draft` |
 | [HR-20260721-09](./HR-20260721-09-fenced-forward-admission.md) | fenced forward admission | `draft` |
 | [HR-20260721-10](./HR-20260721-10-recovery-claims-cleanup-transition.md) | recovery claim·cleanup transition | `draft` |
+| [HR-20260721-11](./HR-20260721-11-read-only-artifact-classifier-contract.md) | read-only artifact classifier 계약 | `draft` |

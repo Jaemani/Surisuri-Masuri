@@ -17,6 +17,8 @@
 - current fence를 요구하는 `MarkStored`·`MarkRejected`와 safe lease release
 - request lease 갱신, sweeper 전용 recovery claim, recovery attempt `started` 원장과 reserved-origin cleanup transition
 - replay authorization의 receipt read-time coherence와 deadline·clock skew·revision overflow fail-closed 검사
+- forward recovery와 accepted integrity audit를 분리하는 provider-neutral artifact classification 계약과 opaque read grant
+- duplicate key·unknown field·invalid UTF-8·64KiB 초과 입력을 거부하는 strict telemetry manifest decoder
 - Cloud Run용 timeout·graceful shutdown·non-root distroless image
 
 구현됐지만 executable에 아직 연결하지 않은 adapter 기반:
@@ -35,7 +37,7 @@
 
 아직 구현하지 않은 production 운영 경계:
 
-- generation-pinned read-only artifact classifier와 Storage version inventory adapter
+- generation-pinned classifier orchestration, raw 검증·codec registry와 Storage version inventory adapter
 - classifier 결과를 소비하는 forward reconciler, attempt completion/failure와 bounded sweeper runtime
 - cleanup lease·target, generation-pinned delete, nested ledger purge와 accepted deletion auditor
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
