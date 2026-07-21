@@ -24,7 +24,7 @@ concurrency:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: mobility-reliability-platform
@@ -68,7 +68,26 @@ jobs:
       - name: Check telemetry gateway
         working-directory: mobility-reliability-platform/services/telemetry-gateway
         run: |
+          go mod tidy -diff
+          go mod verify
           test -z "$(gofmt -l ./cmd ./internal)"
           go vet ./...
-          go test -race ./...
-          CGO_ENABLED=0 go build -trimpath -o /tmp/telemetry-gateway ./cmd/server
+          go test -mod=readonly -count=1 -race ./...
+          CGO_ENABLED=0 go build -mod=readonly -trimpath -o /tmp/telemetry-gateway ./cmd/server
+
+      - name: Build telemetry container
+        run: docker build -f services/telemetry-gateway/Dockerfile -t mobility-telemetry-gateway:ci .
+
+      - name: Smoke test fail-closed telemetry container
+        run: |
+          docker run --rm --name mobility-telemetry-smoke -d -p 127.0.0.1:8085:8080 mobility-telemetry-gateway:ci
+          trap 'docker rm -f mobility-telemetry-smoke >/dev/null 2>&1 || true' EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl --max-time 5 --fail --silent http://127.0.0.1:8085/healthz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(curl --max-time 5 --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8085/healthz)" = "200"
+          test "$(curl --max-time 5 --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8085/readyz)" = "503"
+          test "$(curl --max-time 5 --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:8085/v1/telemetry/batches)" = "503"

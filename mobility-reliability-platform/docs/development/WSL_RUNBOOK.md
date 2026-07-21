@@ -73,6 +73,8 @@ Windows localhost가 WSL 서비스로 전달되지 않는 구성에서는 WSL mi
 - iPhone이 로컬 emulator에 접근해야 할 때는 WSL/Windows의 실제 접근 가능한 주소와 Windows 방화벽을 확인한다.
 - emulator 연결이 불가능하다는 이유로 production Firebase 프로젝트를 개발 기본값으로 사용하지 않는다.
 - `.firebaserc.example`의 demo project ID를 사용하고 실제 service account key를 저장소에 넣지 않는다.
+- `pnpm check`와 `pnpm test`는 둘 다 Firebase Emulator Suite를 시작하므로 같은 workspace에서 병렬 실행하지 않는다. 병렬 실행은 hub `4400`, Firestore `8080`, websocket `9150` 충돌과 orphan Java process를 만들 수 있다.
+- 테스트 실패 후 `8080`이 계속 점유되면 먼저 `rtk proxy ss -ltnp 'sport = :8080'`과 process command line으로 해당 project의 orphan emulator인지 확인한다. 확인되지 않은 Java process를 일괄 종료하지 않는다.
 
 ## GPS 디버깅 체크리스트
 

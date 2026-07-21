@@ -26,6 +26,7 @@ func main() {
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           api.Routes(),
+		MaxHeaderBytes:    64 * 1024,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

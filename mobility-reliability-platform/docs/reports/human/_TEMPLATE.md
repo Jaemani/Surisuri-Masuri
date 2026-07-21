@@ -1,6 +1,6 @@
 ---
-id: HR-YYYY-MM-A
-report_type: fixed # fixed | requested | incident-update
+id: HR-YYYYMMDD-NN
+report_type: requested # requested | incident-update
 status: draft # planned | draft | reviewed | issued | superseded
 period_start: YYYY-MM-DD
 period_end: YYYY-MM-DD
@@ -12,7 +12,7 @@ reviewer: TBD
 audience: TBD
 ---
 
-# 기술 리포트: 제목
+# 요청 기술 리포트: 제목
 
 ## 한눈에 보기
 

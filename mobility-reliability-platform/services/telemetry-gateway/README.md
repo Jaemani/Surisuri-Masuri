@@ -13,14 +13,21 @@
 - 늦은 retry에서 object를 중복 생성하지 않는 `PutIfAbsent`와 terminal rejection 계약
 - Cloud Run용 timeout·graceful shutdown·non-root distroless image
 
+구현됐지만 executable에 아직 연결하지 않은 adapter 기반:
+
+- strict 단일 Authorization Bearer와 `X-Firebase-AppCheck` header parser
+- Firebase Admin Go SDK 기반 ID token·App Check 검증 wrapper
+- Firebase UID·App ID principal 분리와 App ID allowlist
+- invalid `401`, unlisted app `403`, verifier provider failure `503` 오류 계약
+- production SDK factory의 emulator 환경변수 fail-closed 검사
+
 아직 구현하지 않은 production adapter:
 
-- Firebase ID token과 App Check 검증
 - tenant membership 및 기기·세션·동의 authorizer
 - Firestore receipt store
 - Cloud Storage object store와 lifecycle
 
-adapter가 없는 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
+verifier를 포함한 production adapter가 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
 
 ## WSL2에서 검사
 
@@ -38,7 +45,7 @@ rtk docker build \
   -t mobility-telemetry-gateway:dev .
 ```
 
-Docker build context는 프로젝트 root이며 `.dockerignore` allowlist가 현재 gateway source와 사용하는 synthetic contract fixture 하나만 전달합니다.
+Docker build context는 프로젝트 root이며 `.dockerignore` allowlist가 gateway `cmd`·`internal` source, Go module 파일과 synthetic contract JSON fixture만 전달합니다. 패키지 단위 allowlist이므로 새 Go 파일이 host CI에는 보이지만 image에서 조용히 누락되는 구조를 피합니다.
 
 Firestore Emulator가 WSL host의 `8080`을 사용하므로 gateway는 host `8085`로 노출합니다. container 내부와 Cloud Run의 `PORT`는 `8080`을 유지합니다.
 

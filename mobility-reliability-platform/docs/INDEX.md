@@ -51,6 +51,7 @@
 - React Native 앱의 foreground 위치 수집 코드와 SQLite outbox 구현, JS 정적 export·순수 policy 검증. native SQLite/GPS callback과 실기기 동작은 미검증
 - `telemetry-batch.v2` 계약과 raw telemetry에서 Firebase UID를 분리한 identity 경계
 - Go telemetry ingest kernel의 strict decode, 멱등성·receipt·object 저장 인터페이스, fail-closed HTTP 경계
+- Firebase Admin SDK dual-token verifier·App ID allowlist·production emulator guard factory의 local synthetic 검증. executable에는 미연결
 - adapter 미구성 상태에서 `/healthz=200`, `/readyz`와 ingest는 `503`
 
 다음은 아직 운영 완료로 주장하지 않는다.
