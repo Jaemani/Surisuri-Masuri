@@ -10,6 +10,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/tenants/$(tenantId)/memberships/$(request.auth.uid);
     }
 
+    function tenantPath(tenantId) {
+      return /databases/$(database)/documents/tenants/$(tenantId);
+    }
+
     function hasCanonicalRoles(membership) {
       return membership.roles is list
         && membership.roles.size() > 0
@@ -35,6 +39,9 @@ service cloud.firestore {
 
     function isActiveMember(tenantId) {
       return signedIn()
+        && exists(tenantPath(tenantId))
+        && get(tenantPath(tenantId)).data.tenant_id == tenantId
+        && get(tenantPath(tenantId)).data.status == 'active'
         && exists(membershipPath(tenantId))
         && get(membershipPath(tenantId)).data.tenant_id == tenantId
         && get(membershipPath(tenantId)).data.firebase_uid == request.auth.uid
@@ -43,108 +50,170 @@ service cloud.firestore {
         && isCurrentlyValid(get(membershipPath(tenantId)).data);
     }
 
+    function isOperationalStaff(tenantId) {
+      return isActiveMember(tenantId)
+        && get(membershipPath(tenantId)).data.roles.hasAny([
+          'case_worker',
+          'tenant_admin'
+        ]);
+    }
+
+    function hasOwnPerson(tenantId) {
+      return isActiveMember(tenantId)
+        && 'person_id' in get(membershipPath(tenantId)).data
+        && get(membershipPath(tenantId)).data.person_id is string
+        && get(membershipPath(tenantId)).data.person_id.size() > 0;
+    }
+
+    function hasMatchingTenant(tenantId) {
+      return 'tenant_id' in resource.data
+        && resource.data.tenant_id == tenantId;
+    }
+
+    function isOwnPerson(tenantId, personId) {
+      return hasOwnPerson(tenantId)
+        && get(membershipPath(tenantId)).data.person_id == personId;
+    }
+
+    function canReadPersonScopedResource(tenantId) {
+      return hasMatchingTenant(tenantId)
+        && (
+          isOperationalStaff(tenantId)
+          || (
+            hasOwnPerson(tenantId)
+            && 'person_id' in resource.data
+            && resource.data.person_id == get(membershipPath(tenantId)).data.person_id
+          )
+        );
+    }
+
+    function canReadRelationship(tenantId) {
+      return hasMatchingTenant(tenantId)
+        && (
+          isOperationalStaff(tenantId)
+          || (
+            hasOwnPerson(tenantId)
+            && (
+              (
+                'from_person_id' in resource.data
+                && resource.data.from_person_id == get(membershipPath(tenantId)).data.person_id
+              )
+              || (
+                'to_person_id' in resource.data
+                && resource.data.to_person_id == get(membershipPath(tenantId)).data.person_id
+              )
+            )
+          )
+        );
+    }
+
     match /tenants/{tenantId} {
-      allow read: if isActiveMember(tenantId);
-      allow write: if false;
+      allow get: if isActiveMember(tenantId);
+      allow list, write: if false;
 
       match /memberships/{firebaseUid} {
         allow get: if firebaseUid == request.auth.uid && isActiveMember(tenantId);
         allow list, write: if false;
       }
 
-      // Tenant-scoped domain projections are readable by a current member.
-      // Mutations remain behind authenticated backend commands for Stage 1.
+      // Person-scoped records are visible to operational staff or the member
+      // whose canonical membership person_id owns the record. Mutations remain
+      // behind authenticated backend commands for Stage 1.
       match /people/{personId} {
-        allow read: if isActiveMember(tenantId);
+        allow get: if hasMatchingTenant(tenantId)
+          && 'person_id' in resource.data
+          && resource.data.person_id == personId
+          && (isOperationalStaff(tenantId) || isOwnPerson(tenantId, personId));
+        allow list: if false;
         allow write: if false;
       }
 
       match /personRelationships/{relationshipId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if canReadRelationship(tenantId);
         allow write: if false;
       }
 
       match /devices/{deviceId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if isOperationalStaff(tenantId) && hasMatchingTenant(tenantId);
         allow write: if false;
 
         match /state/{stateId} {
-          allow read: if isActiveMember(tenantId);
+          allow get, list: if isOperationalStaff(tenantId);
           allow write: if false;
         }
       }
 
       match /deviceAssignments/{assignmentId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if canReadPersonScopedResource(tenantId);
         allow write: if false;
       }
 
       match /partCatalog/{partId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if isActiveMember(tenantId) && hasMatchingTenant(tenantId);
         allow write: if false;
       }
 
       match /componentInstallations/{componentId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if isOperationalStaff(tenantId) && hasMatchingTenant(tenantId);
         allow write: if false;
       }
 
       match /repairs/{repairId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if isOperationalStaff(tenantId) && hasMatchingTenant(tenantId);
         allow write: if false;
 
         match /items/{repairItemId} {
-          allow read: if isActiveMember(tenantId);
+          allow get, list: if isOperationalStaff(tenantId);
           allow write: if false;
         }
       }
 
       match /inspections/{inspectionId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if isOperationalStaff(tenantId) && hasMatchingTenant(tenantId);
         allow write: if false;
 
         match /observations/{observationId} {
-          allow read: if isActiveMember(tenantId);
+          allow get, list: if isOperationalStaff(tenantId);
           allow write: if false;
         }
       }
 
       match /trips/{tripId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if canReadPersonScopedResource(tenantId);
         allow write: if false;
       }
 
       match /consentRevisions/{consentRevisionId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if canReadPersonScopedResource(tenantId);
         allow write: if false;
       }
 
       match /alerts/{alertId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if canReadPersonScopedResource(tenantId);
         allow write: if false;
 
         match /deliveries/{deliveryId} {
-          allow read: if isActiveMember(tenantId);
+          allow get, list: if isOperationalStaff(tenantId);
           allow write: if false;
         }
       }
 
       match /modelPredictions/{predictionId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if isOperationalStaff(tenantId) && hasMatchingTenant(tenantId);
         allow write: if false;
       }
 
       match /evidenceFacts/{factId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if isOperationalStaff(tenantId) && hasMatchingTenant(tenantId);
         allow write: if false;
       }
 
       match /reportRuns/{reportRunId} {
-        allow read: if isActiveMember(tenantId);
+        allow get, list: if isOperationalStaff(tenantId) && hasMatchingTenant(tenantId);
         allow write: if false;
 
         match /claims/{claimId} {
-          allow read: if isActiveMember(tenantId);
+          allow get, list: if isOperationalStaff(tenantId);
           allow write: if false;
         }
       }

@@ -39,6 +39,7 @@ audience: project team and technical reviewer
 | Pure authorization policy | `검증됨` | 본인 beneficiary와 모든 exact relation·상태·시각을 검사 | 좌표 없이 min/max capturedAt만 추가 | Docker Go / synthetic |
 | Firestore reader | `검증됨` | bounded exact GetAll, pseudonymous consent-state path, generic error mapping | 실제 Emulator document decode는 후속 | Docker Go / synthetic |
 | Firebase client boundary | `검증됨` | current consent state client read/write 거절 | Admin SDK/IAM은 후속 | Firebase Rules Emulator |
+| Tenant client read matrix | `계획 변경·검증됨` | 본인 person 범위와 case worker/admin 운영 범위로 축소, 24-case 통과 | 기존 active-member 전체 read를 제거 | Firebase Rules Emulator |
 | Runtime 연결 | `미착수` | `cmd/server`는 계속 fail-closed | 원자적 reservation 전 의도적 보류 | local container |
 
 ### 실제 결과 상세
@@ -55,9 +56,10 @@ audience: project team and technical reviewer
 
 | 실제 주장 | 증거 ID·링크 | 검증 상태 | 확인자·확인일 |
 | --- | --- | --- | --- |
-| 관계·시각·상태 allow/deny policy가 local test를 통과 | [EVD-20260721-012](../../evidence/2026-07.md#evd-20260721-012--firestore-텔레메트리-권한-snapshot) | `generated` | Codex / 2026-07-21 |
-| Firestore exact path·DTO·오류 sanitization이 단위 검증됨 | [EVD-20260721-012](../../evidence/2026-07.md#evd-20260721-012--firestore-텔레메트리-권한-snapshot) | `generated` | delegated review / 2026-07-21 |
-| current consent state의 client direct access가 차단됨 | [EVD-20260721-012](../../evidence/2026-07.md#evd-20260721-012--firestore-텔레메트리-권한-snapshot) | `generated` | local Rules test / 2026-07-21 |
+| 관계·시각·상태 allow/deny policy가 local test와 clean CI를 통과 | [EVD-20260721-012](../../evidence/2026-07.md#evd-20260721-012--firestore-텔레메트리-권한-snapshot) | `verified` | Codex / 2026-07-21 |
+| Firestore exact path·DTO·오류 sanitization이 단위 검증됨 | [EVD-20260721-012](../../evidence/2026-07.md#evd-20260721-012--firestore-텔레메트리-권한-snapshot) | `verified` | delegated review / 2026-07-21 |
+| current consent state의 client direct access가 차단됨 | [EVD-20260721-012](../../evidence/2026-07.md#evd-20260721-012--firestore-텔레메트리-권한-snapshot) | `verified` | local Rules test + CI / 2026-07-21 |
+| 타인·운영 projection의 광범위 client read가 owner/staff matrix로 축소됨 | [EVD-20260721-013](../../evidence/2026-07.md#evd-20260721-013--firestore-client-최소권한-read-matrix) | `generated` | local Rules Emulator / 2026-07-21 |
 | production에서 실제 권한 검증이 활성화됨 | 확인 필요 — 현재 활성화하지 않음 | `미검증` | 해당 없음 |
 
 ## 결정·제품 변화·인시던트
@@ -65,7 +67,7 @@ audience: project team and technical reviewer
 - 관련 결정: [ADR-0013](../../decisions/ADR-0013-telemetry-authorization-snapshot.md)
 - 실제 제품 업데이트: 해당 없음 — runtime·사용자·운영 동작에는 아직 연결하지 않음
 - 인시던트: 해당 없음 — production·field 배포와 사용자 영향 없음
-- 열린 위험: authorization read와 receipt reservation 사이 철회 race, current-state transaction producer 미구현, 실제 Firebase integration 미검증, [RSK-27](../../plans/RISK_REGISTER.md)의 과도한 client read matrix
+- 열린 위험: authorization read와 receipt reservation 사이 철회 race, current-state transaction producer 미구현, 실제 Firebase integration 미검증. [RSK-27](../../plans/RISK_REGISTER.md)은 local Rules에서 축소했지만 staging Rules 배포·실앱 query 검증 전까지 active
 
 ## 다음 회차
 

@@ -132,6 +132,10 @@ active 상태에 `revoked_at`이 있거나 path/field tenant, installation ID, U
 ### Security Rules 기본 정책
 
 - 명시적 allow가 없는 경로는 deny한다.
+- tenant document가 `active`이고 path/field tenant가 일치해야 membership이 client read 권한을 만든다.
+- beneficiary 등 일반 member는 `membership.person_id`와 직접 일치하는 people·relationship·assignment·trip·consent·alert만 조회한다. people은 자신의 path를 단건 get만 할 수 있다. 나머지 list/query는 path와 같은 `tenant_id`와 자신의 `person_id` filter를 모두 증명해야 한다.
+- 초기 operational direct read role은 `case_worker`, `tenant_admin`으로 제한한다. guardian·repairer·auditor의 타인·기관 간·감사 목적 조회는 relationship·grant·purpose를 검사하는 backend DTO를 사용한다.
+- devices·repairs·inspections·prediction·evidence·report처럼 문서 자체에서 본인 person 관계를 안전하게 증명할 수 없는 데이터는 operational staff만 직접 읽고 beneficiary는 backend DTO를 사용한다. 상세 matrix는 [ADR-0014](../decisions/ADR-0014-firestore-client-read-boundary.md)를 따른다.
 - membership, role, tenant, server timestamp, projection version, model score, object path/hash, delivery provider ID는 **server-only field**다.
 - `privatePeople`, `appInstallations`, `ingestReceipts`, `ingestIdempotency`, `ingestClientBatches`, `consentStates`, `domainEvents`, `projectionCheckpoints`, `deadLetters`, `externalIdentifiers`, `dataAccessGrants`, `authzIndex`의 client write는 항상 거절한다.
 - `privatePeople`의 client direct read도 거절한다. 본인 정보는 purpose 검사를 수행하는 callable/Cloud Run API가 필요한 필드만 반환한다.

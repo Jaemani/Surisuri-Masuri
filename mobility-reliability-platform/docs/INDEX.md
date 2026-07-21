@@ -54,12 +54,14 @@
 - Firebase Admin SDK dual-token verifier·App ID allowlist·production emulator guard factory의 local synthetic 검증. executable에는 미연결
 - active tenant·beneficiary·installation·trip·assignment·current consent를 교차 검사하는 pure authorization policy와 Firestore exact-read adapter의 local synthetic 검증. executable에는 미연결
 - server-only current consent projection의 Firebase client direct read/write 차단
+- Firestore client read를 own-person 또는 `case_worker`·`tenant_admin` 운영 범위로 제한하고 tenant/person query constraint를 고정한 local Rules Emulator 검증. production Rules에는 미배포
 - adapter 미구성 상태에서 `/healthz=200`, `/readyz`와 ingest는 `503`
 
 다음은 아직 운영 완료로 주장하지 않는다.
 
 - background GPS 실기기 검증과 모바일 업로드
 - 실제 Firebase ID token/App Check가 연결된 실행 경로
+- production Firebase Rules 배포와 실제 mobile/admin query·index 검증
 - 실제 Firestore integration과 authorization+receipt 원자 transaction, Cloud Storage production adapter
 - 수리데이터 실제 이관, ML 학습, ONNX 배포, 생존분석
 - 기관 콘솔, field pilot, 운영 SLO, AI report agent
