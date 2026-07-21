@@ -148,12 +148,21 @@ PostgreSQL/PostGIS, Kafka, Kubernetes는 필요성이 측정되기 전에는 초
 
 ## 11. 현재 실제 상태
 
-2026-07-21 기준 신규 저장소 기반, Firebase Rules, foreground GPS/SQLite outbox 코드와 정적·순수 policy 검사, telemetry v2 계약, fail-closed Go ingest kernel까지 검증된 증거가 있다. native SQLite/GPS callback과 실기기 동작은 아직 검증하지 않았고, production adapter가 연결되지 않아 gateway는 의도적으로 ingest를 받지 않는다.
+2026-07-21 기준 신규 저장소 기반, Firebase Rules, foreground GPS/SQLite outbox 코드와 정적·순수 policy 검사, telemetry v2 계약, fail-closed Go ingest kernel까지 로컬·클린 러너 증거가 있다. 그 뒤의 telemetry authorization, atomic admission, immutable artifact 계보도 다음 범위에서만 검증됐다.
+
+- active tenant·beneficiary·installation·trip·assignment·현재 동의를 함께 검사하는 authorization policy와 Firestore exact-read adapter는 [EVD-20260721-012](./evidence/2026-07.md#evd-20260721-012--firestore-텔레메트리-권한-snapshot)의 local synthetic test 범위에서 확인됐다. client용 Firestore read matrix는 [EVD-20260721-013](./evidence/2026-07.md#evd-20260721-013--firestore-client-최소권한-read-matrix)의 Rules Emulator에서 확인됐지만 production Rules 배포와 실제 앱 query는 미검증이다.
+- authorization 재평가와 두 uniqueness index·최초 receipt 생성을 한 Firestore transaction에 묶은 admission adapter는 [EVD-20260721-014](./evidence/2026-07.md#evd-20260721-014--원자적-telemetry-admission과-receipt-lineage)의 local fake seam과 [EVD-20260721-015](./evidence/2026-07.md#evd-20260721-015--firestore-admission-transaction-emulator-integration)의 concurrent same-batch에서 확인됐다. production ADC/IAM과 실제 철회 transaction 경쟁은 미검증이다.
+- deterministic gzip raw object, canonical manifest, exact hash·CRC·size·generation 계보와 Firestore finalizer는 [EVD-20260721-016](./evidence/2026-07.md#evd-20260721-016--immutable-telemetry-objectmanifest-lineage)의 local race test와 pinned official Storage testbench에서 확인됐다. staging bucket IAM·lifecycle·retention은 미검증이다.
+- ADR-0017의 recovery 설계 중 R1 immutable reservation input, R2 lease/fence domain contract와 R3의 **최초 lease·active replay·expired takeover·fenced finalizer forward path**가 local worktree에 구현됐다. 최초 reservation은 lease와 함께 생성되고, active replay는 artifact 작업에 들어가지 않으며, 만료 lease takeover는 fencing token을 증가시킨다. `MarkStored`·`MarkRejected`와 safe release는 현재 owner/token/deadline을 확인한다. 이 범위의 증거는 [EVD-20260721-017](./evidence/2026-07.md)에 `generated` local evidence로 정리하며 clean CI·staging 확인 전에는 verified 운영 성과가 아니다.
+
+native SQLite/GPS callback과 실기기 동작은 아직 검증하지 않았고, production adapter가 executable에 연결되지 않아 gateway는 의도적으로 ingest를 받지 않는다. 현재 `/healthz` 외 readiness와 ingest는 계속 fail-closed여야 한다.
 
 현재 상태를 다음 단계로 과장하지 않는다.
 
 - background GPS와 Android/iPhone 실기기 결과는 아직 별도 증거가 필요하다.
 - Firebase verifier 구현은 runtime wiring·실제 token 검증·Cloud Run 배포 전에는 운영 인증 완료가 아니다.
+- recovery의 `RenewLease`, 별도 `ClaimRecoveryLease`, recovery attempt ledger, generation-pinned classifier·forward reconciler, bounded sweeper와 origin별 cleanup transition/purge는 아직 구현·검증되지 않았다.
+- `ErrIngestInProgress`의 외부 HTTP status·retry 계약과 startup dependency wiring도 아직 고정되지 않았다.
 - 수리 원본 export가 작업공간에 없으므로 실제 이관 품질과 모델 학습 가능성을 확정하지 않는다.
 - 실증 인원, 비용 절감, 모델 정확도는 실제 측정 전 숫자를 채우지 않는다.
 

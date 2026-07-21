@@ -454,7 +454,7 @@ func artifactWriteFixture(t *testing.T, raw []byte) ingest.BatchArtifactWrite {
 		FirstCapturedAt:      receivedAt.Add(-2 * time.Minute),
 		LastCapturedAt:       receivedAt.Add(-time.Minute),
 		ReceivedAt:           receivedAt,
-		ExpiresAt:            receivedAt.Add(ingest.ReceiptRetention),
+		ArtifactExpiresAt:    receivedAt.Add(ingest.TelemetryArtifactRetention),
 		ValidatorVersion:     "gateway-validator@test",
 	}
 	return ingest.BatchArtifactWrite{

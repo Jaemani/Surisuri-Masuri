@@ -38,7 +38,11 @@ func TestServiceStoresCompressedBatchAndCompletesReceipt(t *testing.T) {
 		result.Receipt.InstallationID != batch.InstallationID ||
 		result.Receipt.ConsentRevisionID != batch.ConsentRevisionID ||
 		result.Receipt.PayloadSchemaVersion != batch.SchemaVersion ||
-		!result.Receipt.ExpiresAt.Equal(now.Add(ReceiptRetention)) {
+		result.Receipt.ExpectedSampleCount != len(batch.Samples) ||
+		result.Receipt.ValidatorVersion != TelemetryValidatorVersion ||
+		!result.Receipt.ReservationDeadline.Equal(now.Add(ReservationProcessingWindow)) ||
+		!result.Receipt.ArtifactExpiresAt.Equal(now.Add(TelemetryArtifactRetention)) ||
+		!result.Receipt.ReceiptRetentionFloor.Equal(now.Add(ReceiptControlRetention)) {
 		t.Fatalf("receipt lineage = %#v", result.Receipt)
 	}
 	firstCapturedAt, lastCapturedAt := capturedAtBounds(batch)
@@ -56,7 +60,7 @@ func TestServiceStoresCompressedBatchAndCompletesReceipt(t *testing.T) {
 		FirstCapturedAt:      firstCapturedAt,
 		LastCapturedAt:       lastCapturedAt,
 		ReceivedAt:           result.Receipt.CreatedAt,
-		ExpiresAt:            result.Receipt.ExpiresAt,
+		ArtifactExpiresAt:    result.Receipt.ArtifactExpiresAt,
 		ValidatorVersion:     TelemetryValidatorVersion,
 	}
 	if !reflect.DeepEqual(objects.lastWrite.Manifest, wantManifest) {
@@ -88,6 +92,47 @@ func TestServiceStoresCompressedBatchAndCompletesReceipt(t *testing.T) {
 	}
 	if !bytes.Equal(uncompressed, raw) {
 		t.Fatal("stored object does not round-trip to the request body")
+	}
+}
+
+func TestServiceRejectsUnboundReservationResultBeforeArtifactWrite(t *testing.T) {
+	batch, raw := validBatch(t)
+	tests := []struct {
+		name   string
+		mutate func(*Receipt, *LeaseGrant)
+	}{
+		{name: "tenant", mutate: func(receipt *Receipt, _ *LeaseGrant) { receipt.TenantID = "01982015-4400-7000-8000-000000000091" }},
+		{name: "device", mutate: func(receipt *Receipt, _ *LeaseGrant) { receipt.DeviceID = "01982015-4400-7000-8000-000000000092" }},
+		{name: "trip", mutate: func(receipt *Receipt, _ *LeaseGrant) { receipt.TripID = "01982015-4400-7000-8000-000000000093" }},
+		{name: "consent", mutate: func(receipt *Receipt, _ *LeaseGrant) {
+			receipt.ConsentRevisionID = "01982015-4400-7000-8000-000000000094"
+		}},
+		{name: "reservation key", mutate: func(receipt *Receipt, _ *LeaseGrant) { receipt.ReservationKey = "wrong" }},
+		{name: "body hash", mutate: func(receipt *Receipt, _ *LeaseGrant) { receipt.BodyHash = "wrong" }},
+		{name: "receipt owner", mutate: func(receipt *Receipt, _ *LeaseGrant) { receipt.LeaseOwnerID = "01982015-4400-7000-8000-000000000095" }},
+		{name: "grant token", mutate: func(_ *Receipt, grant *LeaseGrant) { grant.Fence.Token++ }},
+		{name: "terminal state", mutate: func(receipt *Receipt, _ *LeaseGrant) { receipt.State = ReceiptStored }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			receipts := newMemoryReceiptStore()
+			receipts.mutateReservationResult = test.mutate
+			objects := newMemoryArtifactStore()
+			service := mustService(t, receipts, objects, nil)
+
+			_, err := service.Ingest(context.Background(), matchingPrincipal(batch), batch, raw)
+			if err == nil {
+				t.Fatal("Ingest() accepted an unbound reservation result")
+			}
+			if objects.storeCalls != 0 || receipts.markStoredCalls != 0 || receipts.markRejectedCalls != 0 {
+				t.Fatalf(
+					"unbound reservation side effects = store:%d stored:%d rejected:%d, want zero",
+					objects.storeCalls,
+					receipts.markStoredCalls,
+					receipts.markRejectedCalls,
+				)
+			}
+		})
 	}
 }
 
@@ -167,18 +212,20 @@ func TestNewServiceRequiresEveryDependency(t *testing.T) {
 	objects := newMemoryArtifactStore()
 	batchIDs := fixedBatchIDGenerator()
 	tests := []struct {
-		name       string
-		admissions AdmissionStore
-		objects    TelemetryArtifactStore
-		batchIDs   ServerBatchIDGenerator
+		name          string
+		admissions    AdmissionStore
+		objects       TelemetryArtifactStore
+		batchIDs      ServerBatchIDGenerator
+		leaseOwnerIDs ServerBatchIDGenerator
 	}{
-		{name: "nil admissions", objects: objects, batchIDs: batchIDs},
-		{name: "nil objects", admissions: admissions, batchIDs: batchIDs},
-		{name: "nil batch IDs", admissions: admissions, objects: objects},
+		{name: "nil admissions", objects: objects, batchIDs: batchIDs, leaseOwnerIDs: fixedLeaseOwnerIDGenerator()},
+		{name: "nil objects", admissions: admissions, batchIDs: batchIDs, leaseOwnerIDs: fixedLeaseOwnerIDGenerator()},
+		{name: "nil batch IDs", admissions: admissions, objects: objects, leaseOwnerIDs: fixedLeaseOwnerIDGenerator()},
+		{name: "nil lease owner IDs", admissions: admissions, objects: objects, batchIDs: batchIDs},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := NewService(test.admissions, test.objects, test.batchIDs, nil); err == nil {
+			if _, err := NewService(test.admissions, test.objects, test.batchIDs, test.leaseOwnerIDs, nil); err == nil {
 				t.Fatal("NewService() error = nil")
 			}
 		})
@@ -213,6 +260,7 @@ func TestServiceRejectsUnauthorizedBatchScopeBeforeStorage(t *testing.T) {
 		receipts,
 		objects,
 		fixedBatchIDGenerator(),
+		fixedLeaseOwnerIDGenerator(),
 		nil,
 	)
 	if err != nil {
@@ -313,7 +361,8 @@ func TestServiceRetriesAfterRawArtifactFailure(t *testing.T) {
 	receipts := newMemoryReceiptStore()
 	artifacts := newMemoryArtifactStore()
 	artifacts.failNextRaw = true
-	service := mustService(t, receipts, artifacts, nil)
+	now := time.Date(2026, time.July, 21, 6, 0, 0, 0, time.UTC)
+	service := mustService(t, receipts, artifacts, func() time.Time { return now })
 	principal := matchingPrincipal(batch)
 
 	if _, err := service.Ingest(context.Background(), principal, batch, raw); !errors.Is(err, ErrArtifactUnavailable) {
@@ -322,6 +371,14 @@ func TestServiceRetriesAfterRawArtifactFailure(t *testing.T) {
 	if artifacts.rawWrites != 0 || artifacts.manifestWrites != 0 || receipts.markStoredCalls != 0 {
 		t.Fatalf("failed raw attempt wrote state = %d/%d/%d", artifacts.rawWrites, artifacts.manifestWrites, receipts.markStoredCalls)
 	}
+	storeCallsAfterFailure := artifacts.storeCalls
+	if _, err := service.Ingest(context.Background(), principal, batch, raw); !errors.Is(err, ErrIngestInProgress) {
+		t.Fatalf("early retry error = %v, want in progress", err)
+	}
+	if artifacts.storeCalls != storeCallsAfterFailure {
+		t.Fatalf("early retry artifact calls = %d, want %d", artifacts.storeCalls, storeCallsAfterFailure)
+	}
+	now = now.Add(InitialRecoveryBackoff)
 	result, err := service.Ingest(context.Background(), principal, batch, raw)
 	if err != nil {
 		t.Fatalf("retry Ingest() error = %v", err)
@@ -336,7 +393,8 @@ func TestServiceRecoversManifestFailureWithoutDuplicateRaw(t *testing.T) {
 	receipts := newMemoryReceiptStore()
 	artifacts := newMemoryArtifactStore()
 	artifacts.failNextManifest = true
-	service := mustService(t, receipts, artifacts, nil)
+	now := time.Date(2026, time.July, 21, 6, 0, 0, 0, time.UTC)
+	service := mustService(t, receipts, artifacts, func() time.Time { return now })
 	principal := matchingPrincipal(batch)
 
 	if _, err := service.Ingest(context.Background(), principal, batch, raw); !errors.Is(err, ErrArtifactUnavailable) {
@@ -345,6 +403,7 @@ func TestServiceRecoversManifestFailureWithoutDuplicateRaw(t *testing.T) {
 	if artifacts.rawWrites != 1 || artifacts.manifestWrites != 0 || receipts.markStoredCalls != 0 {
 		t.Fatalf("manifest failure state = %d/%d/%d", artifacts.rawWrites, artifacts.manifestWrites, receipts.markStoredCalls)
 	}
+	now = now.Add(InitialRecoveryBackoff)
 	result, err := service.Ingest(context.Background(), principal, batch, raw)
 	if err != nil {
 		t.Fatalf("retry Ingest() error = %v", err)
@@ -362,12 +421,14 @@ func TestServiceRecoversFinalizerFailureWithoutDuplicateArtifacts(t *testing.T) 
 	receipts := newMemoryReceiptStore()
 	receipts.failNextMarkStored = true
 	objects := newMemoryArtifactStore()
-	service := mustService(t, receipts, objects, nil)
+	now := time.Date(2026, time.July, 21, 6, 0, 0, 0, time.UTC)
+	service := mustService(t, receipts, objects, func() time.Time { return now })
 	principal := matchingPrincipal(batch)
 
 	if _, err := service.Ingest(context.Background(), principal, batch, raw); err == nil {
 		t.Fatal("first Ingest() error = nil, want receipt completion failure")
 	}
+	now = now.Add(InitialRecoveryBackoff)
 	result, err := service.Ingest(context.Background(), principal, batch, raw)
 	if err != nil {
 		t.Fatalf("retry Ingest() error = %v", err)
@@ -420,7 +481,8 @@ func TestServiceLeavesManifestConflictReserved(t *testing.T) {
 	receipts := newMemoryReceiptStore()
 	artifacts := newMemoryArtifactStore()
 	artifacts.manifestConflict = true
-	service := mustService(t, receipts, artifacts, nil)
+	now := time.Date(2026, time.July, 21, 6, 0, 0, 0, time.UTC)
+	service := mustService(t, receipts, artifacts, func() time.Time { return now })
 	principal := matchingPrincipal(batch)
 
 	for attempt := 0; attempt < 2; attempt++ {
@@ -428,6 +490,7 @@ func TestServiceLeavesManifestConflictReserved(t *testing.T) {
 		if !errors.Is(err, ErrManifestArtifactConflict) {
 			t.Fatalf("attempt %d error = %v, want manifest conflict", attempt+1, err)
 		}
+		now = now.Add(InitialRecoveryBackoff)
 	}
 	receipt := receipts.receipts[DeriveReservationKey(
 		batch.SchemaVersion,
@@ -507,10 +570,12 @@ type memoryReceiptStore struct {
 	markStoredCalls         int
 	markRejectedCalls       int
 	lastStoredData          StoredReceiptData
+	releaseCalls            int
 	authorize               func(context.Context, Principal, BatchScope) error
 	authorizeCalls          int
 	lastPrincipal           Principal
 	lastScope               BatchScope
+	mutateReservationResult func(*Receipt, *LeaseGrant)
 }
 
 func newMemoryReceiptStore() *memoryReceiptStore {
@@ -525,7 +590,8 @@ func (s *memoryReceiptStore) AuthorizeAndReserve(
 	principal Principal,
 	scope BatchScope,
 	reservation Reservation,
-) (Receipt, ReservationStatus, error) {
+	proposal LeaseProposal,
+) (Receipt, LeaseGrant, ReservationStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.authorizeCalls++
@@ -533,54 +599,98 @@ func (s *memoryReceiptStore) AuthorizeAndReserve(
 	s.lastScope = scope
 	if s.authorize != nil {
 		if err := s.authorize(ctx, principal, scope); err != nil {
-			return Receipt{}, "", err
+			return Receipt{}, LeaseGrant{}, "", err
 		}
+	}
+	if ValidateLeaseProposal(proposal) != nil {
+		return Receipt{}, LeaseGrant{}, "", ErrInvalidLease
 	}
 
 	if current, ok := s.receipts[reservation.ReservationKey]; ok {
 		if current.BodyHash != reservation.BodyHash || current.ClientBatchKey != reservation.ClientBatchKey {
-			return current, ReservationConflict, nil
+			return current, LeaseGrant{}, ReservationConflict, nil
 		}
 		if current.State == ReceiptStored {
-			return current, ReservationReplayComplete, nil
+			return current, LeaseGrant{}, ReservationReplayComplete, nil
 		}
 		if current.State == ReceiptRejected {
-			return current, ReservationReplayRejected, nil
+			return current, LeaseGrant{}, ReservationReplayRejected, nil
 		}
-		return current, ReservationReplayPending, nil
+		requestNow := reservation.CreatedAt.UTC()
+		if current.LeaseOwnerID != "" && requestNow.Before(current.LeaseExpiresAt) {
+			return current, LeaseGrant{}, ReservationReplayInProgress, nil
+		}
+		if current.LeaseOwnerID == "" && requestNow.Before(current.NextRecoveryAt) {
+			return current, LeaseGrant{}, ReservationReplayInProgress, nil
+		}
+		leaseExpiresAt := requestNow.Add(proposal.Duration)
+		if leaseExpiresAt.After(current.ReservationDeadline) {
+			return Receipt{}, LeaseGrant{}, "", ErrAdmissionUnavailable
+		}
+		current.FencingToken++
+		current.LeaseOwnerID = proposal.Owner.ID
+		current.LeaseOwnerKind = proposal.Owner.Kind
+		current.LeaseAcquiredAt = requestNow
+		current.LeaseHeartbeatAt = requestNow
+		current.LeaseExpiresAt = leaseExpiresAt
+		current.NextRecoveryAt = leaseExpiresAt
+		current.LastRecoveryCode = ""
+		current.Revision++
+		current.UpdatedAt = requestNow
+		s.receipts[reservation.ReservationKey] = current
+		return current, leaseGrantForReceipt(current), ReservationReplayLeaseAcquired, nil
 	}
 	if _, ok := s.clientBatchReservations[reservation.ClientBatchKey]; ok {
-		return Receipt{}, ReservationClientBatchConflict, nil
+		return Receipt{}, LeaseGrant{}, ReservationClientBatchConflict, nil
 	}
+	leaseExpiresAt := reservation.CreatedAt.Add(proposal.Duration)
 
 	receipt := Receipt{
-		ReservationKey:       reservation.ReservationKey,
-		ClientBatchKey:       reservation.ClientBatchKey,
-		ReceiptID:            reservation.ReceiptID,
-		TenantID:             reservation.TenantID,
-		BatchID:              reservation.BatchID,
-		DeviceID:             reservation.DeviceID,
-		TripID:               reservation.TripID,
-		InstallationID:       reservation.InstallationID,
-		ConsentRevisionID:    reservation.ConsentRevisionID,
-		ClientBatchID:        reservation.ClientBatchID,
-		PayloadSchemaVersion: reservation.PayloadSchemaVersion,
-		BodyHash:             reservation.BodyHash,
-		State:                ReceiptReserved,
-		Revision:             1,
-		CreatedAt:            reservation.CreatedAt,
-		UpdatedAt:            reservation.CreatedAt,
-		ExpiresAt:            reservation.ExpiresAt,
+		ReservationKey:        reservation.ReservationKey,
+		ClientBatchKey:        reservation.ClientBatchKey,
+		ReceiptID:             reservation.ReceiptID,
+		TenantID:              reservation.TenantID,
+		BatchID:               reservation.BatchID,
+		DeviceID:              reservation.DeviceID,
+		TripID:                reservation.TripID,
+		InstallationID:        reservation.InstallationID,
+		ConsentRevisionID:     reservation.ConsentRevisionID,
+		ClientBatchID:         reservation.ClientBatchID,
+		PayloadSchemaVersion:  reservation.PayloadSchemaVersion,
+		BodyHash:              reservation.BodyHash,
+		ExpectedSampleCount:   reservation.ExpectedSampleCount,
+		FirstCapturedAt:       reservation.FirstCapturedAt,
+		LastCapturedAt:        reservation.LastCapturedAt,
+		ValidatorVersion:      reservation.ValidatorVersion,
+		State:                 ReceiptReserved,
+		FencingToken:          1,
+		LeaseOwnerID:          proposal.Owner.ID,
+		LeaseOwnerKind:        proposal.Owner.Kind,
+		LeaseAcquiredAt:       reservation.CreatedAt,
+		LeaseHeartbeatAt:      reservation.CreatedAt,
+		LeaseExpiresAt:        leaseExpiresAt,
+		NextRecoveryAt:        leaseExpiresAt,
+		Revision:              1,
+		CreatedAt:             reservation.CreatedAt,
+		UpdatedAt:             reservation.CreatedAt,
+		ReservationDeadline:   reservation.ReservationDeadline,
+		ArtifactExpiresAt:     reservation.ArtifactExpiresAt,
+		ReceiptRetentionFloor: reservation.ReceiptRetentionFloor,
 	}
 	s.receipts[reservation.ReservationKey] = receipt
 	s.clientBatchReservations[reservation.ClientBatchKey] = reservation.ReservationKey
-	return receipt, ReservationCreated, nil
+	grant := leaseGrantForReceipt(receipt)
+	if s.mutateReservationResult != nil {
+		s.mutateReservationResult(&receipt, &grant)
+	}
+	return receipt, grant, ReservationCreatedLeaseAcquired, nil
 }
 
 func (s *memoryReceiptStore) MarkStored(
 	_ context.Context,
 	_ string,
 	reservationKey string,
+	fence LeaseFence,
 	stored StoredReceiptData,
 	updatedAt time.Time,
 ) (Receipt, error) {
@@ -597,6 +707,10 @@ func (s *memoryReceiptStore) MarkStored(
 		s.failNextMarkStored = false
 		return Receipt{}, errors.New("synthetic receipt completion failure")
 	}
+	if receipt.LeaseOwnerID != fence.OwnerID || receipt.FencingToken != fence.Token ||
+		!receipt.LeaseExpiresAt.Equal(fence.ExpiresAt) || !updatedAt.Before(receipt.LeaseExpiresAt) {
+		return Receipt{}, ErrAdmissionUnavailable
+	}
 	receipt.ObjectPath = stored.Artifacts.Object.Path
 	receipt.ObjectSHA256 = stored.Artifacts.Object.SHA256
 	receipt.ObjectCRC32C = stored.Artifacts.Object.CRC32C
@@ -611,6 +725,7 @@ func (s *memoryReceiptStore) MarkStored(
 	receipt.ManifestMetageneration = stored.Artifacts.Manifest.Metageneration
 	receipt.SampleCount = stored.SampleCount
 	receipt.State = ReceiptStored
+	clearReceiptLease(&receipt)
 	receipt.Revision++
 	receipt.UpdatedAt = updatedAt
 	s.receipts[reservationKey] = receipt
@@ -621,6 +736,7 @@ func (s *memoryReceiptStore) MarkRejected(
 	_ context.Context,
 	_ string,
 	reservationKey string,
+	fence LeaseFence,
 	rejectionCode string,
 	updatedAt time.Time,
 ) (Receipt, error) {
@@ -632,12 +748,60 @@ func (s *memoryReceiptStore) MarkRejected(
 	if !ok {
 		return Receipt{}, errors.New("receipt not found")
 	}
+	if receipt.LeaseOwnerID != fence.OwnerID || receipt.FencingToken != fence.Token ||
+		!receipt.LeaseExpiresAt.Equal(fence.ExpiresAt) || !updatedAt.Before(receipt.LeaseExpiresAt) {
+		return Receipt{}, ErrAdmissionUnavailable
+	}
 	receipt.State = ReceiptRejected
 	receipt.RejectionCode = rejectionCode
+	clearReceiptLease(&receipt)
 	receipt.Revision++
 	receipt.UpdatedAt = updatedAt
 	s.receipts[reservationKey] = receipt
 	return receipt, nil
+}
+
+func (s *memoryReceiptStore) ReleaseLease(
+	_ context.Context,
+	_ string,
+	reservationKey string,
+	fence LeaseFence,
+	releasedAt time.Time,
+	code LeaseReleaseCode,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.releaseCalls++
+	receipt, ok := s.receipts[reservationKey]
+	if !ok || !ValidLeaseReleaseCode(code) || receipt.LeaseOwnerID != fence.OwnerID ||
+		receipt.FencingToken != fence.Token || !receipt.LeaseExpiresAt.Equal(fence.ExpiresAt) ||
+		!releasedAt.Before(receipt.LeaseExpiresAt) {
+		return ErrAdmissionUnavailable
+	}
+	clearReceiptLease(&receipt)
+	receipt.NextRecoveryAt = releasedAt.Add(InitialRecoveryBackoff)
+	receipt.LastRecoveryCode = string(code)
+	receipt.Revision++
+	receipt.UpdatedAt = releasedAt
+	s.receipts[reservationKey] = receipt
+	return nil
+}
+
+func leaseGrantForReceipt(receipt Receipt) LeaseGrant {
+	return LeaseGrant{
+		Fence:      LeaseFence{OwnerID: receipt.LeaseOwnerID, Token: receipt.FencingToken, ExpiresAt: receipt.LeaseExpiresAt},
+		OwnerKind:  receipt.LeaseOwnerKind,
+		AcquiredAt: receipt.LeaseAcquiredAt,
+	}
+}
+
+func clearReceiptLease(receipt *Receipt) {
+	receipt.LeaseOwnerID = ""
+	receipt.LeaseOwnerKind = ""
+	receipt.LeaseAcquiredAt = time.Time{}
+	receipt.LeaseHeartbeatAt = time.Time{}
+	receipt.LeaseExpiresAt = time.Time{}
+	receipt.NextRecoveryAt = time.Time{}
 }
 
 type memoryStoredArtifact struct {
@@ -782,6 +946,7 @@ func mustService(
 		receipts,
 		objects,
 		fixedBatchIDGenerator(),
+		fixedLeaseOwnerIDGenerator(),
 		now,
 	)
 	if err != nil {
@@ -817,6 +982,12 @@ func (f batchIDGeneratorFunc) NewID() (string, error) {
 func fixedBatchIDGenerator() ServerBatchIDGenerator {
 	return batchIDGeneratorFunc(func() (string, error) {
 		return "01982015-4400-7000-8000-000000000001", nil
+	})
+}
+
+func fixedLeaseOwnerIDGenerator() ServerBatchIDGenerator {
+	return batchIDGeneratorFunc(func() (string, error) {
+		return "01982015-4400-7000-8000-000000000002", nil
 	})
 }
 

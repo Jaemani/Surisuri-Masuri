@@ -31,6 +31,7 @@ const (
 	emulatorClientBatchID     = "01982015-4400-7000-8000-000000000109"
 	emulatorFirstReceiptID    = "01982015-4400-7000-8000-00000000010a"
 	emulatorSecondReceiptID   = "01982015-4400-7000-8000-00000000010b"
+	emulatorThirdReceiptID    = "01982015-4400-7000-8000-00000000010c"
 	emulatorFirebaseUID       = "firestore-emulator-user"
 	emulatorAppID             = "1:1234567890:android:emulator-app"
 	emulatorBodyHash          = "16a42ebf7f1004546f39b50e452c7c5777c075bed43d90df49ab0cfba4e3748f"
@@ -40,7 +41,7 @@ const (
 func TestFirestoreAdmissionStoreEmulatorConcurrentSameBatch(t *testing.T) {
 	client := newAdmissionEmulatorClient(t)
 	clearAdmissionIngestCollections(t, client)
-	now := time.Date(2026, time.July, 21, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 	seedAdmissionAuthorization(t, client, now)
 	barrier := newMissingIndexBarrier(clientBatchDocumentPath(emulatorTenantID, ingest.DeriveClientBatchKey(
 		emulatorTenantID,
@@ -58,6 +59,7 @@ func TestFirestoreAdmissionStoreEmulatorConcurrentSameBatch(t *testing.T) {
 	}
 	type outcome struct {
 		receipt ingest.Receipt
+		lease   ingest.LeaseGrant
 		status  ingest.ReservationStatus
 		err     error
 	}
@@ -69,12 +71,13 @@ func TestFirestoreAdmissionStoreEmulatorConcurrentSameBatch(t *testing.T) {
 		go func(index int) {
 			defer wait.Done()
 			<-start
-			outcomes[index].receipt, outcomes[index].status, outcomes[index].err =
+			outcomes[index].receipt, outcomes[index].lease, outcomes[index].status, outcomes[index].err =
 				store.AuthorizeAndReserve(
 					context.Background(),
 					principal,
 					scope,
 					reservations[index],
+					emulatorLeaseProposal(reservations[index].ReceiptID),
 				)
 		}(index)
 	}
@@ -88,8 +91,8 @@ func TestFirestoreAdmissionStoreEmulatorConcurrentSameBatch(t *testing.T) {
 		}
 		statusCounts[result.status]++
 	}
-	if statusCounts[ingest.ReservationCreated] != 1 || statusCounts[ingest.ReservationReplayPending] != 1 {
-		t.Fatalf("concurrent statuses = %#v, want one created and one replay pending", statusCounts)
+	if statusCounts[ingest.ReservationCreatedLeaseAcquired] != 1 || statusCounts[ingest.ReservationReplayInProgress] != 1 {
+		t.Fatalf("concurrent statuses = %#v, want one acquired and one in progress", statusCounts)
 	}
 	if loads := barrier.authorizationLoads.Load(); loads < 3 {
 		t.Fatalf("authorization callback loads = %d, want at least 3 to prove transaction retry", loads)
@@ -154,7 +157,7 @@ func TestFirestoreAdmissionStoreEmulatorConcurrentSameBatch(t *testing.T) {
 func TestFirestoreAdmissionStoreEmulatorMissingAuthorizationCreatesNothing(t *testing.T) {
 	client := newAdmissionEmulatorClient(t)
 	clearAdmissionIngestCollections(t, client)
-	now := time.Date(2026, time.July, 21, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 	seedAdmissionAuthorization(t, client, now)
 	consentStateID := authorization.ConsentStateDocumentID(
 		emulatorPersonID,
@@ -171,11 +174,12 @@ func TestFirestoreAdmissionStoreEmulatorMissingAuthorizationCreatesNothing(t *te
 	}
 	principal, scope := emulatorAdmissionIdentity(now)
 
-	_, _, err = store.AuthorizeAndReserve(
+	_, _, _, err = store.AuthorizeAndReserve(
 		context.Background(),
 		principal,
 		scope,
 		emulatorReservation(now, emulatorFirstReceiptID),
+		emulatorLeaseProposal(emulatorFirstReceiptID),
 	)
 	if !errors.Is(err, ingest.ErrBatchUnauthorized) {
 		t.Fatalf("AuthorizeAndReserve() error = %v, want unauthorized", err)
@@ -183,6 +187,158 @@ func TestFirestoreAdmissionStoreEmulatorMissingAuthorizationCreatesNothing(t *te
 	assertAdmissionCollectionCount(t, client, "ingestIdempotency", 0)
 	assertAdmissionCollectionCount(t, client, "ingestClientBatches", 0)
 	assertAdmissionCollectionCount(t, client, "ingestReceipts", 0)
+}
+
+func TestFirestoreAdmissionStoreEmulatorConcurrentExpiredTakeover(t *testing.T) {
+	client := newAdmissionEmulatorClient(t)
+	clearAdmissionIngestCollections(t, client)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	seedAdmissionAuthorization(t, client, now)
+	persisted := seedExpiredAdmissionReservation(t, client, now)
+	principal, _ := emulatorAdmissionIdentity(now)
+	scope, reservation := emulatorReplayRequest(persisted, now, emulatorSecondReceiptID)
+	store, err := NewFirestoreAdmissionStore(client, emulatorTransactionTimout, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewFirestoreAdmissionStore() error = %v", err)
+	}
+
+	type outcome struct {
+		receipt ingest.Receipt
+		lease   ingest.LeaseGrant
+		status  ingest.ReservationStatus
+		err     error
+	}
+	ownerIDs := []string{emulatorSecondReceiptID, emulatorThirdReceiptID}
+	outcomes := make([]outcome, len(ownerIDs))
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for index, ownerID := range ownerIDs {
+		wait.Add(1)
+		go func(index int, ownerID string) {
+			defer wait.Done()
+			<-start
+			outcomes[index].receipt, outcomes[index].lease, outcomes[index].status, outcomes[index].err =
+				store.AuthorizeAndReserve(
+					context.Background(),
+					principal,
+					scope,
+					reservation,
+					emulatorLeaseProposal(ownerID),
+				)
+		}(index, ownerID)
+	}
+	close(start)
+	wait.Wait()
+
+	statusCounts := map[ingest.ReservationStatus]int{}
+	var winner outcome
+	for index, result := range outcomes {
+		if result.err != nil {
+			t.Fatalf("concurrent takeover %d error = %v", index, result.err)
+		}
+		statusCounts[result.status]++
+		if result.status == ingest.ReservationReplayLeaseAcquired {
+			winner = result
+		}
+	}
+	if statusCounts[ingest.ReservationReplayLeaseAcquired] != 1 ||
+		statusCounts[ingest.ReservationReplayInProgress] != 1 {
+		t.Fatalf("takeover statuses = %#v, want one acquired and one in progress", statusCounts)
+	}
+	stored := readAdmissionEmulatorReceipt(t, client, persisted.TenantID, persisted.ReceiptID)
+	if stored.State != ingest.ReceiptReserved || stored.FencingToken != 2 || stored.Revision != 2 ||
+		stored.LeaseOwnerID != winner.lease.Fence.OwnerID || stored.RecoveryAttemptCount != 0 {
+		t.Fatalf("stored takeover receipt = %#v, winner = %#v", stored, winner)
+	}
+}
+
+func TestFirestoreAdmissionStoreEmulatorExpiredOwnerCannotRaceTakeoverFinalizer(t *testing.T) {
+	tests := []struct {
+		name     string
+		finalize func(*FirestoreAdmissionStore, firestoreIngestReceipt, ingest.LeaseFence, time.Time) error
+	}{
+		{
+			name: "mark stored",
+			finalize: func(store *FirestoreAdmissionStore, receipt firestoreIngestReceipt, fence ingest.LeaseFence, now time.Time) error {
+				_, err := store.MarkStored(
+					context.Background(),
+					receipt.TenantID,
+					receipt.ReservationKey,
+					fence,
+					emulatorStoredReceiptData(receipt),
+					now,
+				)
+				return err
+			},
+		},
+		{
+			name: "mark rejected",
+			finalize: func(store *FirestoreAdmissionStore, receipt firestoreIngestReceipt, fence ingest.LeaseFence, now time.Time) error {
+				_, err := store.MarkRejected(
+					context.Background(),
+					receipt.TenantID,
+					receipt.ReservationKey,
+					fence,
+					"object_conflict",
+					now,
+				)
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := newAdmissionEmulatorClient(t)
+			clearAdmissionIngestCollections(t, client)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			seedAdmissionAuthorization(t, client, now)
+			persisted := seedExpiredAdmissionReservation(t, client, now)
+			oldFence := persisted.leaseGrant().Fence
+			principal, _ := emulatorAdmissionIdentity(now)
+			scope, reservation := emulatorReplayRequest(persisted, now, emulatorSecondReceiptID)
+			store, err := NewFirestoreAdmissionStore(client, emulatorTransactionTimout, func() time.Time { return now })
+			if err != nil {
+				t.Fatalf("NewFirestoreAdmissionStore() error = %v", err)
+			}
+
+			start := make(chan struct{})
+			var wait sync.WaitGroup
+			var takeoverStatus ingest.ReservationStatus
+			var takeoverErr error
+			var finalizerErr error
+			wait.Add(2)
+			go func() {
+				defer wait.Done()
+				<-start
+				_, _, takeoverStatus, takeoverErr = store.AuthorizeAndReserve(
+					context.Background(),
+					principal,
+					scope,
+					reservation,
+					emulatorLeaseProposal(emulatorSecondReceiptID),
+				)
+			}()
+			go func() {
+				defer wait.Done()
+				<-start
+				finalizerErr = test.finalize(store, persisted, oldFence, now)
+			}()
+			close(start)
+			wait.Wait()
+
+			if takeoverErr != nil || takeoverStatus != ingest.ReservationReplayLeaseAcquired {
+				t.Fatalf("takeover result = %q, %v", takeoverStatus, takeoverErr)
+			}
+			if !errors.Is(finalizerErr, ingest.ErrAdmissionUnavailable) {
+				t.Fatalf("expired finalizer error = %v, want unavailable", finalizerErr)
+			}
+			stored := readAdmissionEmulatorReceipt(t, client, persisted.TenantID, persisted.ReceiptID)
+			if stored.State != ingest.ReceiptReserved || stored.FencingToken != 2 || stored.Revision != 2 ||
+				stored.LeaseOwnerID != emulatorSecondReceiptID || hasStoredArtifactData(stored) || stored.RejectionCode != "" {
+				t.Fatalf("receipt after takeover/finalizer race = %#v", stored)
+			}
+		})
+	}
 }
 
 func newAdmissionEmulatorClient(t *testing.T) *firestore.Client {
@@ -233,7 +389,7 @@ func (transaction barrierAdmissionTransaction) LoadAuthorization(
 	ctx context.Context,
 	principal ingest.Principal,
 	scope ingest.BatchScope,
-) (authorization.Snapshot, error) {
+) (authorizationRead, error) {
 	transaction.barrier.authorizationLoads.Add(1)
 	return transaction.admissionTransaction.LoadAuthorization(ctx, principal, scope)
 }
@@ -337,18 +493,20 @@ func emulatorAdmissionIdentity(now time.Time) (ingest.Principal, ingest.BatchSco
 			FirebaseUID: emulatorFirebaseUID,
 			AppID:       emulatorAppID,
 		}, ingest.BatchScope{
-			TenantID:          emulatorTenantID,
-			DeviceID:          emulatorDeviceID,
-			TripID:            emulatorTripID,
-			ClientSessionID:   emulatorClientSessionID,
-			InstallationID:    emulatorInstallationID,
-			ConsentRevisionID: emulatorConsentID,
-			FirstCapturedAt:   now.Add(-5 * time.Minute),
-			LastCapturedAt:    now.Add(-time.Minute),
+			TenantID:            emulatorTenantID,
+			DeviceID:            emulatorDeviceID,
+			TripID:              emulatorTripID,
+			ClientSessionID:     emulatorClientSessionID,
+			InstallationID:      emulatorInstallationID,
+			ConsentRevisionID:   emulatorConsentID,
+			ExpectedSampleCount: 42,
+			FirstCapturedAt:     now.Add(-5 * time.Minute),
+			LastCapturedAt:      now.Add(-time.Minute),
 		}
 }
 
 func emulatorReservation(now time.Time, receiptID string) ingest.Reservation {
+	_, scope := emulatorAdmissionIdentity(now)
 	return ingest.Reservation{
 		ReservationKey: ingest.DeriveReservationKey(
 			telemetry.SchemaVersionV2,
@@ -361,8 +519,97 @@ func emulatorReservation(now time.Time, receiptID string) ingest.Reservation {
 		DeviceID: emulatorDeviceID, TripID: emulatorTripID, InstallationID: emulatorInstallationID,
 		ConsentRevisionID: emulatorConsentID, ClientBatchID: emulatorClientBatchID,
 		PayloadSchemaVersion: telemetry.SchemaVersionV2, BodyHash: emulatorBodyHash,
-		CreatedAt: now, ExpiresAt: now.Add(ingest.ReceiptRetention),
+		ExpectedSampleCount: 42,
+		FirstCapturedAt:     scope.FirstCapturedAt, LastCapturedAt: scope.LastCapturedAt,
+		ValidatorVersion:      ingest.TelemetryValidatorVersion,
+		CreatedAt:             now,
+		ReservationDeadline:   now.Add(ingest.ReservationProcessingWindow),
+		ArtifactExpiresAt:     now.Add(ingest.TelemetryArtifactRetention),
+		ReceiptRetentionFloor: now.Add(ingest.ReceiptControlRetention),
 	}
+}
+
+func emulatorLeaseProposal(ownerID string) ingest.LeaseProposal {
+	return ingest.LeaseProposal{
+		Owner:    ingest.LeaseOwner{ID: ownerID, Kind: ingest.LeaseOwnerRequest},
+		Duration: ingest.DefaultRequestLeaseDuration,
+	}
+}
+
+func seedExpiredAdmissionReservation(
+	t *testing.T,
+	client *firestore.Client,
+	now time.Time,
+) firestoreIngestReceipt {
+	t.Helper()
+	createdAt := now.Add(-3 * time.Minute)
+	reservation := emulatorReservation(createdAt, emulatorFirstReceiptID)
+	index := newFirestoreIngestIndex(reservation)
+	receipt := newFirestoreIngestReceipt(
+		reservation,
+		ingest.LeaseOwner{ID: emulatorFirstReceiptID, Kind: ingest.LeaseOwnerRequest},
+		createdAt,
+		createdAt.Add(ingest.DefaultRequestLeaseDuration),
+	)
+	batch := client.Batch()
+	batch.Set(client.Doc(idempotencyDocumentPath(reservation.TenantID, reservation.ReservationKey)), index)
+	batch.Set(client.Doc(clientBatchDocumentPath(reservation.TenantID, reservation.ClientBatchKey)), index)
+	batch.Set(client.Doc(receiptDocumentPath(reservation.TenantID, reservation.ReceiptID)), receipt)
+	if _, err := batch.Commit(context.Background()); err != nil {
+		t.Fatalf("seed expired admission reservation: %v", err)
+	}
+	return receipt
+}
+
+func emulatorReplayRequest(
+	persisted firestoreIngestReceipt,
+	requestAt time.Time,
+	receiptID string,
+) (ingest.BatchScope, ingest.Reservation) {
+	_, scope := emulatorAdmissionIdentity(requestAt)
+	scope.ExpectedSampleCount = persisted.ExpectedSampleCount
+	scope.FirstCapturedAt = persisted.FirstCapturedAt
+	scope.LastCapturedAt = persisted.LastCapturedAt
+	reservation := emulatorReservation(requestAt, receiptID)
+	reservation.ExpectedSampleCount = persisted.ExpectedSampleCount
+	reservation.FirstCapturedAt = persisted.FirstCapturedAt
+	reservation.LastCapturedAt = persisted.LastCapturedAt
+	reservation.ValidatorVersion = persisted.ValidatorVersion
+	return scope, reservation
+}
+
+func emulatorStoredReceiptData(receipt firestoreIngestReceipt) ingest.StoredReceiptData {
+	return ingest.StoredReceiptData{
+		Artifacts: ingest.StoredBatchArtifacts{
+			Object: ingest.StoredArtifact{
+				Path: expectedObjectPath(receipt), SHA256: emulatorBodyHash,
+				CRC32C: 1, Size: 1024, Generation: 1, Metageneration: 1,
+			},
+			Manifest: ingest.StoredArtifact{
+				Path: expectedManifestPath(receipt), SHA256: emulatorBodyHash,
+				CRC32C: 2, Size: 512, Generation: 2, Metageneration: 1,
+			},
+		},
+		SampleCount: receipt.ExpectedSampleCount,
+	}
+}
+
+func readAdmissionEmulatorReceipt(
+	t *testing.T,
+	client *firestore.Client,
+	tenantID string,
+	receiptID string,
+) firestoreIngestReceipt {
+	t.Helper()
+	document, err := client.Doc(receiptDocumentPath(tenantID, receiptID)).Get(context.Background())
+	if err != nil {
+		t.Fatalf("read emulator receipt: %v", err)
+	}
+	var receipt firestoreIngestReceipt
+	if err := document.DataTo(&receipt); err != nil {
+		t.Fatalf("decode emulator receipt: %v", err)
+	}
+	return receipt
 }
 
 func assertAdmissionCollectionCount(

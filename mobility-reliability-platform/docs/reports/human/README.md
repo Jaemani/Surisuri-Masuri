@@ -66,3 +66,17 @@
 - 증거: [`../../evidence/`](../../evidence/)
 
 실제 결과 항목은 최소 하나의 검증 가능한 링크를 가져야 한다. 사전 계획에는 근거 링크가 없어도 되지만, 예상 산출물 ID를 실제 ID처럼 꾸미지 않는다.
+
+## 현재 요청 리포트
+
+| ID | 주제 | 상태 |
+| --- | --- | --- |
+| [HR-20260721-01](./HR-20260721-01-project-initiation.md) | 프로젝트 착수 | `draft` |
+| [HR-20260721-02](./HR-20260721-02-foreground-telemetry.md) | foreground telemetry | `draft` |
+| [HR-20260721-03](./HR-20260721-03-ingest-kernel.md) | fail-closed ingest kernel | `draft` |
+| [HR-20260721-04](./HR-20260721-04-telemetry-v2-contract.md) | telemetry v2 계약 | `draft` |
+| [HR-20260721-05](./HR-20260721-05-firebase-dual-token-verifier.md) | Firebase dual-token verifier | `draft` |
+| [HR-20260721-06](./HR-20260721-06-firestore-batch-authorization.md) | Firestore batch authorization | `draft` |
+| [HR-20260721-07](./HR-20260721-07-atomic-telemetry-admission.md) | atomic telemetry admission | `draft` |
+| [HR-20260721-08](./HR-20260721-08-immutable-artifact-lineage.md) | immutable artifact lineage | `draft` |
+| [HR-20260721-09](./HR-20260721-09-fenced-forward-admission.md) | fenced forward admission | `draft` |

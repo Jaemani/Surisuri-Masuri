@@ -65,7 +65,7 @@ type BatchManifestInput struct {
 	FirstCapturedAt      time.Time
 	LastCapturedAt       time.Time
 	ReceivedAt           time.Time
-	ExpiresAt            time.Time
+	ArtifactExpiresAt    time.Time
 	ValidatorVersion     string
 }
 
@@ -193,7 +193,7 @@ func CanonicalTelemetryManifest(
 		ObjectGeneration:     object.Generation,
 		ObjectMetageneration: object.Metageneration,
 		ReceivedAt:           canonicalTime(input.ReceivedAt),
-		ExpiresAt:            canonicalTime(input.ExpiresAt),
+		ExpiresAt:            canonicalTime(input.ArtifactExpiresAt),
 		ValidatorVersion:     input.ValidatorVersion,
 		ConsentRevisionID:    input.ConsentRevisionID,
 	}
@@ -235,8 +235,8 @@ func validateManifestInput(input BatchManifestInput, object StoredArtifact) erro
 		input.LastCapturedAt.Before(input.FirstCapturedAt) {
 		return invalidManifest("captured_at")
 	}
-	if input.ReceivedAt.IsZero() || input.ExpiresAt.IsZero() ||
-		!input.ReceivedAt.Before(input.ExpiresAt) {
+	if input.ReceivedAt.IsZero() || input.ArtifactExpiresAt.IsZero() ||
+		!input.ReceivedAt.Before(input.ArtifactExpiresAt) {
 		return invalidManifest("expires_at")
 	}
 	if strings.TrimSpace(input.ValidatorVersion) == "" {

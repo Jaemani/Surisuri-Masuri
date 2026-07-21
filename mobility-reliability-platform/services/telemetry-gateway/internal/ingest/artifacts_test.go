@@ -60,7 +60,7 @@ func TestCanonicalTelemetryManifestNormalizesTimesAndIgnoresReplayFlag(t *testin
 	input.FirstCapturedAt = input.FirstCapturedAt.UTC()
 	input.LastCapturedAt = input.LastCapturedAt.UTC()
 	input.ReceivedAt = input.ReceivedAt.UTC()
-	input.ExpiresAt = input.ExpiresAt.UTC()
+	input.ArtifactExpiresAt = input.ArtifactExpiresAt.UTC()
 	object.Replay = true
 	second, secondDigest, err := CanonicalTelemetryManifest(input, object)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestCanonicalTelemetryManifestRejectsInvalidLineage(t *testing.T) {
 			input.LastCapturedAt = input.FirstCapturedAt.Add(-time.Second)
 		}},
 		{name: "expiration", mutate: func(input *BatchManifestInput, _ *StoredArtifact) {
-			input.ExpiresAt = input.ReceivedAt
+			input.ArtifactExpiresAt = input.ReceivedAt
 		}},
 		{name: "validator", mutate: func(input *BatchManifestInput, _ *StoredArtifact) {
 			input.ValidatorVersion = "  "
@@ -167,7 +167,7 @@ func validManifestFixture() (BatchManifestInput, StoredArtifact) {
 		FirstCapturedAt:      time.Date(2026, time.July, 21, 17, 10, 0, 0, korea),
 		LastCapturedAt:       time.Date(2026, time.July, 21, 17, 29, 50, 0, korea),
 		ReceivedAt:           time.Date(2026, time.July, 21, 18, 0, 0, 0, korea),
-		ExpiresAt:            time.Date(2026, time.August, 20, 18, 0, 0, 0, korea),
+		ArtifactExpiresAt:    time.Date(2026, time.August, 20, 18, 0, 0, 0, korea),
 		ValidatorVersion:     "gateway-validator@abc123",
 	}
 	return input, StoredArtifact{

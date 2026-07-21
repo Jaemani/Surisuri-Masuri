@@ -26,6 +26,8 @@ const (
 	admissionDeviceID          = "018f1f4e-2f5e-7d31-8c77-43b50f4c91a7"
 	admissionClientSessionID   = "018f1f4e-2f5e-7d31-8c77-43b50f4c91a8"
 	admissionReceiptID         = "018f1f4e-2f5e-7d31-8c77-43b50f4c91a9"
+	admissionLeaseOwnerID      = "018f1f4e-2f5e-7d31-8c77-43b50f4c91aa"
+	admissionTakeoverOwnerID   = "018f1f4e-2f5e-7d31-8c77-43b50f4c91ab"
 	admissionUID               = "firebase-user"
 	admissionAppID             = "firebase-app"
 	admissionReservationKey    = "f2007d291f0564dcf0b1bc0de777b10829405bbbf1fb76d0528cbe796dead994"
@@ -37,17 +39,21 @@ func TestFirestoreAdmissionStoreAuthorizesBeforeIndexReadsAndCreatesAtomicTriple
 	tx := newFakeAdmissionTransaction(admissionTestSnapshot(now))
 	store := admissionTestStore(now, admissionRunner(tx))
 
-	receipt, status, err := store.AuthorizeAndReserve(
+	receipt, lease, status, err := store.AuthorizeAndReserve(
 		context.Background(),
 		admissionTestPrincipal(),
 		admissionTestScope(now),
 		admissionTestReservation(now),
+		admissionTestLeaseProposal(),
 	)
 	if err != nil {
 		t.Fatalf("AuthorizeAndReserve() error = %v", err)
 	}
-	if status != ingest.ReservationCreated {
-		t.Fatalf("AuthorizeAndReserve() status = %q, want %q", status, ingest.ReservationCreated)
+	if status != ingest.ReservationCreatedLeaseAcquired {
+		t.Fatalf("AuthorizeAndReserve() status = %q, want %q", status, ingest.ReservationCreatedLeaseAcquired)
+	}
+	if ingest.ValidateLeaseGrant(lease) != nil || lease.Fence.Token != 1 {
+		t.Fatalf("AuthorizeAndReserve() lease = %#v", lease)
 	}
 	if len(tx.calls) < 3 || tx.calls[0] != "authorization" {
 		t.Fatalf("transaction call order = %#v; authorization must be first", tx.calls)
@@ -119,11 +125,12 @@ func TestFirestoreAdmissionStoreDenialsAndProviderFailuresDoNotTouchIndexesOrWri
 			test.configure(tx)
 			store := admissionTestStore(now, admissionRunner(tx))
 
-			_, _, err := store.AuthorizeAndReserve(
+			_, _, _, err := store.AuthorizeAndReserve(
 				context.Background(),
 				admissionTestPrincipal(),
 				admissionTestScope(now),
 				admissionTestReservation(now),
+				admissionTestLeaseProposal(),
 			)
 			if !errors.Is(err, test.want) {
 				t.Fatalf("AuthorizeAndReserve() error = %v, want %v", err, test.want)
@@ -153,6 +160,9 @@ func TestFirestoreAdmissionStoreRejectsScopeReservationMismatchBeforeTransaction
 		{name: "trip", mutate: func(value *ingest.Reservation) { value.TripID = admissionReceiptID }},
 		{name: "installation", mutate: func(value *ingest.Reservation) { value.InstallationID = admissionReceiptID }},
 		{name: "consent revision", mutate: func(value *ingest.Reservation) { value.ConsentRevisionID = admissionReceiptID }},
+		{name: "expected sample count", mutate: func(value *ingest.Reservation) { value.ExpectedSampleCount++ }},
+		{name: "first captured", mutate: func(value *ingest.Reservation) { value.FirstCapturedAt = value.FirstCapturedAt.Add(time.Second) }},
+		{name: "last captured", mutate: func(value *ingest.Reservation) { value.LastCapturedAt = value.LastCapturedAt.Add(time.Second) }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -167,11 +177,12 @@ func TestFirestoreAdmissionStoreRejectsScopeReservationMismatchBeforeTransaction
 				return nil
 			})
 
-			_, _, err := store.AuthorizeAndReserve(
+			_, _, _, err := store.AuthorizeAndReserve(
 				context.Background(),
 				admissionTestPrincipal(),
 				scope,
 				reservation,
+				admissionTestLeaseProposal(),
 			)
 			if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
 				t.Fatalf("AuthorizeAndReserve() error = %v, want admission unavailable", err)
@@ -190,7 +201,7 @@ func TestFirestoreAdmissionStoreMapsReplayReceiptStates(t *testing.T) {
 		state      ingest.ReceiptState
 		wantStatus ingest.ReservationStatus
 	}{
-		{name: "reserved remains pending", state: ingest.ReceiptReserved, wantStatus: ingest.ReservationReplayPending},
+		{name: "reserved active lease remains in progress", state: ingest.ReceiptReserved, wantStatus: ingest.ReservationReplayInProgress},
 		{name: "stored is complete", state: ingest.ReceiptStored, wantStatus: ingest.ReservationReplayComplete},
 		{name: "rejected remains rejected", state: ingest.ReceiptRejected, wantStatus: ingest.ReservationReplayRejected},
 	}
@@ -200,11 +211,12 @@ func TestFirestoreAdmissionStoreMapsReplayReceiptStates(t *testing.T) {
 			tx, expected := admissionReplayTransaction(t, now, test.state)
 			store := admissionTestStore(now, admissionRunner(tx))
 
-			got, status, err := store.AuthorizeAndReserve(
+			got, _, status, err := store.AuthorizeAndReserve(
 				context.Background(),
 				admissionTestPrincipal(),
 				admissionTestScope(now),
 				admissionTestReservation(now),
+				admissionTestLeaseProposal(),
 			)
 			if err != nil {
 				t.Fatalf("AuthorizeAndReserve() error = %v", err)
@@ -224,6 +236,122 @@ func TestFirestoreAdmissionStoreMapsReplayReceiptStates(t *testing.T) {
 				t.Fatalf("replay creates/updates = %d/%d, want 0/0", len(tx.creates), len(tx.updates))
 			}
 		})
+	}
+}
+
+func TestFirestoreAdmissionStoreExpiredLeaseTakeoverIncrementsFence(t *testing.T) {
+	createdAt := admissionTestNow()
+	takeoverAt := createdAt.Add(ingest.DefaultRequestLeaseDuration)
+	tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+	tx.snapshot = admissionTestSnapshot(takeoverAt)
+	tx.readTime = takeoverAt
+	store := admissionTestStore(takeoverAt, admissionRunner(tx))
+	proposal := admissionTestLeaseProposal()
+	proposal.Owner.ID = admissionTakeoverOwnerID
+	replayScope, replayReservation := admissionReplayRequest(createdAt, takeoverAt)
+
+	receipt, lease, status, err := store.AuthorizeAndReserve(
+		context.Background(),
+		admissionTestPrincipal(),
+		replayScope,
+		replayReservation,
+		proposal,
+	)
+	if err != nil {
+		t.Fatalf("AuthorizeAndReserve() error = %v", err)
+	}
+	if status != ingest.ReservationReplayLeaseAcquired || receipt.FencingToken != 2 ||
+		lease.Fence.Token != 2 || lease.Fence.OwnerID != admissionTakeoverOwnerID {
+		t.Fatalf("takeover result = status:%q receipt:%#v lease:%#v", status, receipt, lease)
+	}
+	if len(tx.updates) != 1 || tx.updates[0].path != admissionReceiptPath() {
+		t.Fatalf("takeover updates = %#v", tx.updates)
+	}
+}
+
+func TestFirestoreAdmissionStoreStaleFenceCannotFinalizeAfterTakeover(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
+	receipt := admissionTestReceipt(reservation, ingest.ReceiptReserved)
+	receipt.FencingToken = 2
+	receipt.LeaseOwnerID = admissionTakeoverOwnerID
+	receipt.LeaseAcquiredAt = createdAt.Add(time.Minute)
+	receipt.LeaseHeartbeatAt = receipt.LeaseAcquiredAt
+	receipt.LeaseExpiresAt = receipt.LeaseAcquiredAt.Add(ingest.DefaultRequestLeaseDuration)
+	receipt.NextRecoveryAt = receipt.LeaseExpiresAt
+	receipt.Revision = 2
+	receipt.UpdatedAt = receipt.LeaseAcquiredAt
+	tx := newFakeAdmissionTransaction(admissionTestSnapshot(receipt.LeaseAcquiredAt))
+	tx.indexes[admissionIdempotencyPath()] = index
+	tx.indexes[admissionClientBatchPath()] = index
+	tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
+	store := admissionTestStore(receipt.LeaseAcquiredAt, admissionRunner(tx))
+
+	_, err := store.MarkStored(
+		context.Background(),
+		admissionTenantID,
+		admissionReservationKey,
+		admissionTestFence(reservation),
+		admissionStoredReceiptData(reservation),
+		receipt.LeaseAcquiredAt.Add(time.Second),
+	)
+	if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatalf("MarkStored() stale fence error = %v", err)
+	}
+	if len(tx.updates) != 0 {
+		t.Fatalf("stale finalizer updates = %d, want zero", len(tx.updates))
+	}
+}
+
+func TestFirestoreAdmissionStoreReleaseLeaseSchedulesBoundedRecovery(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+	store := admissionTestStore(createdAt, admissionRunner(tx))
+	releasedAt := createdAt.Add(time.Minute)
+	tx.readTime = releasedAt
+
+	err := store.ReleaseLease(
+		context.Background(),
+		admissionTenantID,
+		admissionReservationKey,
+		admissionTestFence(reservation),
+		releasedAt,
+		ingest.LeaseReleaseArtifactUnavailable,
+	)
+	if err != nil {
+		t.Fatalf("ReleaseLease() error = %v", err)
+	}
+	if len(tx.updates) != 1 {
+		t.Fatalf("ReleaseLease() updates = %d, want one", len(tx.updates))
+	}
+	updates := make(map[string]any)
+	for _, update := range tx.updates[0].updates {
+		updates[update.Path] = update.Value
+	}
+	if got, ok := updates["next_recovery_at"].(time.Time); !ok ||
+		!got.Equal(releasedAt.Add(ingest.InitialRecoveryBackoff)) {
+		t.Fatalf("next_recovery_at = %#v", updates["next_recovery_at"])
+	}
+	if updates["last_recovery_code"] != string(ingest.LeaseReleaseArtifactUnavailable) {
+		t.Fatalf("last_recovery_code = %#v", updates["last_recovery_code"])
+	}
+}
+
+func TestConservativeAdmissionTimesAreOperationSpecific(t *testing.T) {
+	applicationTime := admissionTestNow()
+	readTime := applicationTime.Add(2 * time.Second)
+	acceptance, err := conservativeAcceptanceTime(applicationTime, readTime)
+	if err != nil || !acceptance.Equal(readTime) {
+		t.Fatalf("acceptance time = %s, %v; want later read time", acceptance, err)
+	}
+	cleanup, err := conservativeCleanupTime(applicationTime, readTime)
+	if err != nil || !cleanup.Equal(applicationTime) {
+		t.Fatalf("cleanup time = %s, %v; want earlier application time", cleanup, err)
+	}
+	if _, err := conservativeAcceptanceTime(applicationTime, applicationTime.Add(maxAdmissionClockSkew+time.Nanosecond)); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatalf("excess skew error = %v", err)
 	}
 }
 
@@ -276,11 +404,12 @@ func TestFirestoreAdmissionStoreDistinguishesIdempotencyAndClientBatchConflicts(
 			test.configure(tx)
 			store := admissionTestStore(now, admissionRunner(tx))
 
-			_, status, err := store.AuthorizeAndReserve(
+			_, _, status, err := store.AuthorizeAndReserve(
 				context.Background(),
 				admissionTestPrincipal(),
 				admissionTestScope(now),
 				reservation,
+				admissionTestLeaseProposal(),
 			)
 			if err != nil {
 				t.Fatalf("AuthorizeAndReserve() error = %v", err)
@@ -360,11 +489,11 @@ func TestFirestoreAdmissionStoreTreatsCorruptAdmissionLinkageAsUnavailable(t *te
 			name: "persisted lineage has noncanonical retention",
 			configure: func(tx *fakeAdmissionTransaction) {
 				index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
-				index.ExpiresAt = reservation.CreatedAt.Add(31 * 24 * time.Hour)
+				index.ReceiptRetentionFloor = reservation.CreatedAt.Add(31 * 24 * time.Hour)
 				tx.indexes[admissionIdempotencyPath()] = index
 				tx.indexes[admissionClientBatchPath()] = index
 				receipt := admissionTestReceipt(reservation, ingest.ReceiptReserved)
-				receipt.ExpiresAt = index.ExpiresAt
+				receipt.ReceiptRetentionFloor = index.ReceiptRetentionFloor
 				tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
 			},
 		},
@@ -376,6 +505,28 @@ func TestFirestoreAdmissionStoreTreatsCorruptAdmissionLinkageAsUnavailable(t *te
 				tx.indexes[admissionClientBatchPath()] = index
 				receipt := admissionTestReceipt(reservation, ingest.ReceiptStored)
 				receipt.ManifestSHA256 = ""
+				tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
+			},
+		},
+		{
+			name: "reserved receipt missing expected sample count",
+			configure: func(tx *fakeAdmissionTransaction) {
+				index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
+				tx.indexes[admissionIdempotencyPath()] = index
+				tx.indexes[admissionClientBatchPath()] = index
+				receipt := admissionTestReceipt(reservation, ingest.ReceiptReserved)
+				receipt.ExpectedSampleCount = 0
+				tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
+			},
+		},
+		{
+			name: "reserved receipt has partial lease",
+			configure: func(tx *fakeAdmissionTransaction) {
+				index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
+				tx.indexes[admissionIdempotencyPath()] = index
+				tx.indexes[admissionClientBatchPath()] = index
+				receipt := admissionTestReceipt(reservation, ingest.ReceiptReserved)
+				receipt.LeaseOwnerID = ""
 				tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
 			},
 		},
@@ -398,11 +549,12 @@ func TestFirestoreAdmissionStoreTreatsCorruptAdmissionLinkageAsUnavailable(t *te
 			test.configure(tx)
 			store := admissionTestStore(now, admissionRunner(tx))
 
-			_, _, err := store.AuthorizeAndReserve(
+			_, _, _, err := store.AuthorizeAndReserve(
 				context.Background(),
 				admissionTestPrincipal(),
 				admissionTestScope(now),
 				reservation,
+				admissionTestLeaseProposal(),
 			)
 			if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
 				t.Fatalf("AuthorizeAndReserve() error = %v, want generic admission unavailable", err)
@@ -432,11 +584,12 @@ func TestFirestoreAdmissionStoreResetsOuterResultAcrossTransactionRetries(t *tes
 	})
 	store := admissionTestStore(now, runner)
 
-	receipt, status, err := store.AuthorizeAndReserve(
+	receipt, _, status, err := store.AuthorizeAndReserve(
 		context.Background(),
 		admissionTestPrincipal(),
 		admissionTestScope(now),
 		admissionTestReservation(now),
+		admissionTestLeaseProposal(),
 	)
 	if err != nil {
 		t.Fatalf("AuthorizeAndReserve() error = %v", err)
@@ -444,7 +597,7 @@ func TestFirestoreAdmissionStoreResetsOuterResultAcrossTransactionRetries(t *tes
 	if authorizationCalls != 2 || first.authorizationLoads != 1 || second.authorizationLoads != 1 {
 		t.Fatalf("authorization evaluations = runner:%d first:%d second:%d, want 2/1/1", authorizationCalls, first.authorizationLoads, second.authorizationLoads)
 	}
-	if status != ingest.ReservationCreated {
+	if status != ingest.ReservationCreatedLeaseAcquired {
 		t.Fatalf("final status = %q, want created from final callback", status)
 	}
 	if receipt.State != ingest.ReceiptReserved {
@@ -458,7 +611,7 @@ func TestFirestoreAdmissionStoreResetsOuterResultAcrossTransactionRetries(t *tes
 func TestFirestoreAdmissionStoreRejectsExpiredPendingReplay(t *testing.T) {
 	now := admissionTestNow()
 	proposal := admissionTestReservation(now)
-	persisted := admissionTestReservation(now.Add(-ingest.ReceiptRetention))
+	persisted := admissionTestReservation(now.Add(-ingest.ReservationProcessingWindow))
 	index := admissionTestIndex(persisted, persisted.ReceiptID, persisted.BodyHash)
 	receipt := admissionTestReceipt(persisted, ingest.ReceiptReserved)
 	tx := newFakeAdmissionTransaction(admissionTestSnapshot(now))
@@ -467,11 +620,12 @@ func TestFirestoreAdmissionStoreRejectsExpiredPendingReplay(t *testing.T) {
 	tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(receipt)
 	store := admissionTestStore(now, admissionRunner(tx))
 
-	_, _, err := store.AuthorizeAndReserve(
+	_, _, _, err := store.AuthorizeAndReserve(
 		context.Background(),
 		admissionTestPrincipal(),
 		admissionTestScope(now),
 		proposal,
+		admissionTestLeaseProposal(),
 	)
 	if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
 		t.Fatalf("AuthorizeAndReserve() error = %v, want expired pending unavailable", err)
@@ -495,11 +649,12 @@ func TestFirestoreAdmissionStoreReauthorizesOnRetryAndStopsAfterRevocation(t *te
 	})
 	store := admissionTestStore(now, runner)
 
-	_, _, err := store.AuthorizeAndReserve(
+	_, _, _, err := store.AuthorizeAndReserve(
 		context.Background(),
 		admissionTestPrincipal(),
 		admissionTestScope(now),
 		admissionTestReservation(now),
+		admissionTestLeaseProposal(),
 	)
 	if !errors.Is(err, ingest.ErrBatchUnauthorized) {
 		t.Fatalf("AuthorizeAndReserve() error = %v, want revoked authorization denial", err)
@@ -517,7 +672,7 @@ func TestFirestoreAdmissionStoreReauthorizesOnRetryAndStopsAfterRevocation(t *te
 
 func TestFirestoreAdmissionStoreMarkStoredAndRejectedPreserveLinkageAndAdvanceRevision(t *testing.T) {
 	createdAt := admissionTestNow()
-	updatedAt := createdAt.Add(17 * time.Minute)
+	updatedAt := createdAt.Add(time.Minute)
 	reservation := admissionTestReservation(createdAt)
 	tests := []struct {
 		name          string
@@ -533,6 +688,7 @@ func TestFirestoreAdmissionStoreMarkStoredAndRejectedPreserveLinkageAndAdvanceRe
 					context.Background(),
 					admissionTenantID,
 					admissionReservationKey,
+					admissionTestFence(reservation),
 					admissionStoredReceiptData(reservation),
 					updatedAt,
 				)
@@ -543,7 +699,7 @@ func TestFirestoreAdmissionStoreMarkStoredAndRejectedPreserveLinkageAndAdvanceRe
 		{
 			name: "mark rejected",
 			invoke: func(store *FirestoreAdmissionStore) (ingest.Receipt, error) {
-				return store.MarkRejected(context.Background(), admissionTenantID, admissionReservationKey, "object_conflict", updatedAt)
+				return store.MarkRejected(context.Background(), admissionTenantID, admissionReservationKey, admissionTestFence(reservation), "object_conflict", updatedAt)
 			},
 			wantState:     ingest.ReceiptRejected,
 			wantPath:      admissionReceiptPath(),
@@ -558,6 +714,7 @@ func TestFirestoreAdmissionStoreMarkStoredAndRejectedPreserveLinkageAndAdvanceRe
 			tx.indexes[admissionIdempotencyPath()] = index
 			tx.indexes[admissionClientBatchPath()] = index
 			tx.receipts[admissionReceiptPath()] = admissionTestReceiptDTO(admissionTestReceipt(reservation, ingest.ReceiptReserved))
+			tx.readTime = updatedAt
 			store := admissionTestStore(createdAt, admissionRunner(tx))
 
 			got, err := test.invoke(store)
@@ -632,6 +789,7 @@ func TestFirestoreAdmissionStoreFinalizersRejectBrokenLinkageWithoutUpdate(t *te
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			tx := newFakeAdmissionTransaction(admissionTestSnapshot(now))
+			tx.readTime = now.Add(time.Minute)
 			if test.configure != nil {
 				test.configure(tx)
 			}
@@ -641,6 +799,7 @@ func TestFirestoreAdmissionStoreFinalizersRejectBrokenLinkageWithoutUpdate(t *te
 				context.Background(),
 				admissionTenantID,
 				admissionReservationKey,
+				admissionTestFence(reservation),
 				admissionStoredReceiptData(reservation),
 				now.Add(time.Minute),
 			)
@@ -670,6 +829,7 @@ func TestFirestoreAdmissionStoreFinalizerTerminalReplayIgnoresOlderCallerTime(t 
 					context.Background(),
 					admissionTenantID,
 					admissionReservationKey,
+					ingest.LeaseFence{},
 					admissionStoredReceiptData(reservation),
 					now.Add(time.Minute),
 				)
@@ -683,6 +843,7 @@ func TestFirestoreAdmissionStoreFinalizerTerminalReplayIgnoresOlderCallerTime(t 
 					context.Background(),
 					admissionTenantID,
 					admissionReservationKey,
+					ingest.LeaseFence{},
 					"object_conflict",
 					now.Add(time.Minute),
 				)
@@ -759,6 +920,7 @@ func TestFirestoreAdmissionStoreStoredReplayRejectsArtifactMismatch(t *testing.T
 				context.Background(),
 				admissionTenantID,
 				admissionReservationKey,
+				admissionTestFence(reservation),
 				stored,
 				now.Add(time.Minute),
 			)
@@ -774,7 +936,7 @@ func TestFirestoreAdmissionStoreStoredReplayRejectsArtifactMismatch(t *testing.T
 
 func TestFirestoreAdmissionStoreRejectsExpiredReservedFinalizer(t *testing.T) {
 	now := admissionTestNow()
-	reservation := admissionTestReservation(now.Add(-ingest.ReceiptRetention))
+	reservation := admissionTestReservation(now.Add(-ingest.ReservationProcessingWindow))
 	index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
 	receipt := admissionTestReceipt(reservation, ingest.ReceiptReserved)
 	receiptDTO := admissionTestReceiptDTO(receipt)
@@ -788,6 +950,7 @@ func TestFirestoreAdmissionStoreRejectsExpiredReservedFinalizer(t *testing.T) {
 		context.Background(),
 		admissionTenantID,
 		admissionReservationKey,
+		admissionTestFence(reservation),
 		admissionStoredReceiptData(reservation),
 		now,
 	)
@@ -799,8 +962,231 @@ func TestFirestoreAdmissionStoreRejectsExpiredReservedFinalizer(t *testing.T) {
 	}
 }
 
+func TestFirestoreAdmissionStoreForwardMutationsUseReceiptReadTime(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	leaseExpiresAt := reservation.CreatedAt.Add(ingest.DefaultRequestLeaseDuration)
+	tests := []struct {
+		name       string
+		callerTime time.Time
+		readTime   time.Time
+	}{
+		{
+			name:       "server observes expired lease while caller clock is still before expiry",
+			callerTime: leaseExpiresAt.Add(-2 * time.Second),
+			readTime:   leaseExpiresAt.Add(2 * time.Second),
+		},
+		{
+			name:       "caller and server clock skew exceeds bound",
+			callerTime: createdAt.Add(time.Minute),
+			readTime:   createdAt.Add(time.Minute + maxAdmissionClockSkew + time.Nanosecond),
+		},
+	}
+	mutations := []struct {
+		name   string
+		invoke func(*FirestoreAdmissionStore, time.Time) error
+	}{
+		{
+			name: "mark stored",
+			invoke: func(store *FirestoreAdmissionStore, at time.Time) error {
+				_, err := store.MarkStored(
+					context.Background(),
+					admissionTenantID,
+					admissionReservationKey,
+					admissionTestFence(reservation),
+					admissionStoredReceiptData(reservation),
+					at,
+				)
+				return err
+			},
+		},
+		{
+			name: "mark rejected",
+			invoke: func(store *FirestoreAdmissionStore, at time.Time) error {
+				_, err := store.MarkRejected(
+					context.Background(),
+					admissionTenantID,
+					admissionReservationKey,
+					admissionTestFence(reservation),
+					"object_conflict",
+					at,
+				)
+				return err
+			},
+		},
+		{
+			name: "release lease",
+			invoke: func(store *FirestoreAdmissionStore, at time.Time) error {
+				return store.ReleaseLease(
+					context.Background(),
+					admissionTenantID,
+					admissionReservationKey,
+					admissionTestFence(reservation),
+					at,
+					ingest.LeaseReleaseFinalizerUnavailable,
+				)
+			},
+		},
+	}
+	for _, test := range tests {
+		for _, mutation := range mutations {
+			t.Run(test.name+"/"+mutation.name, func(t *testing.T) {
+				tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+				tx.readTime = test.readTime
+				store := admissionTestStore(test.callerTime, admissionRunner(tx))
+
+				err := mutation.invoke(store, test.callerTime)
+				if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+					t.Fatalf("forward mutation error = %v, want unavailable", err)
+				}
+				if len(tx.updates) != 0 {
+					t.Fatalf("forward mutation updates = %d, want zero", len(tx.updates))
+				}
+			})
+		}
+	}
+}
+
+func TestFirestoreAdmissionStoreMarkStoredRequiresExpectedSampleCount(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	updatedAt := createdAt.Add(time.Minute)
+	for _, sampleCount := range []int{reservation.ExpectedSampleCount - 1, reservation.ExpectedSampleCount + 1} {
+		t.Run(fmt.Sprintf("sample_count_%d", sampleCount), func(t *testing.T) {
+			tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+			tx.readTime = updatedAt
+			store := admissionTestStore(updatedAt, admissionRunner(tx))
+			stored := admissionStoredReceiptData(reservation)
+			stored.SampleCount = sampleCount
+
+			_, err := store.MarkStored(
+				context.Background(),
+				admissionTenantID,
+				admissionReservationKey,
+				admissionTestFence(reservation),
+				stored,
+				updatedAt,
+			)
+			if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+				t.Fatalf("MarkStored() error = %v, want sample count mismatch unavailable", err)
+			}
+			if len(tx.updates) != 0 {
+				t.Fatalf("sample count mismatch updates = %d, want zero", len(tx.updates))
+			}
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreReplayBindsReceiptImmutablesToReservation(t *testing.T) {
+	now := admissionTestNow()
+	tests := []struct {
+		name   string
+		mutate func(*firestoreIngestReceipt)
+	}{
+		{name: "device", mutate: func(receipt *firestoreIngestReceipt) { receipt.DeviceID = "01982015-4400-7000-8000-000000000091" }},
+		{name: "trip", mutate: func(receipt *firestoreIngestReceipt) { receipt.TripID = "01982015-4400-7000-8000-000000000092" }},
+		{name: "consent", mutate: func(receipt *firestoreIngestReceipt) {
+			receipt.ConsentRevisionID = "01982015-4400-7000-8000-000000000093"
+		}},
+		{name: "expected sample count", mutate: func(receipt *firestoreIngestReceipt) { receipt.ExpectedSampleCount++ }},
+		{name: "first captured time", mutate: func(receipt *firestoreIngestReceipt) {
+			receipt.FirstCapturedAt = receipt.FirstCapturedAt.Add(time.Nanosecond)
+		}},
+		{name: "last captured time", mutate: func(receipt *firestoreIngestReceipt) {
+			receipt.LastCapturedAt = receipt.LastCapturedAt.Add(-time.Nanosecond)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tx, _ := admissionReplayTransaction(t, now, ingest.ReceiptReserved)
+			receipt := tx.receipts[admissionReceiptPath()]
+			test.mutate(&receipt)
+			tx.receipts[admissionReceiptPath()] = receipt
+			store := admissionTestStore(now, admissionRunner(tx))
+
+			_, _, _, err := store.AuthorizeAndReserve(
+				context.Background(),
+				admissionTestPrincipal(),
+				admissionTestScope(now),
+				admissionTestReservation(now),
+				admissionTestLeaseProposal(),
+			)
+			if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+				t.Fatalf("AuthorizeAndReserve() error = %v, want immutable mismatch unavailable", err)
+			}
+			if len(tx.creates) != 0 || len(tx.updates) != 0 {
+				t.Fatalf("immutable mismatch creates/updates = %d/%d, want zero", len(tx.creates), len(tx.updates))
+			}
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreValidatesPersistedLeaseDuration(t *testing.T) {
+	now := admissionTestNow()
+	tests := []struct {
+		name     string
+		duration time.Duration
+		wantErr  bool
+	}{
+		{name: "below minimum", duration: ingest.MinLeaseDuration - time.Nanosecond, wantErr: true},
+		{name: "minimum", duration: ingest.MinLeaseDuration},
+		{name: "maximum", duration: ingest.MaxLeaseDuration},
+		{name: "above maximum", duration: ingest.MaxLeaseDuration + time.Nanosecond, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tx, _ := admissionReplayTransaction(t, now, ingest.ReceiptReserved)
+			receipt := tx.receipts[admissionReceiptPath()]
+			receipt.LeaseExpiresAt = receipt.LeaseHeartbeatAt.Add(test.duration)
+			receipt.NextRecoveryAt = receipt.LeaseExpiresAt
+			tx.receipts[admissionReceiptPath()] = receipt
+			store := admissionTestStore(now, admissionRunner(tx))
+
+			_, _, status, err := store.AuthorizeAndReserve(
+				context.Background(),
+				admissionTestPrincipal(),
+				admissionTestScope(now),
+				admissionTestReservation(now),
+				admissionTestLeaseProposal(),
+			)
+			if test.wantErr {
+				if !errors.Is(err, ingest.ErrAdmissionUnavailable) || len(tx.updates) != 0 {
+					t.Fatalf("invalid duration result = %q, %v, updates %d", status, err, len(tx.updates))
+				}
+				return
+			}
+			if err != nil || status != ingest.ReservationReplayInProgress {
+				t.Fatalf("valid duration result = %q, %v", status, err)
+			}
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreRejectsInitialLeaseBeforeReservationCreation(t *testing.T) {
+	createdAt := admissionTestNow()
+	trustedNow := createdAt.Add(-time.Nanosecond)
+	tx := newFakeAdmissionTransaction(admissionTestSnapshot(createdAt))
+	tx.readTime = trustedNow
+	store := admissionTestStore(trustedNow, admissionRunner(tx))
+
+	_, _, _, err := store.AuthorizeAndReserve(
+		context.Background(),
+		admissionTestPrincipal(),
+		admissionTestScope(createdAt),
+		admissionTestReservation(createdAt),
+		admissionTestLeaseProposal(),
+	)
+	if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatalf("AuthorizeAndReserve() error = %v, want time ordering unavailable", err)
+	}
+	if len(tx.creates) != 0 || len(tx.updates) != 0 {
+		t.Fatalf("invalid initial time creates/updates = %d/%d, want zero", len(tx.creates), len(tx.updates))
+	}
+}
+
 type fakeAdmissionTransaction struct {
 	snapshot           authorization.Snapshot
+	readTime           time.Time
 	authorizationErr   error
 	indexes            map[string]firestoreIngestIndex
 	receipts           map[string]firestoreIngestReceipt
@@ -823,6 +1209,7 @@ type fakeAdmissionUpdate struct {
 func newFakeAdmissionTransaction(snapshot authorization.Snapshot) *fakeAdmissionTransaction {
 	return &fakeAdmissionTransaction{
 		snapshot: snapshot,
+		readTime: snapshot.Trip.StartedAt.Add(time.Hour).UTC(),
 		indexes:  make(map[string]firestoreIngestIndex),
 		receipts: make(map[string]firestoreIngestReceipt),
 	}
@@ -832,10 +1219,10 @@ func (tx *fakeAdmissionTransaction) LoadAuthorization(
 	_ context.Context,
 	_ ingest.Principal,
 	_ ingest.BatchScope,
-) (authorization.Snapshot, error) {
+) (authorizationRead, error) {
 	tx.calls = append(tx.calls, "authorization")
 	tx.authorizationLoads++
-	return tx.snapshot, tx.authorizationErr
+	return authorizationRead{Snapshot: tx.snapshot, ReadTime: tx.readTime}, tx.authorizationErr
 }
 
 func (tx *fakeAdmissionTransaction) ReadIndex(_ context.Context, path string) (firestoreIngestIndex, bool, error) {
@@ -844,10 +1231,10 @@ func (tx *fakeAdmissionTransaction) ReadIndex(_ context.Context, path string) (f
 	return value, exists, nil
 }
 
-func (tx *fakeAdmissionTransaction) ReadReceipt(_ context.Context, path string) (firestoreIngestReceipt, bool, error) {
+func (tx *fakeAdmissionTransaction) ReadReceipt(_ context.Context, path string) (receiptRead, bool, error) {
 	tx.calls = append(tx.calls, "receipt:"+path)
 	value, exists := tx.receipts[path]
-	return value, exists, nil
+	return receiptRead{Receipt: value, ReadTime: tx.readTime}, exists, nil
 }
 
 func (tx *fakeAdmissionTransaction) Create(_ context.Context, path string, value any) error {
@@ -902,33 +1289,56 @@ func admissionTestPrincipal() ingest.Principal {
 
 func admissionTestScope(now time.Time) ingest.BatchScope {
 	return ingest.BatchScope{
-		TenantID:          admissionTenantID,
-		DeviceID:          admissionDeviceID,
-		TripID:            admissionTripID,
-		ClientSessionID:   admissionClientSessionID,
-		InstallationID:    admissionInstallationID,
-		ConsentRevisionID: admissionConsentRevisionID,
-		FirstCapturedAt:   now.Add(-5 * time.Minute),
-		LastCapturedAt:    now.Add(-time.Minute),
+		TenantID:            admissionTenantID,
+		DeviceID:            admissionDeviceID,
+		TripID:              admissionTripID,
+		ClientSessionID:     admissionClientSessionID,
+		InstallationID:      admissionInstallationID,
+		ConsentRevisionID:   admissionConsentRevisionID,
+		ExpectedSampleCount: 42,
+		FirstCapturedAt:     now.Add(-5 * time.Minute),
+		LastCapturedAt:      now.Add(-time.Minute),
 	}
 }
 
 func admissionTestReservation(now time.Time) ingest.Reservation {
+	scope := admissionTestScope(now)
 	return ingest.Reservation{
-		ReservationKey:       admissionReservationKey,
-		ClientBatchKey:       admissionClientBatchKey,
-		ReceiptID:            admissionReceiptID,
-		TenantID:             admissionTenantID,
-		BatchID:              admissionReceiptID,
-		DeviceID:             admissionDeviceID,
-		TripID:               admissionTripID,
-		InstallationID:       admissionInstallationID,
-		ConsentRevisionID:    admissionConsentRevisionID,
-		ClientBatchID:        "018f1f4e-2f5e-7d31-8c77-43b50f4c91ab",
-		PayloadSchemaVersion: telemetry.SchemaVersionV2,
-		BodyHash:             "7d6db7b45493315b87f4333993082edab4fcc2db365001f91dfc4a57d23f40f4",
-		CreatedAt:            now,
-		ExpiresAt:            now.Add(ingest.ReceiptRetention),
+		ReservationKey:        admissionReservationKey,
+		ClientBatchKey:        admissionClientBatchKey,
+		ReceiptID:             admissionReceiptID,
+		TenantID:              admissionTenantID,
+		BatchID:               admissionReceiptID,
+		DeviceID:              admissionDeviceID,
+		TripID:                admissionTripID,
+		InstallationID:        admissionInstallationID,
+		ConsentRevisionID:     admissionConsentRevisionID,
+		ClientBatchID:         "018f1f4e-2f5e-7d31-8c77-43b50f4c91ab",
+		PayloadSchemaVersion:  telemetry.SchemaVersionV2,
+		BodyHash:              "7d6db7b45493315b87f4333993082edab4fcc2db365001f91dfc4a57d23f40f4",
+		ExpectedSampleCount:   42,
+		FirstCapturedAt:       scope.FirstCapturedAt,
+		LastCapturedAt:        scope.LastCapturedAt,
+		ValidatorVersion:      ingest.TelemetryValidatorVersion,
+		CreatedAt:             now,
+		ReservationDeadline:   now.Add(ingest.ReservationProcessingWindow),
+		ArtifactExpiresAt:     now.Add(ingest.TelemetryArtifactRetention),
+		ReceiptRetentionFloor: now.Add(ingest.ReceiptControlRetention),
+	}
+}
+
+func admissionTestLeaseProposal() ingest.LeaseProposal {
+	return ingest.LeaseProposal{
+		Owner:    ingest.LeaseOwner{ID: admissionLeaseOwnerID, Kind: ingest.LeaseOwnerRequest},
+		Duration: ingest.DefaultRequestLeaseDuration,
+	}
+}
+
+func admissionTestFence(reservation ingest.Reservation) ingest.LeaseFence {
+	return ingest.LeaseFence{
+		OwnerID:   admissionLeaseOwnerID,
+		Token:     1,
+		ExpiresAt: reservation.CreatedAt.Add(ingest.DefaultRequestLeaseDuration),
 	}
 }
 
@@ -973,39 +1383,54 @@ func admissionTestSnapshot(now time.Time) authorization.Snapshot {
 
 func admissionTestIndex(reservation ingest.Reservation, receiptID, bodyHash string) firestoreIngestIndex {
 	return firestoreIngestIndex{
-		TenantID:             reservation.TenantID,
-		ReservationKey:       reservation.ReservationKey,
-		ClientBatchKey:       reservation.ClientBatchKey,
-		ReceiptID:            receiptID,
-		BatchID:              reservation.BatchID,
-		InstallationID:       reservation.InstallationID,
-		ClientBatchID:        reservation.ClientBatchID,
-		PayloadSchemaVersion: reservation.PayloadSchemaVersion,
-		BodyHash:             bodyHash,
-		CreatedAt:            reservation.CreatedAt,
-		ExpiresAt:            reservation.ExpiresAt,
+		TenantID:              reservation.TenantID,
+		ReservationKey:        reservation.ReservationKey,
+		ClientBatchKey:        reservation.ClientBatchKey,
+		ReceiptID:             receiptID,
+		BatchID:               reservation.BatchID,
+		InstallationID:        reservation.InstallationID,
+		ClientBatchID:         reservation.ClientBatchID,
+		PayloadSchemaVersion:  reservation.PayloadSchemaVersion,
+		BodyHash:              bodyHash,
+		CreatedAt:             reservation.CreatedAt,
+		ReceiptRetentionFloor: reservation.ReceiptRetentionFloor,
 	}
 }
 
 func admissionTestReceipt(reservation ingest.Reservation, state ingest.ReceiptState) ingest.Receipt {
 	receipt := ingest.Receipt{
-		ReservationKey:       reservation.ReservationKey,
-		ClientBatchKey:       reservation.ClientBatchKey,
-		ReceiptID:            reservation.ReceiptID,
-		TenantID:             reservation.TenantID,
-		BatchID:              reservation.BatchID,
-		DeviceID:             reservation.DeviceID,
-		TripID:               reservation.TripID,
-		InstallationID:       reservation.InstallationID,
-		ConsentRevisionID:    reservation.ConsentRevisionID,
-		ClientBatchID:        reservation.ClientBatchID,
-		PayloadSchemaVersion: reservation.PayloadSchemaVersion,
-		BodyHash:             reservation.BodyHash,
-		State:                state,
-		Revision:             1,
-		CreatedAt:            reservation.CreatedAt,
-		UpdatedAt:            reservation.CreatedAt,
-		ExpiresAt:            reservation.ExpiresAt,
+		ReservationKey:        reservation.ReservationKey,
+		ClientBatchKey:        reservation.ClientBatchKey,
+		ReceiptID:             reservation.ReceiptID,
+		TenantID:              reservation.TenantID,
+		BatchID:               reservation.BatchID,
+		DeviceID:              reservation.DeviceID,
+		TripID:                reservation.TripID,
+		InstallationID:        reservation.InstallationID,
+		ConsentRevisionID:     reservation.ConsentRevisionID,
+		ClientBatchID:         reservation.ClientBatchID,
+		PayloadSchemaVersion:  reservation.PayloadSchemaVersion,
+		BodyHash:              reservation.BodyHash,
+		ExpectedSampleCount:   reservation.ExpectedSampleCount,
+		FirstCapturedAt:       reservation.FirstCapturedAt,
+		LastCapturedAt:        reservation.LastCapturedAt,
+		ValidatorVersion:      reservation.ValidatorVersion,
+		State:                 state,
+		FencingToken:          1,
+		Revision:              1,
+		CreatedAt:             reservation.CreatedAt,
+		UpdatedAt:             reservation.CreatedAt,
+		ReservationDeadline:   reservation.ReservationDeadline,
+		ArtifactExpiresAt:     reservation.ArtifactExpiresAt,
+		ReceiptRetentionFloor: reservation.ReceiptRetentionFloor,
+	}
+	if state == ingest.ReceiptReserved {
+		receipt.LeaseOwnerID = admissionLeaseOwnerID
+		receipt.LeaseOwnerKind = ingest.LeaseOwnerRequest
+		receipt.LeaseAcquiredAt = reservation.CreatedAt
+		receipt.LeaseHeartbeatAt = reservation.CreatedAt
+		receipt.LeaseExpiresAt = reservation.CreatedAt.Add(ingest.DefaultRequestLeaseDuration)
+		receipt.NextRecoveryAt = receipt.LeaseExpiresAt
 	}
 	if state == ingest.ReceiptStored || state == "queued" || state == "projected" || state == "deleting" || state == "deleted" {
 		applyAdmissionStoredReceiptData(&receipt, admissionStoredReceiptData(reservation))
@@ -1042,13 +1467,29 @@ func admissionTestReceiptDTO(receipt ingest.Receipt) firestoreIngestReceipt {
 		ManifestSize:           receipt.ManifestSize,
 		ManifestGeneration:     receipt.ManifestGeneration,
 		ManifestMetageneration: receipt.ManifestMetageneration,
+		ExpectedSampleCount:    receipt.ExpectedSampleCount,
 		SampleCount:            receipt.SampleCount,
+		FirstCapturedAt:        receipt.FirstCapturedAt,
+		LastCapturedAt:         receipt.LastCapturedAt,
+		ValidatorVersion:       receipt.ValidatorVersion,
 		State:                  receipt.State,
 		RejectionCode:          receipt.RejectionCode,
+		FencingToken:           receipt.FencingToken,
+		LeaseOwnerID:           receipt.LeaseOwnerID,
+		LeaseOwnerKind:         receipt.LeaseOwnerKind,
+		LeaseAcquiredAt:        receipt.LeaseAcquiredAt,
+		LeaseHeartbeatAt:       receipt.LeaseHeartbeatAt,
+		LeaseExpiresAt:         receipt.LeaseExpiresAt,
+		RecoveryAttemptCount:   receipt.RecoveryAttemptCount,
+		NextRecoveryAt:         receipt.NextRecoveryAt,
+		LastRecoveryCode:       receipt.LastRecoveryCode,
 		Revision:               receipt.Revision,
 		CreatedAt:              receipt.CreatedAt,
 		UpdatedAt:              receipt.UpdatedAt,
-		ExpiresAt:              receipt.ExpiresAt,
+		ReservationDeadline:    receipt.ReservationDeadline,
+		ArtifactExpiresAt:      receipt.ArtifactExpiresAt,
+		ReceiptRetentionFloor:  receipt.ReceiptRetentionFloor,
+		PurgeEligibleAt:        receipt.PurgeEligibleAt,
 	}
 }
 
@@ -1126,6 +1567,20 @@ func admissionReplayTransaction(
 	return tx, receipt
 }
 
+func admissionReplayRequest(createdAt, requestAt time.Time) (ingest.BatchScope, ingest.Reservation) {
+	stable := admissionTestReservation(createdAt)
+	reservation := admissionTestReservation(requestAt)
+	reservation.ExpectedSampleCount = stable.ExpectedSampleCount
+	reservation.FirstCapturedAt = stable.FirstCapturedAt
+	reservation.LastCapturedAt = stable.LastCapturedAt
+	reservation.ValidatorVersion = stable.ValidatorVersion
+	scope := admissionTestScope(requestAt)
+	scope.ExpectedSampleCount = stable.ExpectedSampleCount
+	scope.FirstCapturedAt = stable.FirstCapturedAt
+	scope.LastCapturedAt = stable.LastCapturedAt
+	return scope, reservation
+}
+
 func admissionIdempotencyPath() string {
 	return "tenants/" + admissionTenantID + "/ingestIdempotency/" + admissionReservationKey
 }
@@ -1152,8 +1607,14 @@ func assertAdmissionReceiptMatchesReservation(t *testing.T, got ingest.Receipt, 
 		got.ClientBatchID != reservation.ClientBatchID ||
 		got.PayloadSchemaVersion != reservation.PayloadSchemaVersion ||
 		got.BodyHash != reservation.BodyHash ||
+		got.ExpectedSampleCount != reservation.ExpectedSampleCount ||
+		!got.FirstCapturedAt.Equal(reservation.FirstCapturedAt) ||
+		!got.LastCapturedAt.Equal(reservation.LastCapturedAt) ||
+		got.ValidatorVersion != reservation.ValidatorVersion ||
 		!got.CreatedAt.Equal(reservation.CreatedAt) ||
-		!got.ExpiresAt.Equal(reservation.ExpiresAt) {
+		!got.ReservationDeadline.Equal(reservation.ReservationDeadline) ||
+		!got.ArtifactExpiresAt.Equal(reservation.ArtifactExpiresAt) ||
+		!got.ReceiptRetentionFloor.Equal(reservation.ReceiptRetentionFloor) {
 		t.Fatalf("receipt lineage = %#v, want reservation %#v", got, reservation)
 	}
 }

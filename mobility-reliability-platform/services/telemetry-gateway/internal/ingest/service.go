@@ -20,12 +20,15 @@ var (
 	ErrIdempotencyConflict  = errors.New("idempotency key reused with a different body")
 	ErrClientBatchConflict  = errors.New("client batch id reused in a different installation or body")
 	ErrObjectConflict       = errors.New("object path already contains different content")
+	ErrIngestInProgress     = errors.New("telemetry batch is already being processed")
 	ErrAdmissionUnavailable = errors.New("telemetry admission store is unavailable")
 )
 
 const (
-	ReceiptRetention          = 30 * 24 * time.Hour
-	TelemetryValidatorVersion = "telemetry-gateway-validator@1"
+	ReservationProcessingWindow = 15 * time.Minute
+	TelemetryArtifactRetention  = 30 * 24 * time.Hour
+	ReceiptControlRetention     = 37 * 24 * time.Hour
+	TelemetryValidatorVersion   = "telemetry-gateway-validator@1"
 )
 
 type Principal struct {
@@ -37,14 +40,15 @@ type Principal struct {
 // server-side authorization decision. Coordinates and all other telemetry
 // values are deliberately excluded.
 type BatchScope struct {
-	TenantID          string
-	DeviceID          string
-	TripID            string
-	ClientSessionID   string
-	InstallationID    string
-	ConsentRevisionID string
-	FirstCapturedAt   time.Time
-	LastCapturedAt    time.Time
+	TenantID            string
+	DeviceID            string
+	TripID              string
+	ClientSessionID     string
+	InstallationID      string
+	ConsentRevisionID   string
+	ExpectedSampleCount int
+	FirstCapturedAt     time.Time
+	LastCapturedAt      time.Time
 }
 
 type ServerBatchIDGenerator interface {
@@ -54,9 +58,16 @@ type ServerBatchIDGenerator interface {
 type ReceiptState string
 
 const (
-	ReceiptReserved ReceiptState = "reserved"
-	ReceiptStored   ReceiptState = "stored"
-	ReceiptRejected ReceiptState = "rejected"
+	ReceiptReserved       ReceiptState = "reserved"
+	ReceiptStored         ReceiptState = "stored"
+	ReceiptRejected       ReceiptState = "rejected"
+	ReceiptQueued         ReceiptState = "queued"
+	ReceiptProjected      ReceiptState = "projected"
+	ReceiptDeleting       ReceiptState = "deleting"
+	ReceiptDeleted        ReceiptState = "deleted"
+	ReceiptCleanupPending ReceiptState = "cleanup_pending"
+	ReceiptExpired        ReceiptState = "expired"
+	ReceiptRecoveryHold   ReceiptState = "recovery_hold"
 )
 
 type Receipt struct {
@@ -84,41 +95,67 @@ type Receipt struct {
 	ManifestSize           int64
 	ManifestGeneration     int64
 	ManifestMetageneration int64
+	ExpectedSampleCount    int
 	SampleCount            int
+	FirstCapturedAt        time.Time
+	LastCapturedAt         time.Time
+	ValidatorVersion       string
 	State                  ReceiptState
 	RejectionCode          string
+	FencingToken           int64
+	LeaseOwnerID           string
+	LeaseOwnerKind         LeaseOwnerKind
+	LeaseAcquiredAt        time.Time
+	LeaseHeartbeatAt       time.Time
+	LeaseExpiresAt         time.Time
+	RecoveryAttemptCount   int64
+	NextRecoveryAt         time.Time
+	LastRecoveryCode       string
 	Revision               int64
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
-	ExpiresAt              time.Time
+	ReservationDeadline    time.Time
+	ArtifactExpiresAt      time.Time
+	ReceiptRetentionFloor  time.Time
+	PurgeEligibleAt        *time.Time
 }
 
 type ReservationStatus string
 
 const (
-	ReservationCreated             ReservationStatus = "created"
-	ReservationReplayPending       ReservationStatus = "replay_pending"
-	ReservationReplayComplete      ReservationStatus = "replay_complete"
-	ReservationReplayRejected      ReservationStatus = "replay_rejected"
-	ReservationConflict            ReservationStatus = "idempotency_conflict"
-	ReservationClientBatchConflict ReservationStatus = "client_batch_conflict"
+	ReservationCreatedLeaseAcquired ReservationStatus = "created_lease_acquired"
+	ReservationReplayLeaseAcquired  ReservationStatus = "replay_lease_acquired"
+	ReservationReplayInProgress     ReservationStatus = "replay_in_progress"
+	ReservationReplayComplete       ReservationStatus = "replay_complete"
+	ReservationReplayRejected       ReservationStatus = "replay_rejected"
+	ReservationReplayRecoveryHold   ReservationStatus = "replay_recovery_hold"
+	ReservationReplayExpired        ReservationStatus = "replay_expired"
+	ReservationConflict             ReservationStatus = "idempotency_conflict"
+	ReservationClientBatchConflict  ReservationStatus = "client_batch_conflict"
 )
 
 type Reservation struct {
-	ReservationKey       string
-	ClientBatchKey       string
-	ReceiptID            string
-	TenantID             string
-	BatchID              string
-	DeviceID             string
-	TripID               string
-	InstallationID       string
-	ConsentRevisionID    string
-	ClientBatchID        string
-	PayloadSchemaVersion string
-	BodyHash             string
-	CreatedAt            time.Time
-	ExpiresAt            time.Time
+	ReservationKey        string
+	ClientBatchKey        string
+	ReceiptID             string
+	TenantID              string
+	BatchID               string
+	DeviceID              string
+	TripID                string
+	InstallationID        string
+	ConsentRevisionID     string
+	ClientBatchID         string
+	PayloadSchemaVersion  string
+	BodyHash              string
+	ExpectedSampleCount   int
+	FirstCapturedAt       time.Time
+	LastCapturedAt        time.Time
+	ValidatorVersion      string
+	CreatedAt             time.Time
+	ReservationDeadline   time.Time
+	ArtifactExpiresAt     time.Time
+	ReceiptRetentionFloor time.Time
+	PurgeEligibleAt       *time.Time
 }
 
 // StoredReceiptData carries the complete immutable raw and manifest lineage
@@ -130,16 +167,18 @@ type StoredReceiptData struct {
 }
 
 type AdmissionStore interface {
-	AuthorizeAndReserve(context.Context, Principal, BatchScope, Reservation) (Receipt, ReservationStatus, error)
-	MarkStored(context.Context, string, string, StoredReceiptData, time.Time) (Receipt, error)
-	MarkRejected(context.Context, string, string, string, time.Time) (Receipt, error)
+	AuthorizeAndReserve(context.Context, Principal, BatchScope, Reservation, LeaseProposal) (Receipt, LeaseGrant, ReservationStatus, error)
+	MarkStored(context.Context, string, string, LeaseFence, StoredReceiptData, time.Time) (Receipt, error)
+	MarkRejected(context.Context, string, string, LeaseFence, string, time.Time) (Receipt, error)
+	ReleaseLease(context.Context, string, string, LeaseFence, time.Time, LeaseReleaseCode) error
 }
 
 type Service struct {
-	admissions AdmissionStore
-	artifacts  TelemetryArtifactStore
-	batchIDs   ServerBatchIDGenerator
-	now        func() time.Time
+	admissions    AdmissionStore
+	artifacts     TelemetryArtifactStore
+	batchIDs      ServerBatchIDGenerator
+	leaseOwnerIDs ServerBatchIDGenerator
+	now           func() time.Time
 }
 
 type Result struct {
@@ -151,19 +190,21 @@ func NewService(
 	admissions AdmissionStore,
 	artifacts TelemetryArtifactStore,
 	batchIDs ServerBatchIDGenerator,
+	leaseOwnerIDs ServerBatchIDGenerator,
 	now func() time.Time,
 ) (*Service, error) {
-	if admissions == nil || artifacts == nil || batchIDs == nil {
-		return nil, errors.New("ingest admission store, artifact store and batch id generator are required")
+	if admissions == nil || artifacts == nil || batchIDs == nil || leaseOwnerIDs == nil {
+		return nil, errors.New("ingest admission store, artifact store, batch id generator and lease owner id generator are required")
 	}
 	if now == nil {
 		now = time.Now
 	}
 	return &Service{
-		admissions: admissions,
-		artifacts:  artifacts,
-		batchIDs:   batchIDs,
-		now:        now,
+		admissions:    admissions,
+		artifacts:     artifacts,
+		batchIDs:      batchIDs,
+		leaseOwnerIDs: leaseOwnerIDs,
+		now:           now,
 	}, nil
 }
 
@@ -181,19 +222,27 @@ func (s *Service) Ingest(
 	}
 	firstCapturedAt, lastCapturedAt := capturedAtBounds(batch)
 	scope := BatchScope{
-		TenantID:          batch.TenantID,
-		DeviceID:          batch.DeviceID,
-		TripID:            batch.TripID,
-		ClientSessionID:   batch.ClientSessionID,
-		InstallationID:    batch.InstallationID,
-		ConsentRevisionID: batch.ConsentRevisionID,
-		FirstCapturedAt:   firstCapturedAt,
-		LastCapturedAt:    lastCapturedAt,
+		TenantID:            batch.TenantID,
+		DeviceID:            batch.DeviceID,
+		TripID:              batch.TripID,
+		ClientSessionID:     batch.ClientSessionID,
+		InstallationID:      batch.InstallationID,
+		ConsentRevisionID:   batch.ConsentRevisionID,
+		ExpectedSampleCount: len(batch.Samples),
+		FirstCapturedAt:     firstCapturedAt,
+		LastCapturedAt:      lastCapturedAt,
 	}
 
 	bodyDigest := sha256.Sum256(rawBody)
 	bodyHash := hex.EncodeToString(bodyDigest[:])
 	now := s.now().UTC()
+	leaseOwnerID, err := s.leaseOwnerIDs.NewID()
+	if err != nil {
+		return Result{}, fmt.Errorf("generate lease owner id: %w", err)
+	}
+	if !telemetry.IsUUID(leaseOwnerID) {
+		return Result{}, errors.New("generated lease owner id is not a UUID")
+	}
 	serverBatchID, err := s.batchIDs.NewID()
 	if err != nil {
 		return Result{}, fmt.Errorf("generate batch id: %w", err)
@@ -209,21 +258,30 @@ func (s *Service) Ingest(
 		batch.ClientBatchID,
 	)
 	clientBatchKey := DeriveClientBatchKey(batch.TenantID, batch.ClientBatchID)
-	receipt, status, err := s.admissions.AuthorizeAndReserve(ctx, principal, scope, Reservation{
-		ReservationKey:       reservationKey,
-		ClientBatchKey:       clientBatchKey,
-		ReceiptID:            receiptID,
-		TenantID:             batch.TenantID,
-		BatchID:              serverBatchID,
-		DeviceID:             batch.DeviceID,
-		TripID:               batch.TripID,
-		InstallationID:       batch.InstallationID,
-		ConsentRevisionID:    batch.ConsentRevisionID,
-		ClientBatchID:        batch.ClientBatchID,
-		PayloadSchemaVersion: batch.SchemaVersion,
-		BodyHash:             bodyHash,
-		CreatedAt:            now,
-		ExpiresAt:            now.Add(ReceiptRetention),
+	receipt, lease, status, err := s.admissions.AuthorizeAndReserve(ctx, principal, scope, Reservation{
+		ReservationKey:        reservationKey,
+		ClientBatchKey:        clientBatchKey,
+		ReceiptID:             receiptID,
+		TenantID:              batch.TenantID,
+		BatchID:               serverBatchID,
+		DeviceID:              batch.DeviceID,
+		TripID:                batch.TripID,
+		InstallationID:        batch.InstallationID,
+		ConsentRevisionID:     batch.ConsentRevisionID,
+		ClientBatchID:         batch.ClientBatchID,
+		PayloadSchemaVersion:  batch.SchemaVersion,
+		BodyHash:              bodyHash,
+		ExpectedSampleCount:   len(batch.Samples),
+		FirstCapturedAt:       firstCapturedAt,
+		LastCapturedAt:        lastCapturedAt,
+		ValidatorVersion:      TelemetryValidatorVersion,
+		CreatedAt:             now,
+		ReservationDeadline:   now.Add(ReservationProcessingWindow),
+		ArtifactExpiresAt:     now.Add(TelemetryArtifactRetention),
+		ReceiptRetentionFloor: now.Add(ReceiptControlRetention),
+	}, LeaseProposal{
+		Owner:    LeaseOwner{ID: leaseOwnerID, Kind: LeaseOwnerRequest},
+		Duration: DefaultRequestLeaseDuration,
 	})
 	if err != nil {
 		if errors.Is(err, ErrBatchUnauthorized) {
@@ -240,16 +298,44 @@ func (s *Service) Ingest(
 		return Result{Receipt: receipt, Replay: true}, nil
 	case ReservationReplayRejected:
 		return Result{}, rejectionError(receipt.RejectionCode)
-	case ReservationCreated, ReservationReplayPending:
+	case ReservationReplayInProgress:
+		return Result{Receipt: receipt, Replay: true}, ErrIngestInProgress
+	case ReservationReplayRecoveryHold, ReservationReplayExpired:
+		return Result{}, ErrAdmissionUnavailable
+	case ReservationCreatedLeaseAcquired, ReservationReplayLeaseAcquired:
 	default:
 		return Result{}, errors.New("unknown reservation status")
+	}
+	if ValidateLeaseGrant(lease) != nil || lease.OwnerKind != LeaseOwnerRequest {
+		return Result{}, ErrAdmissionUnavailable
 	}
 
 	compressed, err := deterministicGZIP(rawBody)
 	if err != nil {
 		return Result{}, fmt.Errorf("compress batch: %w", err)
 	}
-	if receipt.CreatedAt.IsZero() || !telemetry.IsUUID(receipt.BatchID) {
+	if receipt.State != ReceiptReserved || receipt.CreatedAt.IsZero() || !telemetry.IsUUID(receipt.BatchID) ||
+		receipt.TenantID != batch.TenantID ||
+		receipt.DeviceID != batch.DeviceID ||
+		receipt.TripID != batch.TripID ||
+		receipt.InstallationID != batch.InstallationID ||
+		receipt.ConsentRevisionID != batch.ConsentRevisionID ||
+		receipt.ClientBatchID != batch.ClientBatchID ||
+		receipt.PayloadSchemaVersion != batch.SchemaVersion ||
+		receipt.ReservationKey != reservationKey ||
+		receipt.ClientBatchKey != clientBatchKey ||
+		receipt.BodyHash != bodyHash ||
+		receipt.ExpectedSampleCount != len(batch.Samples) ||
+		!receipt.FirstCapturedAt.Equal(firstCapturedAt) ||
+		!receipt.LastCapturedAt.Equal(lastCapturedAt) ||
+		receipt.ValidatorVersion != TelemetryValidatorVersion ||
+		receipt.ReservationDeadline.IsZero() || receipt.ArtifactExpiresAt.IsZero() ||
+		receipt.LeaseOwnerID != leaseOwnerID ||
+		receipt.LeaseOwnerKind != LeaseOwnerRequest ||
+		receipt.FencingToken != lease.Fence.Token ||
+		receipt.LeaseOwnerID != lease.Fence.OwnerID ||
+		!receipt.LeaseExpiresAt.Equal(lease.Fence.ExpiresAt) ||
+		!receipt.LeaseAcquiredAt.Equal(lease.AcquiredAt) {
 		return Result{}, errors.New("reserved receipt is missing stable batch identity")
 	}
 	manifestInput := BatchManifestInput{
@@ -262,12 +348,12 @@ func (s *Service) Ingest(
 		ClientBatchID:        receipt.ClientBatchID,
 		ConsentRevisionID:    receipt.ConsentRevisionID,
 		BodyHash:             receipt.BodyHash,
-		SampleCount:          len(batch.Samples),
-		FirstCapturedAt:      firstCapturedAt,
-		LastCapturedAt:       lastCapturedAt,
+		SampleCount:          receipt.ExpectedSampleCount,
+		FirstCapturedAt:      receipt.FirstCapturedAt,
+		LastCapturedAt:       receipt.LastCapturedAt,
 		ReceivedAt:           receipt.CreatedAt.UTC(),
-		ExpiresAt:            receipt.ExpiresAt.UTC(),
-		ValidatorVersion:     TelemetryValidatorVersion,
+		ArtifactExpiresAt:    receipt.ArtifactExpiresAt.UTC(),
+		ValidatorVersion:     receipt.ValidatorVersion,
 	}
 	objectPath := ExpectedTelemetryObjectPath(manifestInput)
 	manifestPath := ExpectedTelemetryManifestPath(manifestInput)
@@ -283,6 +369,7 @@ func (s *Service) Ingest(
 				ctx,
 				receipt.TenantID,
 				receipt.ReservationKey,
+				lease.Fence,
 				"object_conflict",
 				s.now().UTC(),
 			); rejectErr != nil {
@@ -290,13 +377,24 @@ func (s *Service) Ingest(
 			}
 			return Result{}, ErrObjectConflict
 		}
+		if releaseErr := s.admissions.ReleaseLease(
+			ctx,
+			receipt.TenantID,
+			receipt.ReservationKey,
+			lease.Fence,
+			s.now().UTC(),
+			LeaseReleaseArtifactUnavailable,
+		); releaseErr != nil {
+			return Result{}, fmt.Errorf("store batch artifacts: %w; release lease: %v", err, releaseErr)
+		}
 		return Result{}, fmt.Errorf("store batch artifacts: %w", err)
 	}
 
-	receipt, err = s.admissions.MarkStored(
+	storedReceipt, err := s.admissions.MarkStored(
 		ctx,
 		receipt.TenantID,
 		receipt.ReservationKey,
+		lease.Fence,
 		StoredReceiptData{
 			Artifacts:   storedArtifacts,
 			SampleCount: len(batch.Samples),
@@ -304,9 +402,20 @@ func (s *Service) Ingest(
 		s.now().UTC(),
 	)
 	if err != nil {
+		if releaseErr := s.admissions.ReleaseLease(
+			ctx,
+			receipt.TenantID,
+			receipt.ReservationKey,
+			lease.Fence,
+			s.now().UTC(),
+			LeaseReleaseFinalizerUnavailable,
+		); releaseErr != nil {
+			return Result{}, fmt.Errorf("complete receipt: %w; release lease: %v", err, releaseErr)
+		}
 		return Result{}, fmt.Errorf("complete receipt: %w", err)
 	}
-	return Result{Receipt: receipt, Replay: status == ReservationReplayPending}, nil
+	receipt = storedReceipt
+	return Result{Receipt: receipt, Replay: status == ReservationReplayLeaseAcquired}, nil
 }
 
 func capturedAtBounds(batch telemetry.Batch) (time.Time, time.Time) {

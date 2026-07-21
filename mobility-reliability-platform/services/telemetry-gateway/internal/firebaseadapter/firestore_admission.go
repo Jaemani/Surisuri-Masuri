@@ -15,12 +15,25 @@ import (
 	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/telemetry"
 )
 
-const maxAdmissionTransactionTimeout = 10 * time.Second
+const (
+	maxAdmissionTransactionTimeout = 10 * time.Second
+	maxAdmissionClockSkew          = 5 * time.Second
+)
+
+type authorizationRead struct {
+	Snapshot authorization.Snapshot
+	ReadTime time.Time
+}
+
+type receiptRead struct {
+	Receipt  firestoreIngestReceipt
+	ReadTime time.Time
+}
 
 type admissionTransaction interface {
-	LoadAuthorization(context.Context, ingest.Principal, ingest.BatchScope) (authorization.Snapshot, error)
+	LoadAuthorization(context.Context, ingest.Principal, ingest.BatchScope) (authorizationRead, error)
 	ReadIndex(context.Context, string) (firestoreIngestIndex, bool, error)
-	ReadReceipt(context.Context, string) (firestoreIngestReceipt, bool, error)
+	ReadReceipt(context.Context, string) (receiptRead, bool, error)
 	Create(context.Context, string, any) error
 	Update(context.Context, string, []firestore.Update) error
 }
@@ -78,44 +91,57 @@ func (s *FirestoreAdmissionStore) AuthorizeAndReserve(
 	principal ingest.Principal,
 	scope ingest.BatchScope,
 	reservation ingest.Reservation,
-) (ingest.Receipt, ingest.ReservationStatus, error) {
+	leaseProposal ingest.LeaseProposal,
+) (ingest.Receipt, ingest.LeaseGrant, ingest.ReservationStatus, error) {
 	if s == nil || s.runTransaction == nil || s.now == nil || ctx == nil {
-		return ingest.Receipt{}, "", ingest.ErrAdmissionUnavailable
+		return ingest.Receipt{}, ingest.LeaseGrant{}, "", ingest.ErrAdmissionUnavailable
 	}
 	paths, err := admissionDocumentPaths(reservation)
 	if err != nil {
-		return ingest.Receipt{}, "", ingest.ErrAdmissionUnavailable
+		return ingest.Receipt{}, ingest.LeaseGrant{}, "", ingest.ErrAdmissionUnavailable
+	}
+	if ingest.ValidateLeaseProposal(leaseProposal) != nil || leaseProposal.Owner.Kind != ingest.LeaseOwnerRequest {
+		return ingest.Receipt{}, ingest.LeaseGrant{}, "", ingest.ErrAdmissionUnavailable
 	}
 	if reservation.TenantID != scope.TenantID ||
 		reservation.DeviceID != scope.DeviceID ||
 		reservation.TripID != scope.TripID ||
 		reservation.InstallationID != scope.InstallationID ||
-		reservation.ConsentRevisionID != scope.ConsentRevisionID {
-		return ingest.Receipt{}, "", ingest.ErrAdmissionUnavailable
+		reservation.ConsentRevisionID != scope.ConsentRevisionID ||
+		reservation.ExpectedSampleCount != scope.ExpectedSampleCount ||
+		!reservation.FirstCapturedAt.Equal(scope.FirstCapturedAt) ||
+		!reservation.LastCapturedAt.Equal(scope.LastCapturedAt) {
+		return ingest.Receipt{}, ingest.LeaseGrant{}, "", ingest.ErrAdmissionUnavailable
 	}
 
 	var (
 		resultReceipt ingest.Receipt
+		resultLease   ingest.LeaseGrant
 		resultStatus  ingest.ReservationStatus
 	)
 	err = s.runTransaction(ctx, func(runContext context.Context, transaction admissionTransaction) error {
 		// Firestore may retry this callback. Reset result state and reevaluate the
 		// current authorization snapshot on every attempt.
 		resultReceipt = ingest.Receipt{}
+		resultLease = ingest.LeaseGrant{}
 		resultStatus = ""
 
-		now := s.now().UTC()
-		if now.IsZero() {
+		applicationNow := s.now().UTC()
+		if applicationNow.IsZero() {
 			return ingest.ErrAdmissionUnavailable
 		}
-		snapshot, loadErr := transaction.LoadAuthorization(runContext, principal, scope)
+		authorizationResult, loadErr := transaction.LoadAuthorization(runContext, principal, scope)
 		if loadErr != nil {
 			if errors.Is(loadErr, authorization.ErrSnapshotNotFound) {
 				return ingest.ErrBatchUnauthorized
 			}
 			return normalizeAdmissionError(runContext, loadErr)
 		}
-		if evaluationErr := authorization.EvaluateSnapshot(principal, scope, snapshot, now); evaluationErr != nil {
+		now, clockErr := conservativeAcceptanceTime(applicationNow, authorizationResult.ReadTime)
+		if clockErr != nil {
+			return ingest.ErrAdmissionUnavailable
+		}
+		if evaluationErr := authorization.EvaluateSnapshot(principal, scope, authorizationResult.Snapshot, now); evaluationErr != nil {
 			if errors.Is(evaluationErr, ingest.ErrBatchUnauthorized) {
 				return ingest.ErrBatchUnauthorized
 			}
@@ -133,8 +159,18 @@ func (s *FirestoreAdmissionStore) AuthorizeAndReserve(
 
 		switch {
 		case !hasIdempotencyIndex && !hasClientBatchIndex:
+			if now.Before(reservation.CreatedAt) {
+				return ingest.ErrAdmissionUnavailable
+			}
+			leaseExpiresAt := now.Add(leaseProposal.Duration)
+			if leaseExpiresAt.After(reservation.ReservationDeadline) {
+				return ingest.ErrAdmissionUnavailable
+			}
 			index := newFirestoreIngestIndex(reservation)
-			receipt := newFirestoreIngestReceipt(reservation)
+			receipt := newFirestoreIngestReceipt(reservation, leaseProposal.Owner, now, leaseExpiresAt)
+			if validateReceiptLinkage(receipt, index) != nil || validateReceiptState(receipt) != nil {
+				return ingest.ErrAdmissionUnavailable
+			}
 			// All reads above complete before the first create.
 			if createErr := transaction.Create(runContext, paths.idempotency, index); createErr != nil {
 				return normalizeAdmissionError(runContext, createErr)
@@ -146,7 +182,8 @@ func (s *FirestoreAdmissionStore) AuthorizeAndReserve(
 				return normalizeAdmissionError(runContext, createErr)
 			}
 			resultReceipt = receipt.toDomain()
-			resultStatus = ingest.ReservationCreated
+			resultLease = receipt.leaseGrant()
+			resultStatus = ingest.ReservationCreatedLeaseAcquired
 			return nil
 
 		case hasIdempotencyIndex && !hasClientBatchIndex:
@@ -173,10 +210,11 @@ func (s *FirestoreAdmissionStore) AuthorizeAndReserve(
 				return ingest.ErrAdmissionUnavailable
 			}
 			linkedReceiptPath := receiptDocumentPath(reservation.TenantID, clientBatchIndex.ReceiptID)
-			linkedReceipt, exists, linkedErr := transaction.ReadReceipt(runContext, linkedReceiptPath)
+			linkedReceiptResult, exists, linkedErr := transaction.ReadReceipt(runContext, linkedReceiptPath)
 			if linkedErr != nil {
 				return normalizeAdmissionError(runContext, linkedErr)
 			}
+			linkedReceipt := linkedReceiptResult.Receipt
 			if !exists || validateReceiptLinkage(linkedReceipt, clientBatchIndex) != nil ||
 				validateReceiptState(linkedReceipt) != nil {
 				return ingest.ErrAdmissionUnavailable
@@ -189,10 +227,11 @@ func (s *FirestoreAdmissionStore) AuthorizeAndReserve(
 			return ingest.ErrAdmissionUnavailable
 		}
 		receiptPath := receiptDocumentPath(reservation.TenantID, idempotencyIndex.ReceiptID)
-		storedReceipt, exists, readErr := transaction.ReadReceipt(runContext, receiptPath)
+		storedReceiptResult, exists, readErr := transaction.ReadReceipt(runContext, receiptPath)
 		if readErr != nil {
 			return normalizeAdmissionError(runContext, readErr)
 		}
+		storedReceipt := storedReceiptResult.Receipt
 		if !exists || validateReceiptLinkage(storedReceipt, idempotencyIndex) != nil ||
 			validateReceiptState(storedReceipt) != nil {
 			return ingest.ErrAdmissionUnavailable
@@ -201,35 +240,81 @@ func (s *FirestoreAdmissionStore) AuthorizeAndReserve(
 			resultStatus = ingest.ReservationConflict
 			return nil
 		}
-		if storedReceipt.State == ingest.ReceiptReserved && !now.Before(storedReceipt.ExpiresAt) {
+		if validateReceiptReservation(storedReceipt, reservation) != nil {
 			return ingest.ErrAdmissionUnavailable
 		}
 		resultReceipt = storedReceipt.toDomain()
 		switch storedReceipt.State {
 		case ingest.ReceiptReserved:
-			resultStatus = ingest.ReservationReplayPending
-		case ingest.ReceiptStored, "queued", "projected", "deleting", "deleted":
+			replayNow, clockErr := conservativeAcceptanceTime(applicationNow, storedReceiptResult.ReadTime)
+			if clockErr != nil {
+				return ingest.ErrAdmissionUnavailable
+			}
+			if replayNow.After(now) {
+				now = replayNow
+			}
+			if !now.Before(storedReceipt.ReservationDeadline) {
+				return ingest.ErrAdmissionUnavailable
+			}
+			if receiptHasLeaseFields(storedReceipt) && now.Before(storedReceipt.LeaseExpiresAt) {
+				resultStatus = ingest.ReservationReplayInProgress
+				return nil
+			}
+			if !receiptHasLeaseFields(storedReceipt) && now.Before(storedReceipt.NextRecoveryAt) {
+				resultStatus = ingest.ReservationReplayInProgress
+				return nil
+			}
+			leaseExpiresAt := now.Add(leaseProposal.Duration)
+			if leaseExpiresAt.After(storedReceipt.ReservationDeadline) {
+				return ingest.ErrAdmissionUnavailable
+			}
+			nextToken := storedReceipt.FencingToken + 1
+			nextRevision := storedReceipt.Revision + 1
+			if nextToken <= 1 || nextRevision <= storedReceipt.Revision {
+				return ingest.ErrAdmissionUnavailable
+			}
+			if updateErr := transaction.Update(runContext, receiptPath, leaseTakeoverUpdates(
+				leaseProposal.Owner,
+				now,
+				leaseExpiresAt,
+				nextToken,
+				nextRevision,
+			)); updateErr != nil {
+				return normalizeAdmissionError(runContext, updateErr)
+			}
+			storedReceipt.applyLease(leaseProposal.Owner, now, leaseExpiresAt, nextToken)
+			storedReceipt.Revision = nextRevision
+			storedReceipt.UpdatedAt = now
+			resultReceipt = storedReceipt.toDomain()
+			resultLease = storedReceipt.leaseGrant()
+			resultStatus = ingest.ReservationReplayLeaseAcquired
+		case ingest.ReceiptStored, ingest.ReceiptQueued, ingest.ReceiptProjected, ingest.ReceiptDeleting, ingest.ReceiptDeleted:
 			resultStatus = ingest.ReservationReplayComplete
 		case ingest.ReceiptRejected:
 			resultStatus = ingest.ReservationReplayRejected
+		case ingest.ReceiptRecoveryHold:
+			resultStatus = ingest.ReservationReplayRecoveryHold
+		case ingest.ReceiptCleanupPending, ingest.ReceiptExpired:
+			resultStatus = ingest.ReservationReplayExpired
 		default:
 			return ingest.ErrAdmissionUnavailable
 		}
 		return nil
 	})
 	if err != nil {
-		return ingest.Receipt{}, "", normalizeAdmissionError(ctx, err)
+		return ingest.Receipt{}, ingest.LeaseGrant{}, "", normalizeAdmissionError(ctx, err)
 	}
 	if resultStatus == "" {
-		return ingest.Receipt{}, "", ingest.ErrAdmissionUnavailable
+		return ingest.Receipt{}, ingest.LeaseGrant{}, "", ingest.ErrAdmissionUnavailable
 	}
-	return resultReceipt, resultStatus, nil
+	return resultReceipt, resultLease, resultStatus, nil
 }
 
 func (s *FirestoreAdmissionStore) MarkStored(
 	ctx context.Context,
 	tenantID string,
 	reservationKey string,
+	fence ingest.LeaseFence,
 	stored ingest.StoredReceiptData,
 	updatedAt time.Time,
 ) (ingest.Receipt, error) {
@@ -261,10 +346,11 @@ func (s *FirestoreAdmissionStore) MarkStored(
 			return ingest.ErrAdmissionUnavailable
 		}
 		receiptPath := receiptDocumentPath(tenantID, index.ReceiptID)
-		receipt, exists, readErr := transaction.ReadReceipt(runContext, receiptPath)
+		receiptResult, exists, readErr := transaction.ReadReceipt(runContext, receiptPath)
 		if readErr != nil {
 			return normalizeAdmissionError(runContext, readErr)
 		}
+		receipt := receiptResult.Receipt
 		if !exists || validateReceiptLinkage(receipt, index) != nil || validateReceiptState(receipt) != nil ||
 			stored.Artifacts.Object.Path != expectedObjectPath(receipt) ||
 			stored.Artifacts.Manifest.Path != expectedManifestPath(receipt) {
@@ -281,7 +367,11 @@ func (s *FirestoreAdmissionStore) MarkStored(
 		default:
 			return ingest.ErrAdmissionUnavailable
 		}
-		if updatedAt.Before(receipt.UpdatedAt) || !updatedAt.Before(receipt.ExpiresAt) {
+		if stored.SampleCount != receipt.ExpectedSampleCount {
+			return ingest.ErrAdmissionUnavailable
+		}
+		effectiveAt, clockErr := conservativeAcceptanceTime(updatedAt.UTC(), receiptResult.ReadTime)
+		if clockErr != nil || validateForwardFence(receipt, fence, effectiveAt) != nil {
 			return ingest.ErrAdmissionUnavailable
 		}
 		nextRevision := receipt.Revision + 1
@@ -300,15 +390,22 @@ func (s *FirestoreAdmissionStore) MarkStored(
 			{Path: "manifest_generation", Value: stored.Artifacts.Manifest.Generation},
 			{Path: "manifest_metageneration", Value: stored.Artifacts.Manifest.Metageneration},
 			{Path: "sample_count", Value: stored.SampleCount},
+			{Path: "lease_owner_id", Value: firestore.Delete},
+			{Path: "lease_owner_kind", Value: firestore.Delete},
+			{Path: "lease_acquired_at", Value: firestore.Delete},
+			{Path: "lease_heartbeat_at", Value: firestore.Delete},
+			{Path: "lease_expires_at", Value: firestore.Delete},
+			{Path: "next_recovery_at", Value: firestore.Delete},
 			{Path: "revision", Value: nextRevision},
-			{Path: "updated_at", Value: updatedAt.UTC()},
+			{Path: "updated_at", Value: effectiveAt},
 		}); updateErr != nil {
 			return normalizeAdmissionError(runContext, updateErr)
 		}
 		receipt.State = ingest.ReceiptStored
 		receipt.applyStoredData(stored)
+		receipt.clearLease()
 		receipt.Revision = nextRevision
-		receipt.UpdatedAt = updatedAt.UTC()
+		receipt.UpdatedAt = effectiveAt
 		result = receipt.toDomain()
 		return nil
 	})
@@ -325,6 +422,7 @@ func (s *FirestoreAdmissionStore) MarkRejected(
 	ctx context.Context,
 	tenantID string,
 	reservationKey string,
+	fence ingest.LeaseFence,
 	rejectionCode string,
 	updatedAt time.Time,
 ) (ingest.Receipt, error) {
@@ -356,10 +454,11 @@ func (s *FirestoreAdmissionStore) MarkRejected(
 			return ingest.ErrAdmissionUnavailable
 		}
 		receiptPath := receiptDocumentPath(tenantID, index.ReceiptID)
-		receipt, exists, readErr := transaction.ReadReceipt(runContext, receiptPath)
+		receiptResult, exists, readErr := transaction.ReadReceipt(runContext, receiptPath)
 		if readErr != nil {
 			return normalizeAdmissionError(runContext, readErr)
 		}
+		receipt := receiptResult.Receipt
 		if !exists || validateReceiptLinkage(receipt, index) != nil || validateReceiptState(receipt) != nil {
 			return ingest.ErrAdmissionUnavailable
 		}
@@ -374,22 +473,30 @@ func (s *FirestoreAdmissionStore) MarkRejected(
 		default:
 			return ingest.ErrAdmissionUnavailable
 		}
-		if updatedAt.Before(receipt.UpdatedAt) || !updatedAt.Before(receipt.ExpiresAt) {
+		effectiveAt, clockErr := conservativeAcceptanceTime(updatedAt.UTC(), receiptResult.ReadTime)
+		if clockErr != nil || validateForwardFence(receipt, fence, effectiveAt) != nil {
 			return ingest.ErrAdmissionUnavailable
 		}
 		nextRevision := receipt.Revision + 1
 		if updateErr := transaction.Update(runContext, receiptPath, []firestore.Update{
 			{Path: "status", Value: string(ingest.ReceiptRejected)},
 			{Path: "rejection_code", Value: rejectionCode},
+			{Path: "lease_owner_id", Value: firestore.Delete},
+			{Path: "lease_owner_kind", Value: firestore.Delete},
+			{Path: "lease_acquired_at", Value: firestore.Delete},
+			{Path: "lease_heartbeat_at", Value: firestore.Delete},
+			{Path: "lease_expires_at", Value: firestore.Delete},
+			{Path: "next_recovery_at", Value: firestore.Delete},
 			{Path: "revision", Value: nextRevision},
-			{Path: "updated_at", Value: updatedAt.UTC()},
+			{Path: "updated_at", Value: effectiveAt},
 		}); updateErr != nil {
 			return normalizeAdmissionError(runContext, updateErr)
 		}
 		receipt.State = ingest.ReceiptRejected
 		receipt.RejectionCode = rejectionCode
+		receipt.clearLease()
 		receipt.Revision = nextRevision
-		receipt.UpdatedAt = updatedAt.UTC()
+		receipt.UpdatedAt = effectiveAt
 		result = receipt.toDomain()
 		return nil
 	})
@@ -400,6 +507,80 @@ func (s *FirestoreAdmissionStore) MarkRejected(
 		return ingest.Receipt{}, ingest.ErrAdmissionUnavailable
 	}
 	return result, nil
+}
+
+func (s *FirestoreAdmissionStore) ReleaseLease(
+	ctx context.Context,
+	tenantID string,
+	reservationKey string,
+	fence ingest.LeaseFence,
+	releasedAt time.Time,
+	code ingest.LeaseReleaseCode,
+) error {
+	if s == nil || s.runTransaction == nil || ctx == nil ||
+		!telemetry.IsUUID(tenantID) || !lowerHexDigest(reservationKey) ||
+		ingest.ValidateLeaseFence(fence) != nil || releasedAt.IsZero() ||
+		!ingest.ValidLeaseReleaseCode(code) {
+		return ingest.ErrAdmissionUnavailable
+	}
+	err := s.runTransaction(ctx, func(runContext context.Context, transaction admissionTransaction) error {
+		indexPath := idempotencyDocumentPath(tenantID, reservationKey)
+		index, exists, readErr := transaction.ReadIndex(runContext, indexPath)
+		if readErr != nil {
+			return normalizeAdmissionError(runContext, readErr)
+		}
+		if !exists || validateIndexDocument(index, tenantID) != nil || index.ReservationKey != reservationKey {
+			return ingest.ErrAdmissionUnavailable
+		}
+		clientBatchIndex, exists, readErr := transaction.ReadIndex(
+			runContext,
+			clientBatchDocumentPath(tenantID, index.ClientBatchKey),
+		)
+		if readErr != nil {
+			return normalizeAdmissionError(runContext, readErr)
+		}
+		if !exists || validateIndexDocument(clientBatchIndex, tenantID) != nil ||
+			!sameIngestIndex(index, clientBatchIndex) {
+			return ingest.ErrAdmissionUnavailable
+		}
+		receiptPath := receiptDocumentPath(tenantID, index.ReceiptID)
+		receiptResult, exists, readErr := transaction.ReadReceipt(runContext, receiptPath)
+		if readErr != nil {
+			return normalizeAdmissionError(runContext, readErr)
+		}
+		receipt := receiptResult.Receipt
+		if !exists || validateReceiptLinkage(receipt, index) != nil ||
+			validateReceiptState(receipt) != nil || receipt.State != ingest.ReceiptReserved {
+			return ingest.ErrAdmissionUnavailable
+		}
+		if !receiptHasLeaseFields(receipt) {
+			return ingest.ErrAdmissionUnavailable
+		}
+		effectiveAt, clockErr := conservativeAcceptanceTime(releasedAt.UTC(), receiptResult.ReadTime)
+		if clockErr != nil || validateForwardFence(receipt, fence, effectiveAt) != nil {
+			return ingest.ErrAdmissionUnavailable
+		}
+		nextRevision := receipt.Revision + 1
+		nextRecoveryAt := effectiveAt.Add(ingest.InitialRecoveryBackoff)
+		if !nextRecoveryAt.Before(receipt.ReservationDeadline) {
+			nextRecoveryAt = receipt.ReservationDeadline
+		}
+		if updateErr := transaction.Update(runContext, receiptPath, []firestore.Update{
+			{Path: "lease_owner_id", Value: firestore.Delete},
+			{Path: "lease_owner_kind", Value: firestore.Delete},
+			{Path: "lease_acquired_at", Value: firestore.Delete},
+			{Path: "lease_heartbeat_at", Value: firestore.Delete},
+			{Path: "lease_expires_at", Value: firestore.Delete},
+			{Path: "next_recovery_at", Value: nextRecoveryAt},
+			{Path: "last_recovery_code", Value: string(code)},
+			{Path: "revision", Value: nextRevision},
+			{Path: "updated_at", Value: effectiveAt},
+		}); updateErr != nil {
+			return normalizeAdmissionError(runContext, updateErr)
+		}
+		return nil
+	})
+	return normalizeAdmissionError(ctx, err)
 }
 
 type admissionPaths struct {
@@ -461,8 +642,19 @@ func validateReservation(reservation ingest.Reservation) error {
 			reservation.ClientBatchID,
 		) ||
 		reservation.PayloadSchemaVersion != telemetry.SchemaVersionV2 ||
-		reservation.CreatedAt.IsZero() || reservation.ExpiresAt.IsZero() ||
-		!reservation.ExpiresAt.Equal(reservation.CreatedAt.Add(ingest.ReceiptRetention)) {
+		reservation.ExpectedSampleCount <= 0 || reservation.ExpectedSampleCount > telemetry.MaxSamples ||
+		reservation.FirstCapturedAt.IsZero() || reservation.LastCapturedAt.IsZero() ||
+		reservation.LastCapturedAt.Before(reservation.FirstCapturedAt) ||
+		reservation.ValidatorVersion != ingest.TelemetryValidatorVersion ||
+		reservation.CreatedAt.IsZero() || reservation.ReservationDeadline.IsZero() ||
+		reservation.ArtifactExpiresAt.IsZero() || reservation.ReceiptRetentionFloor.IsZero() ||
+		!reservation.ReservationDeadline.Equal(reservation.CreatedAt.Add(ingest.ReservationProcessingWindow)) ||
+		!reservation.ArtifactExpiresAt.Equal(reservation.CreatedAt.Add(ingest.TelemetryArtifactRetention)) ||
+		!reservation.ReceiptRetentionFloor.Equal(reservation.CreatedAt.Add(ingest.ReceiptControlRetention)) ||
+		!reservation.CreatedAt.Before(reservation.ReservationDeadline) ||
+		!reservation.ReservationDeadline.Before(reservation.ArtifactExpiresAt) ||
+		reservation.ReceiptRetentionFloor.Before(reservation.ArtifactExpiresAt) ||
+		reservation.PurgeEligibleAt != nil {
 		return ingest.ErrAdmissionUnavailable
 	}
 	return nil
@@ -532,88 +724,125 @@ func normalizeAdmissionError(ctx context.Context, err error) error {
 }
 
 type firestoreIngestIndex struct {
-	TenantID             string    `firestore:"tenant_id"`
-	ReservationKey       string    `firestore:"reservation_key"`
-	ClientBatchKey       string    `firestore:"client_batch_key"`
-	ReceiptID            string    `firestore:"receipt_id"`
-	BatchID              string    `firestore:"batch_id"`
-	InstallationID       string    `firestore:"installation_id"`
-	ClientBatchID        string    `firestore:"client_batch_id"`
-	PayloadSchemaVersion string    `firestore:"payload_schema_version"`
-	BodyHash             string    `firestore:"body_hash"`
-	CreatedAt            time.Time `firestore:"created_at"`
-	ExpiresAt            time.Time `firestore:"expires_at"`
+	TenantID              string     `firestore:"tenant_id"`
+	ReservationKey        string     `firestore:"reservation_key"`
+	ClientBatchKey        string     `firestore:"client_batch_key"`
+	ReceiptID             string     `firestore:"receipt_id"`
+	BatchID               string     `firestore:"batch_id"`
+	InstallationID        string     `firestore:"installation_id"`
+	ClientBatchID         string     `firestore:"client_batch_id"`
+	PayloadSchemaVersion  string     `firestore:"payload_schema_version"`
+	BodyHash              string     `firestore:"body_hash"`
+	CreatedAt             time.Time  `firestore:"created_at"`
+	ReceiptRetentionFloor time.Time  `firestore:"receipt_retention_floor"`
+	PurgeEligibleAt       *time.Time `firestore:"purge_eligible_at,omitempty"`
 }
 
 func newFirestoreIngestIndex(reservation ingest.Reservation) firestoreIngestIndex {
 	return firestoreIngestIndex{
-		TenantID:             reservation.TenantID,
-		ReservationKey:       reservation.ReservationKey,
-		ClientBatchKey:       reservation.ClientBatchKey,
-		ReceiptID:            reservation.ReceiptID,
-		BatchID:              reservation.BatchID,
-		InstallationID:       reservation.InstallationID,
-		ClientBatchID:        reservation.ClientBatchID,
-		PayloadSchemaVersion: reservation.PayloadSchemaVersion,
-		BodyHash:             reservation.BodyHash,
-		CreatedAt:            reservation.CreatedAt.UTC(),
-		ExpiresAt:            reservation.ExpiresAt.UTC(),
+		TenantID:              reservation.TenantID,
+		ReservationKey:        reservation.ReservationKey,
+		ClientBatchKey:        reservation.ClientBatchKey,
+		ReceiptID:             reservation.ReceiptID,
+		BatchID:               reservation.BatchID,
+		InstallationID:        reservation.InstallationID,
+		ClientBatchID:         reservation.ClientBatchID,
+		PayloadSchemaVersion:  reservation.PayloadSchemaVersion,
+		BodyHash:              reservation.BodyHash,
+		CreatedAt:             reservation.CreatedAt.UTC(),
+		ReceiptRetentionFloor: reservation.ReceiptRetentionFloor.UTC(),
+		PurgeEligibleAt:       cloneOptionalTime(reservation.PurgeEligibleAt),
 	}
 }
 
 type firestoreIngestReceipt struct {
-	ReservationKey         string              `firestore:"reservation_key"`
-	ClientBatchKey         string              `firestore:"client_batch_key"`
-	ReceiptID              string              `firestore:"receipt_id"`
-	TenantID               string              `firestore:"tenant_id"`
-	BatchID                string              `firestore:"batch_id"`
-	DeviceID               string              `firestore:"device_id"`
-	TripID                 string              `firestore:"trip_id"`
-	InstallationID         string              `firestore:"installation_id"`
-	ConsentRevisionID      string              `firestore:"consent_revision_id"`
-	ClientBatchID          string              `firestore:"client_batch_id"`
-	PayloadSchemaVersion   string              `firestore:"payload_schema_version"`
-	BodyHash               string              `firestore:"body_hash"`
-	ObjectPath             string              `firestore:"object_path,omitempty"`
-	ObjectSHA256           string              `firestore:"object_sha256,omitempty"`
-	ObjectCRC32C           int64               `firestore:"object_crc32c,omitempty"`
-	ObjectSize             int64               `firestore:"object_size,omitempty"`
-	ObjectGeneration       int64               `firestore:"object_generation,omitempty"`
-	ObjectMetageneration   int64               `firestore:"object_metageneration,omitempty"`
-	ManifestPath           string              `firestore:"manifest_path,omitempty"`
-	ManifestSHA256         string              `firestore:"manifest_sha256,omitempty"`
-	ManifestCRC32C         int64               `firestore:"manifest_crc32c,omitempty"`
-	ManifestSize           int64               `firestore:"manifest_size,omitempty"`
-	ManifestGeneration     int64               `firestore:"manifest_generation,omitempty"`
-	ManifestMetageneration int64               `firestore:"manifest_metageneration,omitempty"`
-	SampleCount            int                 `firestore:"sample_count"`
-	State                  ingest.ReceiptState `firestore:"status"`
-	RejectionCode          string              `firestore:"rejection_code,omitempty"`
-	Revision               int64               `firestore:"revision"`
-	CreatedAt              time.Time           `firestore:"created_at"`
-	UpdatedAt              time.Time           `firestore:"updated_at"`
-	ExpiresAt              time.Time           `firestore:"expires_at"`
+	ReservationKey         string                `firestore:"reservation_key"`
+	ClientBatchKey         string                `firestore:"client_batch_key"`
+	ReceiptID              string                `firestore:"receipt_id"`
+	TenantID               string                `firestore:"tenant_id"`
+	BatchID                string                `firestore:"batch_id"`
+	DeviceID               string                `firestore:"device_id"`
+	TripID                 string                `firestore:"trip_id"`
+	InstallationID         string                `firestore:"installation_id"`
+	ConsentRevisionID      string                `firestore:"consent_revision_id"`
+	ClientBatchID          string                `firestore:"client_batch_id"`
+	PayloadSchemaVersion   string                `firestore:"payload_schema_version"`
+	BodyHash               string                `firestore:"body_hash"`
+	ObjectPath             string                `firestore:"object_path,omitempty"`
+	ObjectSHA256           string                `firestore:"object_sha256,omitempty"`
+	ObjectCRC32C           int64                 `firestore:"object_crc32c,omitempty"`
+	ObjectSize             int64                 `firestore:"object_size,omitempty"`
+	ObjectGeneration       int64                 `firestore:"object_generation,omitempty"`
+	ObjectMetageneration   int64                 `firestore:"object_metageneration,omitempty"`
+	ManifestPath           string                `firestore:"manifest_path,omitempty"`
+	ManifestSHA256         string                `firestore:"manifest_sha256,omitempty"`
+	ManifestCRC32C         int64                 `firestore:"manifest_crc32c,omitempty"`
+	ManifestSize           int64                 `firestore:"manifest_size,omitempty"`
+	ManifestGeneration     int64                 `firestore:"manifest_generation,omitempty"`
+	ManifestMetageneration int64                 `firestore:"manifest_metageneration,omitempty"`
+	ExpectedSampleCount    int                   `firestore:"expected_sample_count"`
+	SampleCount            int                   `firestore:"sample_count"`
+	FirstCapturedAt        time.Time             `firestore:"first_captured_at"`
+	LastCapturedAt         time.Time             `firestore:"last_captured_at"`
+	ValidatorVersion       string                `firestore:"validator_version"`
+	State                  ingest.ReceiptState   `firestore:"status"`
+	RejectionCode          string                `firestore:"rejection_code,omitempty"`
+	FencingToken           int64                 `firestore:"fencing_token"`
+	LeaseOwnerID           string                `firestore:"lease_owner_id,omitempty"`
+	LeaseOwnerKind         ingest.LeaseOwnerKind `firestore:"lease_owner_kind,omitempty"`
+	LeaseAcquiredAt        time.Time             `firestore:"lease_acquired_at,omitempty"`
+	LeaseHeartbeatAt       time.Time             `firestore:"lease_heartbeat_at,omitempty"`
+	LeaseExpiresAt         time.Time             `firestore:"lease_expires_at,omitempty"`
+	RecoveryAttemptCount   int64                 `firestore:"recovery_attempt_count"`
+	NextRecoveryAt         time.Time             `firestore:"next_recovery_at,omitempty"`
+	LastRecoveryCode       string                `firestore:"last_recovery_code,omitempty"`
+	Revision               int64                 `firestore:"revision"`
+	CreatedAt              time.Time             `firestore:"created_at"`
+	UpdatedAt              time.Time             `firestore:"updated_at"`
+	ReservationDeadline    time.Time             `firestore:"reservation_deadline"`
+	ArtifactExpiresAt      time.Time             `firestore:"artifact_expires_at"`
+	ReceiptRetentionFloor  time.Time             `firestore:"receipt_retention_floor"`
+	PurgeEligibleAt        *time.Time            `firestore:"purge_eligible_at,omitempty"`
 }
 
-func newFirestoreIngestReceipt(reservation ingest.Reservation) firestoreIngestReceipt {
+func newFirestoreIngestReceipt(
+	reservation ingest.Reservation,
+	owner ingest.LeaseOwner,
+	leaseAcquiredAt time.Time,
+	leaseExpiresAt time.Time,
+) firestoreIngestReceipt {
 	return firestoreIngestReceipt{
-		ReservationKey:       reservation.ReservationKey,
-		ClientBatchKey:       reservation.ClientBatchKey,
-		ReceiptID:            reservation.ReceiptID,
-		TenantID:             reservation.TenantID,
-		BatchID:              reservation.BatchID,
-		DeviceID:             reservation.DeviceID,
-		TripID:               reservation.TripID,
-		InstallationID:       reservation.InstallationID,
-		ConsentRevisionID:    reservation.ConsentRevisionID,
-		ClientBatchID:        reservation.ClientBatchID,
-		PayloadSchemaVersion: reservation.PayloadSchemaVersion,
-		BodyHash:             reservation.BodyHash,
-		State:                ingest.ReceiptReserved,
-		Revision:             1,
-		CreatedAt:            reservation.CreatedAt.UTC(),
-		UpdatedAt:            reservation.CreatedAt.UTC(),
-		ExpiresAt:            reservation.ExpiresAt.UTC(),
+		ReservationKey:        reservation.ReservationKey,
+		ClientBatchKey:        reservation.ClientBatchKey,
+		ReceiptID:             reservation.ReceiptID,
+		TenantID:              reservation.TenantID,
+		BatchID:               reservation.BatchID,
+		DeviceID:              reservation.DeviceID,
+		TripID:                reservation.TripID,
+		InstallationID:        reservation.InstallationID,
+		ConsentRevisionID:     reservation.ConsentRevisionID,
+		ClientBatchID:         reservation.ClientBatchID,
+		PayloadSchemaVersion:  reservation.PayloadSchemaVersion,
+		BodyHash:              reservation.BodyHash,
+		ExpectedSampleCount:   reservation.ExpectedSampleCount,
+		FirstCapturedAt:       reservation.FirstCapturedAt.UTC(),
+		LastCapturedAt:        reservation.LastCapturedAt.UTC(),
+		ValidatorVersion:      reservation.ValidatorVersion,
+		State:                 ingest.ReceiptReserved,
+		FencingToken:          1,
+		LeaseOwnerID:          owner.ID,
+		LeaseOwnerKind:        owner.Kind,
+		LeaseAcquiredAt:       leaseAcquiredAt.UTC(),
+		LeaseHeartbeatAt:      leaseAcquiredAt.UTC(),
+		LeaseExpiresAt:        leaseExpiresAt.UTC(),
+		NextRecoveryAt:        leaseExpiresAt.UTC(),
+		Revision:              1,
+		CreatedAt:             reservation.CreatedAt.UTC(),
+		UpdatedAt:             leaseAcquiredAt.UTC(),
+		ReservationDeadline:   reservation.ReservationDeadline.UTC(),
+		ArtifactExpiresAt:     reservation.ArtifactExpiresAt.UTC(),
+		ReceiptRetentionFloor: reservation.ReceiptRetentionFloor.UTC(),
+		PurgeEligibleAt:       cloneOptionalTime(reservation.PurgeEligibleAt),
 	}
 }
 
@@ -643,13 +872,29 @@ func (receipt firestoreIngestReceipt) toDomain() ingest.Receipt {
 		ManifestSize:           receipt.ManifestSize,
 		ManifestGeneration:     receipt.ManifestGeneration,
 		ManifestMetageneration: receipt.ManifestMetageneration,
+		ExpectedSampleCount:    receipt.ExpectedSampleCount,
 		SampleCount:            receipt.SampleCount,
+		FirstCapturedAt:        receipt.FirstCapturedAt,
+		LastCapturedAt:         receipt.LastCapturedAt,
+		ValidatorVersion:       receipt.ValidatorVersion,
 		State:                  receipt.State,
 		RejectionCode:          receipt.RejectionCode,
+		FencingToken:           receipt.FencingToken,
+		LeaseOwnerID:           receipt.LeaseOwnerID,
+		LeaseOwnerKind:         receipt.LeaseOwnerKind,
+		LeaseAcquiredAt:        receipt.LeaseAcquiredAt,
+		LeaseHeartbeatAt:       receipt.LeaseHeartbeatAt,
+		LeaseExpiresAt:         receipt.LeaseExpiresAt,
+		RecoveryAttemptCount:   receipt.RecoveryAttemptCount,
+		NextRecoveryAt:         receipt.NextRecoveryAt,
+		LastRecoveryCode:       receipt.LastRecoveryCode,
 		Revision:               receipt.Revision,
 		CreatedAt:              receipt.CreatedAt,
 		UpdatedAt:              receipt.UpdatedAt,
-		ExpiresAt:              receipt.ExpiresAt,
+		ReservationDeadline:    receipt.ReservationDeadline,
+		ArtifactExpiresAt:      receipt.ArtifactExpiresAt,
+		ReceiptRetentionFloor:  receipt.ReceiptRetentionFloor,
+		PurgeEligibleAt:        cloneOptionalTime(receipt.PurgeEligibleAt),
 	}
 }
 
@@ -669,6 +914,165 @@ func (receipt *firestoreIngestReceipt) applyStoredData(stored ingest.StoredRecei
 	receipt.SampleCount = stored.SampleCount
 }
 
+func (receipt *firestoreIngestReceipt) applyLease(
+	owner ingest.LeaseOwner,
+	acquiredAt time.Time,
+	expiresAt time.Time,
+	token int64,
+) {
+	receipt.FencingToken = token
+	receipt.LeaseOwnerID = owner.ID
+	receipt.LeaseOwnerKind = owner.Kind
+	receipt.LeaseAcquiredAt = acquiredAt.UTC()
+	receipt.LeaseHeartbeatAt = acquiredAt.UTC()
+	receipt.LeaseExpiresAt = expiresAt.UTC()
+	receipt.NextRecoveryAt = expiresAt.UTC()
+	receipt.LastRecoveryCode = ""
+}
+
+func (receipt *firestoreIngestReceipt) clearLease() {
+	receipt.LeaseOwnerID = ""
+	receipt.LeaseOwnerKind = ""
+	receipt.LeaseAcquiredAt = time.Time{}
+	receipt.LeaseHeartbeatAt = time.Time{}
+	receipt.LeaseExpiresAt = time.Time{}
+	receipt.NextRecoveryAt = time.Time{}
+}
+
+func (receipt firestoreIngestReceipt) leaseGrant() ingest.LeaseGrant {
+	return ingest.LeaseGrant{
+		Fence: ingest.LeaseFence{
+			OwnerID:   receipt.LeaseOwnerID,
+			Token:     receipt.FencingToken,
+			ExpiresAt: receipt.LeaseExpiresAt,
+		},
+		OwnerKind:  receipt.LeaseOwnerKind,
+		AcquiredAt: receipt.LeaseAcquiredAt,
+	}
+}
+
+func leaseTakeoverUpdates(
+	owner ingest.LeaseOwner,
+	acquiredAt time.Time,
+	expiresAt time.Time,
+	token int64,
+	revision int64,
+) []firestore.Update {
+	return []firestore.Update{
+		{Path: "fencing_token", Value: token},
+		{Path: "lease_owner_id", Value: owner.ID},
+		{Path: "lease_owner_kind", Value: string(owner.Kind)},
+		{Path: "lease_acquired_at", Value: acquiredAt.UTC()},
+		{Path: "lease_heartbeat_at", Value: acquiredAt.UTC()},
+		{Path: "lease_expires_at", Value: expiresAt.UTC()},
+		{Path: "next_recovery_at", Value: expiresAt.UTC()},
+		{Path: "last_recovery_code", Value: firestore.Delete},
+		{Path: "revision", Value: revision},
+		{Path: "updated_at", Value: acquiredAt.UTC()},
+	}
+}
+
+func validateForwardFence(
+	receipt firestoreIngestReceipt,
+	fence ingest.LeaseFence,
+	updatedAt time.Time,
+) error {
+	updatedAt = updatedAt.UTC()
+	if receipt.State != ingest.ReceiptReserved || validateActiveReceiptLease(receipt) != nil ||
+		ingest.ValidateLeaseFence(fence) != nil ||
+		fence.OwnerID != receipt.LeaseOwnerID || fence.Token != receipt.FencingToken ||
+		!fence.ExpiresAt.Equal(receipt.LeaseExpiresAt) ||
+		updatedAt.Before(receipt.UpdatedAt) || !updatedAt.Before(receipt.LeaseExpiresAt) ||
+		!updatedAt.Before(receipt.ReservationDeadline) {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func validateReservedReceiptLease(receipt firestoreIngestReceipt) error {
+	if receiptHasLeaseFields(receipt) {
+		return validateActiveReceiptLease(receipt)
+	}
+	if receipt.NextRecoveryAt.IsZero() || receipt.NextRecoveryAt.Before(receipt.UpdatedAt) ||
+		!ingest.ValidLeaseReleaseCode(ingest.LeaseReleaseCode(receipt.LastRecoveryCode)) {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func validateActiveReceiptLease(receipt firestoreIngestReceipt) error {
+	grant := receipt.leaseGrant()
+	leaseDuration := receipt.LeaseExpiresAt.Sub(receipt.LeaseHeartbeatAt)
+	if !receiptHasLeaseFields(receipt) || ingest.ValidateLeaseGrant(grant) != nil ||
+		receipt.LeaseHeartbeatAt.Before(receipt.LeaseAcquiredAt) ||
+		!receipt.LeaseHeartbeatAt.Before(receipt.LeaseExpiresAt) ||
+		leaseDuration < ingest.MinLeaseDuration || leaseDuration > ingest.MaxLeaseDuration ||
+		receipt.LeaseExpiresAt.After(receipt.ReservationDeadline) ||
+		!receipt.NextRecoveryAt.Equal(receipt.LeaseExpiresAt) || receipt.LastRecoveryCode != "" {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func validateNoReceiptLease(receipt firestoreIngestReceipt) error {
+	if receiptHasLeaseFields(receipt) || !receipt.NextRecoveryAt.IsZero() {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func receiptHasLeaseFields(receipt firestoreIngestReceipt) bool {
+	return receipt.LeaseOwnerID != "" || receipt.LeaseOwnerKind != "" ||
+		!receipt.LeaseAcquiredAt.IsZero() || !receipt.LeaseHeartbeatAt.IsZero() ||
+		!receipt.LeaseExpiresAt.IsZero()
+}
+
+func cloneOptionalTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := value.UTC()
+	return &cloned
+}
+
+func optionalTimesEqual(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
+}
+
+func conservativeAcceptanceTime(applicationTime, readTime time.Time) (time.Time, error) {
+	applicationTime = applicationTime.UTC()
+	readTime = readTime.UTC()
+	if applicationTime.IsZero() || readTime.IsZero() || absoluteDuration(applicationTime.Sub(readTime)) > maxAdmissionClockSkew {
+		return time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	if readTime.After(applicationTime) {
+		return readTime, nil
+	}
+	return applicationTime, nil
+}
+
+func conservativeCleanupTime(applicationTime, readTime time.Time) (time.Time, error) {
+	applicationTime = applicationTime.UTC()
+	readTime = readTime.UTC()
+	if applicationTime.IsZero() || readTime.IsZero() || absoluteDuration(applicationTime.Sub(readTime)) > maxAdmissionClockSkew {
+		return time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	if readTime.Before(applicationTime) {
+		return readTime, nil
+	}
+	return applicationTime, nil
+}
+
+func absoluteDuration(value time.Duration) time.Duration {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
 func validateIndexDocument(index firestoreIngestIndex, tenantID string) error {
 	if !telemetry.IsUUID(index.TenantID) || index.TenantID != tenantID ||
 		!lowerHexDigest(index.ReservationKey) ||
@@ -678,7 +1082,8 @@ func validateIndexDocument(index firestoreIngestIndex, tenantID string) error {
 		index.ReceiptID != index.BatchID ||
 		!telemetry.IsUUID(index.InstallationID) || !telemetry.IsUUID(index.ClientBatchID) ||
 		index.PayloadSchemaVersion != telemetry.SchemaVersionV2 ||
-		index.CreatedAt.IsZero() || index.ExpiresAt.IsZero() || !index.CreatedAt.Before(index.ExpiresAt) {
+		index.CreatedAt.IsZero() || index.ReceiptRetentionFloor.IsZero() ||
+		!index.CreatedAt.Before(index.ReceiptRetentionFloor) {
 		return ingest.ErrAdmissionUnavailable
 	}
 	if index.ReservationKey != ingest.DeriveReservationKey(
@@ -689,7 +1094,8 @@ func validateIndexDocument(index firestoreIngestIndex, tenantID string) error {
 	) || index.ClientBatchKey != ingest.DeriveClientBatchKey(index.TenantID, index.ClientBatchID) {
 		return ingest.ErrAdmissionUnavailable
 	}
-	if !index.ExpiresAt.Equal(index.CreatedAt.Add(ingest.ReceiptRetention)) {
+	if !index.ReceiptRetentionFloor.Equal(index.CreatedAt.Add(ingest.ReceiptControlRetention)) ||
+		(index.PurgeEligibleAt != nil && index.PurgeEligibleAt.Before(index.ReceiptRetentionFloor)) {
 		return ingest.ErrAdmissionUnavailable
 	}
 	return nil
@@ -726,7 +1132,8 @@ func sameIngestIndex(left, right firestoreIngestIndex) bool {
 		left.PayloadSchemaVersion == right.PayloadSchemaVersion &&
 		left.BodyHash == right.BodyHash &&
 		left.CreatedAt.Equal(right.CreatedAt) &&
-		left.ExpiresAt.Equal(right.ExpiresAt)
+		left.ReceiptRetentionFloor.Equal(right.ReceiptRetentionFloor) &&
+		optionalTimesEqual(left.PurgeEligibleAt, right.PurgeEligibleAt)
 }
 
 func validateReceiptLinkage(receipt firestoreIngestReceipt, index firestoreIngestIndex) error {
@@ -739,11 +1146,44 @@ func validateReceiptLinkage(receipt firestoreIngestReceipt, index firestoreInges
 		receipt.ClientBatchID != index.ClientBatchID ||
 		receipt.PayloadSchemaVersion != index.PayloadSchemaVersion ||
 		receipt.BodyHash != index.BodyHash ||
-		!receipt.CreatedAt.Equal(index.CreatedAt) || !receipt.ExpiresAt.Equal(index.ExpiresAt) ||
+		!receipt.CreatedAt.Equal(index.CreatedAt) ||
+		!receipt.ReceiptRetentionFloor.Equal(index.ReceiptRetentionFloor) ||
+		!optionalTimesEqual(receipt.PurgeEligibleAt, index.PurgeEligibleAt) ||
 		!telemetry.IsUUID(receipt.DeviceID) || !telemetry.IsUUID(receipt.TripID) ||
 		!telemetry.IsUUID(receipt.ConsentRevisionID) || receipt.Revision <= 0 ||
 		receipt.CreatedAt.IsZero() || receipt.UpdatedAt.Before(receipt.CreatedAt) ||
-		receipt.ExpiresAt.IsZero() || !receipt.CreatedAt.Before(receipt.ExpiresAt) {
+		receipt.ExpectedSampleCount <= 0 || receipt.ExpectedSampleCount > telemetry.MaxSamples ||
+		receipt.FirstCapturedAt.IsZero() || receipt.LastCapturedAt.Before(receipt.FirstCapturedAt) ||
+		receipt.ValidatorVersion != ingest.TelemetryValidatorVersion ||
+		receipt.ReservationDeadline.IsZero() || receipt.ArtifactExpiresAt.IsZero() ||
+		!receipt.CreatedAt.Before(receipt.ReservationDeadline) ||
+		!receipt.ReservationDeadline.Before(receipt.ArtifactExpiresAt) ||
+		receipt.ReceiptRetentionFloor.Before(receipt.ArtifactExpiresAt) ||
+		!receipt.ReservationDeadline.Equal(receipt.CreatedAt.Add(ingest.ReservationProcessingWindow)) ||
+		!receipt.ArtifactExpiresAt.Equal(receipt.CreatedAt.Add(ingest.TelemetryArtifactRetention)) ||
+		!receipt.ReceiptRetentionFloor.Equal(receipt.CreatedAt.Add(ingest.ReceiptControlRetention)) ||
+		(receipt.PurgeEligibleAt != nil && receipt.PurgeEligibleAt.Before(receipt.ReceiptRetentionFloor)) ||
+		receipt.FencingToken <= 0 || receipt.RecoveryAttemptCount < 0 {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func validateReceiptReservation(receipt firestoreIngestReceipt, reservation ingest.Reservation) error {
+	if receipt.TenantID != reservation.TenantID ||
+		receipt.ReservationKey != reservation.ReservationKey ||
+		receipt.ClientBatchKey != reservation.ClientBatchKey ||
+		receipt.DeviceID != reservation.DeviceID ||
+		receipt.TripID != reservation.TripID ||
+		receipt.InstallationID != reservation.InstallationID ||
+		receipt.ConsentRevisionID != reservation.ConsentRevisionID ||
+		receipt.ClientBatchID != reservation.ClientBatchID ||
+		receipt.PayloadSchemaVersion != reservation.PayloadSchemaVersion ||
+		receipt.BodyHash != reservation.BodyHash ||
+		receipt.ExpectedSampleCount != reservation.ExpectedSampleCount ||
+		!receipt.FirstCapturedAt.Equal(reservation.FirstCapturedAt) ||
+		!receipt.LastCapturedAt.Equal(reservation.LastCapturedAt) ||
+		receipt.ValidatorVersion != reservation.ValidatorVersion {
 		return ingest.ErrAdmissionUnavailable
 	}
 	return nil
@@ -752,17 +1192,23 @@ func validateReceiptLinkage(receipt firestoreIngestReceipt, index firestoreInges
 func validateReceiptState(receipt firestoreIngestReceipt) error {
 	switch receipt.State {
 	case ingest.ReceiptReserved:
-		if hasStoredArtifactData(receipt) || receipt.SampleCount != 0 || receipt.RejectionCode != "" {
+		if hasStoredArtifactData(receipt) || receipt.SampleCount != 0 || receipt.RejectionCode != "" ||
+			validateReservedReceiptLease(receipt) != nil {
 			return ingest.ErrAdmissionUnavailable
 		}
-	case ingest.ReceiptStored, "queued", "projected", "deleting", "deleted":
+	case ingest.ReceiptStored, ingest.ReceiptQueued, ingest.ReceiptProjected, ingest.ReceiptDeleting, ingest.ReceiptDeleted:
 		if validatePersistedArtifactData(receipt) != nil ||
-			receipt.SampleCount <= 0 || receipt.SampleCount > telemetry.MaxSamples ||
-			receipt.RejectionCode != "" {
+			receipt.SampleCount != receipt.ExpectedSampleCount ||
+			receipt.RejectionCode != "" || validateNoReceiptLease(receipt) != nil {
 			return ingest.ErrAdmissionUnavailable
 		}
 	case ingest.ReceiptRejected:
-		if receipt.RejectionCode != "object_conflict" || hasStoredArtifactData(receipt) || receipt.SampleCount != 0 {
+		if receipt.RejectionCode != "object_conflict" || hasStoredArtifactData(receipt) || receipt.SampleCount != 0 ||
+			validateNoReceiptLease(receipt) != nil {
+			return ingest.ErrAdmissionUnavailable
+		}
+	case ingest.ReceiptRecoveryHold, ingest.ReceiptCleanupPending, ingest.ReceiptExpired:
+		if receipt.RejectionCode != "" || validateNoReceiptLease(receipt) != nil {
 			return ingest.ErrAdmissionUnavailable
 		}
 	default:
@@ -833,14 +1279,18 @@ func (transaction firestoreAdmissionTransaction) LoadAuthorization(
 	ctx context.Context,
 	principal ingest.Principal,
 	scope ingest.BatchScope,
-) (authorization.Snapshot, error) {
+) (authorizationRead, error) {
 	primaryPaths, err := primaryAuthorizationPaths(principal, scope)
 	if err != nil {
-		return authorization.Snapshot{}, authorization.ErrSnapshotUnavailable
+		return authorizationRead{}, authorization.ErrSnapshotUnavailable
 	}
 	primaryDocuments, err := transaction.readExact(ctx, primaryPaths)
 	if err != nil {
-		return authorization.Snapshot{}, err
+		return authorizationRead{}, err
+	}
+	readTime, err := coherentSnapshotReadTime(primaryDocuments)
+	if err != nil {
+		return authorizationRead{}, err
 	}
 	var tenant firestoreTenant
 	var membership firestoreMembership
@@ -849,34 +1299,44 @@ func (transaction firestoreAdmissionTransaction) LoadAuthorization(
 	var consent firestoreConsentRevision
 	for index, destination := range []any{&tenant, &membership, &installation, &trip, &consent} {
 		if err := primaryDocuments[index].DataTo(destination); err != nil {
-			return authorization.Snapshot{}, authorization.ErrSnapshotUnavailable
+			return authorizationRead{}, authorization.ErrSnapshotUnavailable
 		}
 	}
 	relatedPaths, err := relatedAuthorizationPaths(scope.TenantID, trip.DeviceAssignmentID, trip.PersonID)
 	if err != nil {
-		return authorization.Snapshot{}, authorization.ErrSnapshotUnavailable
+		return authorizationRead{}, authorization.ErrSnapshotUnavailable
 	}
 	relatedDocuments, err := transaction.readExact(ctx, relatedPaths)
 	if err != nil {
-		return authorization.Snapshot{}, err
+		return authorizationRead{}, err
+	}
+	relatedReadTime, err := coherentSnapshotReadTime(relatedDocuments)
+	if err != nil || absoluteDuration(relatedReadTime.Sub(readTime)) > maxAdmissionClockSkew {
+		return authorizationRead{}, authorization.ErrSnapshotUnavailable
+	}
+	if relatedReadTime.After(readTime) {
+		readTime = relatedReadTime
 	}
 	var assignment firestoreDeviceAssignment
 	var consentState firestoreConsentState
 	if err := relatedDocuments[0].DataTo(&assignment); err != nil {
-		return authorization.Snapshot{}, authorization.ErrSnapshotUnavailable
+		return authorizationRead{}, authorization.ErrSnapshotUnavailable
 	}
 	if err := relatedDocuments[1].DataTo(&consentState); err != nil {
-		return authorization.Snapshot{}, authorization.ErrSnapshotUnavailable
+		return authorizationRead{}, authorization.ErrSnapshotUnavailable
 	}
-	return assembleAuthorizationSnapshot(
-		tenant,
-		membership,
-		installation,
-		trip,
-		assignment,
-		consent,
-		consentState,
-	), nil
+	return authorizationRead{
+		Snapshot: assembleAuthorizationSnapshot(
+			tenant,
+			membership,
+			installation,
+			trip,
+			assignment,
+			consent,
+			consentState,
+		),
+		ReadTime: readTime,
+	}, nil
 }
 
 func (transaction firestoreAdmissionTransaction) ReadIndex(
@@ -900,19 +1360,19 @@ func (transaction firestoreAdmissionTransaction) ReadIndex(
 func (transaction firestoreAdmissionTransaction) ReadReceipt(
 	ctx context.Context,
 	path string,
-) (firestoreIngestReceipt, bool, error) {
+) (receiptRead, bool, error) {
 	document, err := transaction.transaction.Get(transaction.client.Doc(path))
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			return firestoreIngestReceipt{}, false, nil
+			return receiptRead{}, false, nil
 		}
-		return firestoreIngestReceipt{}, false, normalizeAdmissionError(ctx, err)
+		return receiptRead{}, false, normalizeAdmissionError(ctx, err)
 	}
 	var receipt firestoreIngestReceipt
-	if document == nil || !document.Exists() || document.DataTo(&receipt) != nil {
-		return firestoreIngestReceipt{}, false, ingest.ErrAdmissionUnavailable
+	if document == nil || !document.Exists() || document.ReadTime.IsZero() || document.DataTo(&receipt) != nil {
+		return receiptRead{}, false, ingest.ErrAdmissionUnavailable
 	}
-	return receipt, true, nil
+	return receiptRead{Receipt: receipt, ReadTime: document.ReadTime.UTC()}, true, nil
 }
 
 func (transaction firestoreAdmissionTransaction) Create(
@@ -955,4 +1415,25 @@ func (transaction firestoreAdmissionTransaction) readExact(
 		}
 	}
 	return documents, nil
+}
+
+func coherentSnapshotReadTime(documents []*firestore.DocumentSnapshot) (time.Time, error) {
+	var earliest time.Time
+	var latest time.Time
+	for _, document := range documents {
+		if document == nil || document.ReadTime.IsZero() {
+			return time.Time{}, authorization.ErrSnapshotUnavailable
+		}
+		current := document.ReadTime.UTC()
+		if earliest.IsZero() || current.Before(earliest) {
+			earliest = current
+		}
+		if latest.IsZero() || current.After(latest) {
+			latest = current
+		}
+	}
+	if earliest.IsZero() || latest.IsZero() || latest.Sub(earliest) > maxAdmissionClockSkew {
+		return time.Time{}, authorization.ErrSnapshotUnavailable
+	}
+	return latest, nil
 }

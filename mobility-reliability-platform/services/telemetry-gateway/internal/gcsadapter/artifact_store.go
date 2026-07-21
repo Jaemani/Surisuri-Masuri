@@ -87,7 +87,7 @@ func (s *ArtifactStore) StoreBatch(
 		"artifact_version": strconv.Itoa(ingest.TelemetryManifestVersion),
 		"batch_id":         write.Manifest.BatchID,
 		"body_sha256":      write.Manifest.BodyHash,
-		"expires_at":       canonicalTime(write.Manifest.ExpiresAt),
+		"expires_at":       canonicalTime(write.Manifest.ArtifactExpiresAt),
 		"sha256":           objectDigest.SHA256,
 		"tenant_id":        write.Manifest.TenantID,
 	}
@@ -116,7 +116,7 @@ func (s *ArtifactStore) StoreBatch(
 		"artifact_kind":     "telemetry_manifest",
 		"artifact_version":  strconv.Itoa(ingest.TelemetryManifestVersion),
 		"batch_id":          write.Manifest.BatchID,
-		"expires_at":        canonicalTime(write.Manifest.ExpiresAt),
+		"expires_at":        canonicalTime(write.Manifest.ArtifactExpiresAt),
 		"object_generation": strconv.FormatInt(object.Generation, 10),
 		"sha256":            manifestDigest.SHA256,
 		"tenant_id":         write.Manifest.TenantID,

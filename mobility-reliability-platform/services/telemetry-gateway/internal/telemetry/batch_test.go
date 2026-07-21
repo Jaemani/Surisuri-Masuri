@@ -40,6 +40,26 @@ func TestDecodeBatchRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestDecodeBatchRejectsClientControlledLeaseAndFenceFields(t *testing.T) {
+	for _, field := range []string{
+		`"leaseOwnerId": "01982015-4400-7000-8000-000000000002"`,
+		`"fencingToken": 42`,
+	} {
+		t.Run(strings.Split(field, `"`)[1], func(t *testing.T) {
+			payload := strings.Replace(
+				string(readFixture(t, "telemetry-batch.v2.valid.json")),
+				`"schemaVersion": "telemetry-batch.v2"`,
+				`"schemaVersion": "telemetry-batch.v2", `+field,
+				1,
+			)
+			_, err := DecodeBatch(strings.NewReader(payload))
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("DecodeBatch() error = %v, want server-only field rejection", err)
+			}
+		})
+	}
+}
+
 func TestDecodeBatchRejectsTrailingJSON(t *testing.T) {
 	payload := append(readFixture(t, "telemetry-batch.v2.valid.json"), []byte(` {"another":true}`)...)
 
