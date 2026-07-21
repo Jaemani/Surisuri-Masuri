@@ -40,10 +40,12 @@ func TestDecodeBatchRejectsUnknownFields(t *testing.T) {
 	}
 }
 
-func TestDecodeBatchRejectsClientControlledLeaseAndFenceFields(t *testing.T) {
+func TestDecodeBatchRejectsClientControlledRecoveryFields(t *testing.T) {
 	for _, field := range []string{
 		`"leaseOwnerId": "01982015-4400-7000-8000-000000000002"`,
 		`"fencingToken": 42`,
+		`"recoveryAttemptId": "01982015-4400-7000-8000-000000000003"`,
+		`"workerVersion": "client-controlled"`,
 	} {
 		t.Run(strings.Split(field, `"`)[1], func(t *testing.T) {
 			payload := strings.Replace(

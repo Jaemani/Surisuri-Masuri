@@ -111,6 +111,9 @@ type Receipt struct {
 	RecoveryAttemptCount   int64
 	NextRecoveryAt         time.Time
 	LastRecoveryCode       string
+	CleanupQuiescenceUntil time.Time
+	CleanupMode            CleanupMode
+	CleanupOriginStatus    ReceiptState
 	Revision               int64
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
@@ -282,6 +285,10 @@ func (s *Service) Ingest(
 	}, LeaseProposal{
 		Owner:    LeaseOwner{ID: leaseOwnerID, Kind: LeaseOwnerRequest},
 		Duration: DefaultRequestLeaseDuration,
+		Attempt: RecoveryAttemptProposal{
+			ID:            leaseOwnerID,
+			WorkerVersion: RecoveryWorkerVersion,
+		},
 	})
 	if err != nil {
 		if errors.Is(err, ErrBatchUnauthorized) {
@@ -335,7 +342,8 @@ func (s *Service) Ingest(
 		receipt.FencingToken != lease.Fence.Token ||
 		receipt.LeaseOwnerID != lease.Fence.OwnerID ||
 		!receipt.LeaseExpiresAt.Equal(lease.Fence.ExpiresAt) ||
-		!receipt.LeaseAcquiredAt.Equal(lease.AcquiredAt) {
+		!receipt.LeaseAcquiredAt.Equal(lease.AcquiredAt) ||
+		!receipt.LeaseHeartbeatAt.Equal(lease.HeartbeatAt) {
 		return Result{}, errors.New("reserved receipt is missing stable batch identity")
 	}
 	manifestInput := BatchManifestInput{

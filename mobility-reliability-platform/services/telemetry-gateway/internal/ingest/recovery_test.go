@@ -43,8 +43,9 @@ func TestValidateLeaseGrant(t *testing.T) {
 			Token:     1,
 			ExpiresAt: acquiredAt.Add(DefaultRequestLeaseDuration),
 		},
-		OwnerKind:  LeaseOwnerRequest,
-		AcquiredAt: acquiredAt,
+		OwnerKind:   LeaseOwnerRequest,
+		AcquiredAt:  acquiredAt,
+		HeartbeatAt: acquiredAt,
 	}
 	if err := ValidateLeaseGrant(valid); err != nil {
 		t.Fatalf("ValidateLeaseGrant() error = %v", err)
@@ -78,5 +79,26 @@ func TestValidLeaseReleaseCode(t *testing.T) {
 	}
 	if ValidLeaseReleaseCode("client_cancelled") {
 		t.Fatal("unknown release code was accepted")
+	}
+}
+
+func TestValidateRecoveryAttemptProposal(t *testing.T) {
+	valid := RecoveryAttemptProposal{
+		ID:            "01982015-4400-7000-8000-000000000003",
+		WorkerVersion: RecoveryWorkerVersion,
+	}
+	if err := ValidateRecoveryAttemptProposal(valid); err != nil {
+		t.Fatalf("ValidateRecoveryAttemptProposal() error = %v", err)
+	}
+	for _, invalid := range []RecoveryAttemptProposal{
+		{ID: "not-a-uuid", WorkerVersion: RecoveryWorkerVersion},
+		{ID: valid.ID},
+		{ID: valid.ID, WorkerVersion: "contains space"},
+		{ID: valid.ID, WorkerVersion: "user@example.com"},
+		{ID: valid.ID, WorkerVersion: "telemetry-recovery.v2"},
+	} {
+		if !errors.Is(ValidateRecoveryAttemptProposal(invalid), ErrInvalidLease) {
+			t.Fatalf("ValidateRecoveryAttemptProposal(%#v) accepted invalid input", invalid)
+		}
 	}
 }

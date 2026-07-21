@@ -789,9 +789,10 @@ func (s *memoryReceiptStore) ReleaseLease(
 
 func leaseGrantForReceipt(receipt Receipt) LeaseGrant {
 	return LeaseGrant{
-		Fence:      LeaseFence{OwnerID: receipt.LeaseOwnerID, Token: receipt.FencingToken, ExpiresAt: receipt.LeaseExpiresAt},
-		OwnerKind:  receipt.LeaseOwnerKind,
-		AcquiredAt: receipt.LeaseAcquiredAt,
+		Fence:       LeaseFence{OwnerID: receipt.LeaseOwnerID, Token: receipt.FencingToken, ExpiresAt: receipt.LeaseExpiresAt},
+		OwnerKind:   receipt.LeaseOwnerKind,
+		AcquiredAt:  receipt.LeaseAcquiredAt,
+		HeartbeatAt: receipt.LeaseHeartbeatAt,
 	}
 }
 

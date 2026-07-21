@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -248,6 +249,7 @@ func TestFirestoreAdmissionStoreExpiredLeaseTakeoverIncrementsFence(t *testing.T
 	store := admissionTestStore(takeoverAt, admissionRunner(tx))
 	proposal := admissionTestLeaseProposal()
 	proposal.Owner.ID = admissionTakeoverOwnerID
+	proposal.Attempt.ID = admissionTakeoverOwnerID
 	replayScope, replayReservation := admissionReplayRequest(createdAt, takeoverAt)
 
 	receipt, lease, status, err := store.AuthorizeAndReserve(
@@ -261,11 +263,388 @@ func TestFirestoreAdmissionStoreExpiredLeaseTakeoverIncrementsFence(t *testing.T
 		t.Fatalf("AuthorizeAndReserve() error = %v", err)
 	}
 	if status != ingest.ReservationReplayLeaseAcquired || receipt.FencingToken != 2 ||
-		lease.Fence.Token != 2 || lease.Fence.OwnerID != admissionTakeoverOwnerID {
+		lease.Fence.Token != 2 || lease.Fence.OwnerID != admissionTakeoverOwnerID ||
+		receipt.RecoveryAttemptCount != 1 {
 		t.Fatalf("takeover result = status:%q receipt:%#v lease:%#v", status, receipt, lease)
 	}
 	if len(tx.updates) != 1 || tx.updates[0].path != admissionReceiptPath() {
 		t.Fatalf("takeover updates = %#v", tx.updates)
+	}
+	if len(tx.creates) != 1 || tx.creates[0].path != recoveryAttemptDocumentPath(
+		admissionTenantID,
+		admissionReceiptID,
+		admissionTakeoverOwnerID,
+	) {
+		t.Fatalf("takeover attempt creates = %#v", tx.creates)
+	}
+	attempt, ok := tx.creates[0].value.(firestoreRecoveryAttempt)
+	if !ok || attempt.Status != "started" || attempt.FencingToken != 2 ||
+		attempt.OwnerKind != ingest.LeaseOwnerRequest || attempt.WorkerVersion != ingest.RecoveryWorkerVersion {
+		t.Fatalf("takeover attempt = %#v", tx.creates[0].value)
+	}
+}
+
+func TestFirestoreAdmissionStoreReplayRechecksAuthorizationAtReceiptReadTime(t *testing.T) {
+	createdAt := admissionTestNow()
+	takeoverAt := createdAt.Add(ingest.DefaultRequestLeaseDuration)
+	receiptReadAt := takeoverAt.Add(4 * time.Second)
+	tests := []struct {
+		name       string
+		expiresAt  time.Time
+		wantDenied bool
+	}{
+		{name: "consent expires before receipt read", expiresAt: takeoverAt.Add(2 * time.Second), wantDenied: true},
+		{name: "consent remains valid through receipt read", expiresAt: takeoverAt.Add(5 * time.Second)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+			tx.snapshot = admissionTestSnapshot(takeoverAt)
+			tx.snapshot.Consent.ExpiresAt = &test.expiresAt
+			tx.snapshot.ConsentState.ExpiresAt = &test.expiresAt
+			tx.authorizationReadTime = takeoverAt
+			tx.receiptReadTime = receiptReadAt
+			store := admissionTestStore(takeoverAt, admissionRunner(tx))
+			proposal := admissionTestLeaseProposal()
+			proposal.Owner.ID = admissionTakeoverOwnerID
+			proposal.Attempt.ID = admissionTakeoverOwnerID
+			replayScope, replayReservation := admissionReplayRequest(createdAt, takeoverAt)
+
+			_, _, status, err := store.AuthorizeAndReserve(
+				context.Background(),
+				admissionTestPrincipal(),
+				replayScope,
+				replayReservation,
+				proposal,
+			)
+			if test.wantDenied {
+				if !errors.Is(err, ingest.ErrBatchUnauthorized) {
+					t.Fatalf("AuthorizeAndReserve() error = %v, want unauthorized", err)
+				}
+				if len(tx.updates) != 0 || len(tx.creates) != 0 {
+					t.Fatalf("expired authorization updates/creates = %d/%d, want 0/0", len(tx.updates), len(tx.creates))
+				}
+				return
+			}
+			if err != nil || status != ingest.ReservationReplayLeaseAcquired {
+				t.Fatalf("AuthorizeAndReserve() = %q, %v; want takeover", status, err)
+			}
+			if len(tx.updates) != 1 || len(tx.creates) != 1 {
+				t.Fatalf("valid authorization updates/creates = %d/%d, want 1/1", len(tx.updates), len(tx.creates))
+			}
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreClaimRecoveryLeaseStatuses(t *testing.T) {
+	createdAt := admissionTestNow()
+	tests := []struct {
+		name        string
+		requestedAt time.Time
+		state       ingest.ReceiptState
+		configure   func(*firestoreIngestReceipt)
+		wantStatus  ingest.LeaseStatus
+		wantToken   int64
+		wantWrite   bool
+	}{
+		{
+			name:        "expired lease acquired",
+			requestedAt: createdAt.Add(ingest.DefaultRequestLeaseDuration),
+			state:       ingest.ReceiptReserved,
+			wantStatus:  ingest.LeaseStatusAcquired,
+			wantToken:   2,
+			wantWrite:   true,
+		},
+		{
+			name:        "active lease held",
+			requestedAt: createdAt.Add(time.Minute),
+			state:       ingest.ReceiptReserved,
+			wantStatus:  ingest.LeaseStatusHeld,
+		},
+		{
+			name:        "released lease not due",
+			requestedAt: createdAt.Add(time.Minute),
+			state:       ingest.ReceiptReserved,
+			configure: func(receipt *firestoreIngestReceipt) {
+				receipt.clearLease()
+				receipt.NextRecoveryAt = createdAt.Add(90 * time.Second)
+				receipt.LastRecoveryCode = string(ingest.LeaseReleaseArtifactUnavailable)
+			},
+			wantStatus: ingest.LeaseStatusNotDue,
+		},
+		{
+			name:        "deadline elapsed",
+			requestedAt: createdAt.Add(ingest.ReservationProcessingWindow),
+			state:       ingest.ReceiptReserved,
+			wantStatus:  ingest.LeaseStatusDeadlineElapsed,
+		},
+		{
+			name:        "terminal receipt not eligible",
+			requestedAt: createdAt.Add(time.Minute),
+			state:       ingest.ReceiptStored,
+			wantStatus:  ingest.LeaseStatusNotEligible,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tx, _ := admissionReplayTransaction(t, createdAt, test.state)
+			receipt := tx.receipts[admissionReceiptPath()]
+			if test.configure != nil {
+				test.configure(&receipt)
+				tx.receipts[admissionReceiptPath()] = receipt
+			}
+			tx.readTime = test.requestedAt
+			store := admissionTestStore(test.requestedAt, admissionRunner(tx))
+			grant, status, err := store.ClaimRecoveryLease(
+				context.Background(),
+				admissionTenantID,
+				admissionReservationKey,
+				ingest.LeaseOwner{ID: admissionTakeoverOwnerID, Kind: ingest.LeaseOwnerSweeper},
+				ingest.RecoveryAttemptProposal{ID: admissionTakeoverOwnerID, WorkerVersion: ingest.RecoveryWorkerVersion},
+				test.requestedAt,
+				ingest.DefaultRequestLeaseDuration,
+			)
+			if err != nil || status != test.wantStatus {
+				t.Fatalf("ClaimRecoveryLease() = %#v, %q, %v", grant, status, err)
+			}
+			if test.wantToken != 0 && (grant.Fence.Token != test.wantToken || grant.OwnerKind != ingest.LeaseOwnerSweeper) {
+				t.Fatalf("ClaimRecoveryLease() grant = %#v", grant)
+			}
+			if test.wantWrite {
+				if len(tx.updates) != 1 || len(tx.creates) != 1 {
+					t.Fatalf("claim updates/creates = %d/%d, want 1/1", len(tx.updates), len(tx.creates))
+				}
+				attempt, ok := tx.creates[0].value.(firestoreRecoveryAttempt)
+				if !ok || attempt.OwnerKind != ingest.LeaseOwnerSweeper || attempt.FencingToken != test.wantToken {
+					t.Fatalf("claim attempt = %#v", tx.creates[0].value)
+				}
+			} else if len(tx.updates) != 0 || len(tx.creates) != 0 {
+				t.Fatalf("read-only claim updates/creates = %d/%d, want zero", len(tx.updates), len(tx.creates))
+			}
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreRenewLeaseWithinWindow(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	renewedAt := reservation.CreatedAt.Add(ingest.DefaultRequestLeaseDuration - 30*time.Second)
+	tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+	tx.readTime = renewedAt
+	store := admissionTestStore(renewedAt, admissionRunner(tx))
+
+	grant, err := store.RenewLease(
+		context.Background(),
+		admissionTenantID,
+		admissionReservationKey,
+		admissionTestFence(reservation),
+		renewedAt,
+		ingest.DefaultRequestLeaseDuration,
+	)
+	if err != nil {
+		t.Fatalf("RenewLease() error = %v", err)
+	}
+	if grant.Fence.Token != 1 || grant.Fence.OwnerID != admissionLeaseOwnerID ||
+		!grant.AcquiredAt.Equal(createdAt) || !grant.HeartbeatAt.Equal(renewedAt) ||
+		!grant.Fence.ExpiresAt.Equal(renewedAt.Add(ingest.DefaultRequestLeaseDuration)) {
+		t.Fatalf("RenewLease() grant = %#v", grant)
+	}
+	if len(tx.updates) != 1 || len(tx.creates) != 0 {
+		t.Fatalf("renew updates/creates = %d/%d, want 1/0", len(tx.updates), len(tx.creates))
+	}
+}
+
+func TestFirestoreAdmissionStoreRenewLeaseRejectsIneligibleCalls(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	tests := []struct {
+		name      string
+		renewedAt time.Time
+		fence     ingest.LeaseFence
+		duration  time.Duration
+	}{
+		{
+			name:      "too early",
+			renewedAt: createdAt.Add(time.Minute),
+			fence:     admissionTestFence(reservation),
+			duration:  ingest.DefaultRequestLeaseDuration,
+		},
+		{
+			name:      "at expiry",
+			renewedAt: createdAt.Add(ingest.DefaultRequestLeaseDuration),
+			fence:     admissionTestFence(reservation),
+			duration:  ingest.DefaultRequestLeaseDuration,
+		},
+		{
+			name:      "stale owner",
+			renewedAt: createdAt.Add(ingest.DefaultRequestLeaseDuration - 30*time.Second),
+			fence: ingest.LeaseFence{
+				OwnerID:   admissionTakeoverOwnerID,
+				Token:     1,
+				ExpiresAt: createdAt.Add(ingest.DefaultRequestLeaseDuration),
+			},
+			duration: ingest.DefaultRequestLeaseDuration,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+			tx.readTime = test.renewedAt
+			store := admissionTestStore(test.renewedAt, admissionRunner(tx))
+			_, err := store.RenewLease(
+				context.Background(),
+				admissionTenantID,
+				admissionReservationKey,
+				test.fence,
+				test.renewedAt,
+				test.duration,
+			)
+			if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+				t.Fatalf("RenewLease() error = %v, want unavailable", err)
+			}
+			if len(tx.updates) != 0 || len(tx.creates) != 0 {
+				t.Fatalf("ineligible renew updates/creates = %d/%d, want zero", len(tx.updates), len(tx.creates))
+			}
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreBeginCleanupTransitionAtDeadline(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	cleanupAt := reservation.ReservationDeadline
+	tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+	tx.readTime = cleanupAt
+	store := admissionTestStore(cleanupAt, admissionRunner(tx))
+
+	receipt, status, err := store.BeginCleanupTransition(
+		context.Background(),
+		admissionTenantID,
+		admissionReservationKey,
+		cleanupAt,
+	)
+	if err != nil || status != ingest.TransitionStatusStarted {
+		t.Fatalf("BeginCleanupTransition() = %#v, %q, %v", receipt, status, err)
+	}
+	if receipt.State != ingest.ReceiptCleanupPending || receipt.FencingToken != 2 || receipt.Revision != 2 ||
+		receipt.LeaseOwnerID != "" || !receipt.LeaseExpiresAt.IsZero() ||
+		receipt.CleanupMode != ingest.CleanupModeReservationExpiry ||
+		receipt.CleanupOriginStatus != ingest.ReceiptReserved ||
+		!receipt.CleanupQuiescenceUntil.Equal(cleanupAt.Add(ingest.DefaultCleanupLateWriteGrace)) {
+		t.Fatalf("cleanup transition receipt = %#v", receipt)
+	}
+	if len(tx.updates) != 1 || len(tx.creates) != 0 {
+		t.Fatalf("cleanup transition updates/creates = %d/%d, want 1/0", len(tx.updates), len(tx.creates))
+	}
+}
+
+func TestFirestoreAdmissionStoreBeginCleanupTransitionReadOnlyStatuses(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	tests := []struct {
+		name        string
+		requestedAt time.Time
+		readTime    time.Time
+		state       ingest.ReceiptState
+		configure   func(*firestoreIngestReceipt)
+		wantStatus  ingest.TransitionStatus
+	}{
+		{
+			name:        "before deadline",
+			requestedAt: reservation.ReservationDeadline.Add(-time.Second),
+			readTime:    reservation.ReservationDeadline.Add(-time.Second),
+			state:       ingest.ReceiptReserved,
+			wantStatus:  ingest.TransitionStatusNotReady,
+		},
+		{
+			name:        "server time prevents early cleanup",
+			requestedAt: reservation.ReservationDeadline,
+			readTime:    reservation.ReservationDeadline.Add(-time.Nanosecond),
+			state:       ingest.ReceiptReserved,
+			wantStatus:  ingest.TransitionStatusNotReady,
+		},
+		{
+			name:        "terminal receipt not eligible",
+			requestedAt: reservation.ReservationDeadline,
+			readTime:    reservation.ReservationDeadline,
+			state:       ingest.ReceiptStored,
+			wantStatus:  ingest.TransitionStatusNotEligible,
+		},
+		{
+			name:        "existing transition",
+			requestedAt: reservation.ReservationDeadline.Add(time.Second),
+			readTime:    reservation.ReservationDeadline.Add(time.Second),
+			state:       ingest.ReceiptCleanupPending,
+			configure: func(receipt *firestoreIngestReceipt) {
+				receipt.clearLease()
+				receipt.CleanupMode = ingest.CleanupModeReservationExpiry
+				receipt.CleanupOriginStatus = ingest.ReceiptReserved
+				receipt.UpdatedAt = reservation.ReservationDeadline
+				receipt.CleanupQuiescenceUntil = reservation.ReservationDeadline.Add(ingest.DefaultCleanupLateWriteGrace)
+				receipt.FencingToken = 2
+				receipt.Revision = 2
+			},
+			wantStatus: ingest.TransitionStatusAlreadyStarted,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tx, _ := admissionReplayTransaction(t, createdAt, test.state)
+			receipt := tx.receipts[admissionReceiptPath()]
+			if test.configure != nil {
+				test.configure(&receipt)
+				tx.receipts[admissionReceiptPath()] = receipt
+			}
+			tx.readTime = test.readTime
+			store := admissionTestStore(test.requestedAt, admissionRunner(tx))
+			_, status, err := store.BeginCleanupTransition(
+				context.Background(),
+				admissionTenantID,
+				admissionReservationKey,
+				test.requestedAt,
+			)
+			if err != nil || status != test.wantStatus {
+				t.Fatalf("BeginCleanupTransition() = %q, %v, want %q", status, err, test.wantStatus)
+			}
+			if len(tx.updates) != 0 || len(tx.creates) != 0 {
+				t.Fatalf("read-only transition updates/creates = %d/%d, want zero", len(tx.updates), len(tx.creates))
+			}
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreCleanupTransitionFencesStaleFinalizer(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	receipt := admissionTestReceiptDTO(admissionTestReceipt(reservation, ingest.ReceiptCleanupPending))
+	receipt.clearLease()
+	receipt.CleanupMode = ingest.CleanupModeReservationExpiry
+	receipt.CleanupOriginStatus = ingest.ReceiptReserved
+	receipt.UpdatedAt = reservation.ReservationDeadline
+	receipt.CleanupQuiescenceUntil = reservation.ReservationDeadline.Add(ingest.DefaultCleanupLateWriteGrace)
+	receipt.FencingToken = 2
+	receipt.Revision = 2
+	index := admissionTestIndex(reservation, admissionReceiptID, reservation.BodyHash)
+	tx := newFakeAdmissionTransaction(admissionTestSnapshot(reservation.ReservationDeadline))
+	tx.readTime = reservation.ReservationDeadline
+	tx.indexes[admissionIdempotencyPath()] = index
+	tx.indexes[admissionClientBatchPath()] = index
+	tx.receipts[admissionReceiptPath()] = receipt
+	store := admissionTestStore(reservation.ReservationDeadline, admissionRunner(tx))
+
+	_, err := store.MarkStored(
+		context.Background(),
+		admissionTenantID,
+		admissionReservationKey,
+		admissionTestFence(reservation),
+		admissionStoredReceiptData(reservation),
+		reservation.ReservationDeadline,
+	)
+	if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatalf("MarkStored() stale cleanup fence error = %v", err)
+	}
+	if len(tx.updates) != 0 {
+		t.Fatalf("stale cleanup finalizer updates = %d, want zero", len(tx.updates))
 	}
 }
 
@@ -352,6 +731,106 @@ func TestConservativeAdmissionTimesAreOperationSpecific(t *testing.T) {
 	}
 	if _, err := conservativeAcceptanceTime(applicationTime, applicationTime.Add(maxAdmissionClockSkew+time.Nanosecond)); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
 		t.Fatalf("excess skew error = %v", err)
+	}
+	for _, extreme := range []time.Time{
+		time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC),
+	} {
+		if _, err := conservativeAcceptanceTime(applicationTime, extreme); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+			t.Fatalf("extreme acceptance skew %s error = %v", extreme, err)
+		}
+		if _, err := conservativeCleanupTime(applicationTime, extreme); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+			t.Fatalf("extreme cleanup skew %s error = %v", extreme, err)
+		}
+	}
+}
+
+func TestFirestoreAdmissionStoreForwardMutationsRejectRevisionOverflow(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	updatedAt := createdAt.Add(time.Minute)
+	mutations := []struct {
+		name   string
+		invoke func(*FirestoreAdmissionStore) error
+	}{
+		{
+			name: "mark stored",
+			invoke: func(store *FirestoreAdmissionStore) error {
+				_, err := store.MarkStored(
+					context.Background(), admissionTenantID, admissionReservationKey,
+					admissionTestFence(reservation), admissionStoredReceiptData(reservation), updatedAt,
+				)
+				return err
+			},
+		},
+		{
+			name: "mark rejected",
+			invoke: func(store *FirestoreAdmissionStore) error {
+				_, err := store.MarkRejected(
+					context.Background(), admissionTenantID, admissionReservationKey,
+					admissionTestFence(reservation), "object_conflict", updatedAt,
+				)
+				return err
+			},
+		},
+		{
+			name: "release lease",
+			invoke: func(store *FirestoreAdmissionStore) error {
+				return store.ReleaseLease(
+					context.Background(), admissionTenantID, admissionReservationKey,
+					admissionTestFence(reservation), updatedAt, ingest.LeaseReleaseArtifactUnavailable,
+				)
+			},
+		},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+			receipt := tx.receipts[admissionReceiptPath()]
+			receipt.Revision = math.MaxInt64
+			tx.receipts[admissionReceiptPath()] = receipt
+			tx.readTime = updatedAt
+			store := admissionTestStore(updatedAt, admissionRunner(tx))
+
+			if err := mutation.invoke(store); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+				t.Fatalf("mutation error = %v, want unavailable", err)
+			}
+			if len(tx.updates) != 0 {
+				t.Fatalf("overflow updates = %d, want zero", len(tx.updates))
+			}
+		})
+	}
+}
+
+func TestValidateReservedOriginCleanupReceiptState(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	transitionAt := reservation.ReservationDeadline
+	quiescenceUntil := transitionAt.Add(ingest.DefaultCleanupLateWriteGrace)
+	pending := admissionTestReceiptDTO(admissionTestReceipt(reservation, ingest.ReceiptReserved))
+	pending.State = ingest.ReceiptCleanupPending
+	pending.clearLease()
+	pending.CleanupMode = ingest.CleanupModeReservationExpiry
+	pending.CleanupOriginStatus = ingest.ReceiptReserved
+	pending.CleanupQuiescenceUntil = quiescenceUntil
+	pending.UpdatedAt = transitionAt
+	if err := validateReceiptState(pending); err != nil {
+		t.Fatalf("valid cleanup_pending rejected: %v", err)
+	}
+	withArtifact := pending
+	withArtifact.ObjectPath = expectedObjectPath(withArtifact)
+	if err := validateReceiptState(withArtifact); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatal("cleanup_pending with stored artifact fields was accepted")
+	}
+	expired := pending
+	expired.State = ingest.ReceiptExpired
+	expired.UpdatedAt = quiescenceUntil
+	if err := validateReceiptState(expired); err != nil {
+		t.Fatalf("valid expired receipt rejected: %v", err)
+	}
+	expired.UpdatedAt = quiescenceUntil.Add(-time.Nanosecond)
+	if err := validateReceiptState(expired); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatal("expired receipt completed before quiescence was accepted")
 	}
 }
 
@@ -1185,15 +1664,17 @@ func TestFirestoreAdmissionStoreRejectsInitialLeaseBeforeReservationCreation(t *
 }
 
 type fakeAdmissionTransaction struct {
-	snapshot           authorization.Snapshot
-	readTime           time.Time
-	authorizationErr   error
-	indexes            map[string]firestoreIngestIndex
-	receipts           map[string]firestoreIngestReceipt
-	calls              []string
-	creates            []fakeAdmissionCreate
-	updates            []fakeAdmissionUpdate
-	authorizationLoads int
+	snapshot              authorization.Snapshot
+	readTime              time.Time
+	authorizationReadTime time.Time
+	receiptReadTime       time.Time
+	authorizationErr      error
+	indexes               map[string]firestoreIngestIndex
+	receipts              map[string]firestoreIngestReceipt
+	calls                 []string
+	creates               []fakeAdmissionCreate
+	updates               []fakeAdmissionUpdate
+	authorizationLoads    int
 }
 
 type fakeAdmissionCreate struct {
@@ -1222,7 +1703,11 @@ func (tx *fakeAdmissionTransaction) LoadAuthorization(
 ) (authorizationRead, error) {
 	tx.calls = append(tx.calls, "authorization")
 	tx.authorizationLoads++
-	return authorizationRead{Snapshot: tx.snapshot, ReadTime: tx.readTime}, tx.authorizationErr
+	readTime := tx.authorizationReadTime
+	if readTime.IsZero() {
+		readTime = tx.readTime
+	}
+	return authorizationRead{Snapshot: tx.snapshot, ReadTime: readTime}, tx.authorizationErr
 }
 
 func (tx *fakeAdmissionTransaction) ReadIndex(_ context.Context, path string) (firestoreIngestIndex, bool, error) {
@@ -1234,7 +1719,11 @@ func (tx *fakeAdmissionTransaction) ReadIndex(_ context.Context, path string) (f
 func (tx *fakeAdmissionTransaction) ReadReceipt(_ context.Context, path string) (receiptRead, bool, error) {
 	tx.calls = append(tx.calls, "receipt:"+path)
 	value, exists := tx.receipts[path]
-	return receiptRead{Receipt: value, ReadTime: tx.readTime}, exists, nil
+	readTime := tx.receiptReadTime
+	if readTime.IsZero() {
+		readTime = tx.readTime
+	}
+	return receiptRead{Receipt: value, ReadTime: readTime}, exists, nil
 }
 
 func (tx *fakeAdmissionTransaction) Create(_ context.Context, path string, value any) error {
@@ -1331,6 +1820,10 @@ func admissionTestLeaseProposal() ingest.LeaseProposal {
 	return ingest.LeaseProposal{
 		Owner:    ingest.LeaseOwner{ID: admissionLeaseOwnerID, Kind: ingest.LeaseOwnerRequest},
 		Duration: ingest.DefaultRequestLeaseDuration,
+		Attempt: ingest.RecoveryAttemptProposal{
+			ID:            admissionLeaseOwnerID,
+			WorkerVersion: ingest.RecoveryWorkerVersion,
+		},
 	}
 }
 
@@ -1483,6 +1976,9 @@ func admissionTestReceiptDTO(receipt ingest.Receipt) firestoreIngestReceipt {
 		RecoveryAttemptCount:   receipt.RecoveryAttemptCount,
 		NextRecoveryAt:         receipt.NextRecoveryAt,
 		LastRecoveryCode:       receipt.LastRecoveryCode,
+		CleanupQuiescenceUntil: receipt.CleanupQuiescenceUntil,
+		CleanupMode:            receipt.CleanupMode,
+		CleanupOriginStatus:    receipt.CleanupOriginStatus,
 		Revision:               receipt.Revision,
 		CreatedAt:              receipt.CreatedAt,
 		UpdatedAt:              receipt.UpdatedAt,

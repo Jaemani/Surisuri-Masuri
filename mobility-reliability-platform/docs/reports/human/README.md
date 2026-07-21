@@ -80,3 +80,4 @@
 | [HR-20260721-07](./HR-20260721-07-atomic-telemetry-admission.md) | atomic telemetry admission | `draft` |
 | [HR-20260721-08](./HR-20260721-08-immutable-artifact-lineage.md) | immutable artifact lineage | `draft` |
 | [HR-20260721-09](./HR-20260721-09-fenced-forward-admission.md) | fenced forward admission | `draft` |
+| [HR-20260721-10](./HR-20260721-10-recovery-claims-cleanup-transition.md) | recovery claim·cleanup transition | `draft` |

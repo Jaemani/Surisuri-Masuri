@@ -47,7 +47,7 @@ func TestFirestoreAdmissionStoreEmulatorConcurrentSameBatch(t *testing.T) {
 		emulatorTenantID,
 		emulatorClientBatchID,
 	)))
-	store, err := newContendedAdmissionEmulatorStore(client, now, barrier)
+	store, err := newContendedAdmissionEmulatorStore(client, barrier)
 	if err != nil {
 		t.Fatalf("NewFirestoreAdmissionStore() error = %v", err)
 	}
@@ -247,8 +247,13 @@ func TestFirestoreAdmissionStoreEmulatorConcurrentExpiredTakeover(t *testing.T) 
 	}
 	stored := readAdmissionEmulatorReceipt(t, client, persisted.TenantID, persisted.ReceiptID)
 	if stored.State != ingest.ReceiptReserved || stored.FencingToken != 2 || stored.Revision != 2 ||
-		stored.LeaseOwnerID != winner.lease.Fence.OwnerID || stored.RecoveryAttemptCount != 0 {
+		stored.LeaseOwnerID != winner.lease.Fence.OwnerID || stored.RecoveryAttemptCount != 1 {
 		t.Fatalf("stored takeover receipt = %#v, winner = %#v", stored, winner)
+	}
+	attempt := readAdmissionEmulatorAttempt(t, client, stored.TenantID, stored.ReceiptID, winner.lease.Fence.OwnerID)
+	if attempt.Status != "started" || attempt.FencingToken != 2 ||
+		attempt.OwnerKind != ingest.LeaseOwnerRequest || attempt.WorkerVersion != ingest.RecoveryWorkerVersion {
+		t.Fatalf("stored takeover attempt = %#v", attempt)
 	}
 }
 
@@ -334,8 +339,342 @@ func TestFirestoreAdmissionStoreEmulatorExpiredOwnerCannotRaceTakeoverFinalizer(
 			}
 			stored := readAdmissionEmulatorReceipt(t, client, persisted.TenantID, persisted.ReceiptID)
 			if stored.State != ingest.ReceiptReserved || stored.FencingToken != 2 || stored.Revision != 2 ||
+				stored.RecoveryAttemptCount != 1 ||
 				stored.LeaseOwnerID != emulatorSecondReceiptID || hasStoredArtifactData(stored) || stored.RejectionCode != "" {
 				t.Fatalf("receipt after takeover/finalizer race = %#v", stored)
+			}
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreEmulatorConcurrentSweeperClaim(t *testing.T) {
+	client := newAdmissionEmulatorClient(t)
+	clearAdmissionIngestCollections(t, client)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	seedAdmissionAuthorization(t, client, now)
+	persisted := seedExpiredAdmissionReservation(t, client, now)
+	store, err := NewFirestoreAdmissionStore(client, emulatorTransactionTimout, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewFirestoreAdmissionStore() error = %v", err)
+	}
+
+	type outcome struct {
+		grant  ingest.LeaseGrant
+		status ingest.LeaseStatus
+		err    error
+	}
+	ownerIDs := []string{emulatorSecondReceiptID, emulatorThirdReceiptID}
+	outcomes := make([]outcome, len(ownerIDs))
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for index, ownerID := range ownerIDs {
+		wait.Add(1)
+		go func(index int, ownerID string) {
+			defer wait.Done()
+			<-start
+			outcomes[index].grant, outcomes[index].status, outcomes[index].err = store.ClaimRecoveryLease(
+				context.Background(),
+				persisted.TenantID,
+				persisted.ReservationKey,
+				ingest.LeaseOwner{ID: ownerID, Kind: ingest.LeaseOwnerSweeper},
+				ingest.RecoveryAttemptProposal{ID: ownerID, WorkerVersion: ingest.RecoveryWorkerVersion},
+				now,
+				ingest.DefaultRequestLeaseDuration,
+			)
+		}(index, ownerID)
+	}
+	close(start)
+	wait.Wait()
+
+	statusCounts := map[ingest.LeaseStatus]int{}
+	var winner outcome
+	for index, result := range outcomes {
+		if result.err != nil {
+			t.Fatalf("concurrent sweeper claim %d error = %v", index, result.err)
+		}
+		statusCounts[result.status]++
+		if result.status == ingest.LeaseStatusAcquired {
+			winner = result
+		}
+	}
+	if statusCounts[ingest.LeaseStatusAcquired] != 1 || statusCounts[ingest.LeaseStatusHeld] != 1 {
+		t.Fatalf("sweeper claim statuses = %#v, want one acquired and one held", statusCounts)
+	}
+	stored := readAdmissionEmulatorReceipt(t, client, persisted.TenantID, persisted.ReceiptID)
+	if stored.FencingToken != 2 || stored.Revision != 2 || stored.RecoveryAttemptCount != 1 ||
+		stored.LeaseOwnerKind != ingest.LeaseOwnerSweeper || stored.LeaseOwnerID != winner.grant.Fence.OwnerID {
+		t.Fatalf("stored sweeper claim = %#v, winner = %#v", stored, winner)
+	}
+	attempt := readAdmissionEmulatorAttempt(t, client, stored.TenantID, stored.ReceiptID, winner.grant.Fence.OwnerID)
+	if attempt.FencingToken != 2 || attempt.OwnerKind != ingest.LeaseOwnerSweeper || attempt.Status != "started" {
+		t.Fatalf("stored sweeper attempt = %#v", attempt)
+	}
+}
+
+func TestFirestoreAdmissionStoreEmulatorDuplicateAttemptRollsBackSweeperClaim(t *testing.T) {
+	client := newAdmissionEmulatorClient(t)
+	clearAdmissionIngestCollections(t, client)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	seedAdmissionAuthorization(t, client, now)
+	persisted := seedExpiredAdmissionReservation(t, client, now)
+	attemptProposal := ingest.RecoveryAttemptProposal{
+		ID:            emulatorSecondReceiptID,
+		WorkerVersion: ingest.RecoveryWorkerVersion,
+	}
+	existingAttempt := newFirestoreRecoveryAttempt(
+		attemptProposal,
+		persisted.TenantID,
+		persisted.ReceiptID,
+		ingest.LeaseOwnerSweeper,
+		persisted.FencingToken+1,
+		now.Add(-time.Second),
+	)
+	if _, err := client.Doc(recoveryAttemptDocumentPath(
+		persisted.TenantID,
+		persisted.ReceiptID,
+		attemptProposal.ID,
+	)).Create(context.Background(), existingAttempt); err != nil {
+		t.Fatalf("seed duplicate recovery attempt: %v", err)
+	}
+	store, err := NewFirestoreAdmissionStore(client, emulatorTransactionTimout, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewFirestoreAdmissionStore() error = %v", err)
+	}
+
+	grant, status, err := store.ClaimRecoveryLease(
+		context.Background(),
+		persisted.TenantID,
+		persisted.ReservationKey,
+		ingest.LeaseOwner{ID: emulatorSecondReceiptID, Kind: ingest.LeaseOwnerSweeper},
+		attemptProposal,
+		now,
+		ingest.DefaultRequestLeaseDuration,
+	)
+	if !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatalf("ClaimRecoveryLease() error = %v, want admission unavailable", err)
+	}
+	if status != "" || grant != (ingest.LeaseGrant{}) {
+		t.Fatalf("ClaimRecoveryLease() result = %#v, %q, want zero grant/status", grant, status)
+	}
+
+	stored := readAdmissionEmulatorReceipt(t, client, persisted.TenantID, persisted.ReceiptID)
+	if stored.State != persisted.State || stored.FencingToken != persisted.FencingToken ||
+		stored.Revision != persisted.Revision || stored.RecoveryAttemptCount != persisted.RecoveryAttemptCount ||
+		stored.LeaseOwnerID != persisted.LeaseOwnerID || stored.LeaseOwnerKind != persisted.LeaseOwnerKind ||
+		!stored.LeaseAcquiredAt.Equal(persisted.LeaseAcquiredAt) ||
+		!stored.LeaseHeartbeatAt.Equal(persisted.LeaseHeartbeatAt) ||
+		!stored.LeaseExpiresAt.Equal(persisted.LeaseExpiresAt) ||
+		!stored.NextRecoveryAt.Equal(persisted.NextRecoveryAt) ||
+		stored.LastRecoveryCode != persisted.LastRecoveryCode || !stored.UpdatedAt.Equal(persisted.UpdatedAt) {
+		t.Fatalf("receipt changed after duplicate attempt rollback: before=%#v after=%#v", persisted, stored)
+	}
+	storedAttempt := readAdmissionEmulatorAttempt(
+		t,
+		client,
+		persisted.TenantID,
+		persisted.ReceiptID,
+		attemptProposal.ID,
+	)
+	if storedAttempt != existingAttempt {
+		t.Fatalf("duplicate attempt was changed: before=%#v after=%#v", existingAttempt, storedAttempt)
+	}
+	attempts, err := client.Collection(
+		receiptDocumentPath(persisted.TenantID, persisted.ReceiptID) + "/recoveryAttempts",
+	).Documents(context.Background()).GetAll()
+	if err != nil {
+		t.Fatalf("list recovery attempts after rollback: %v", err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("recovery attempt count after rollback = %d, want 1", len(attempts))
+	}
+}
+
+func TestFirestoreAdmissionStoreEmulatorRenewVersusTakeover(t *testing.T) {
+	client := newAdmissionEmulatorClient(t)
+	clearAdmissionIngestCollections(t, client)
+	serverNow := time.Now().UTC().Truncate(time.Millisecond)
+	seedAdmissionAuthorization(t, client, serverNow)
+	createdAt := serverNow.Add(-ingest.DefaultRequestLeaseDuration + 2*time.Second)
+	persisted := seedAdmissionReservation(t, client, createdAt)
+	oldFence := persisted.leaseGrant().Fence
+	renewedAt := persisted.LeaseExpiresAt.Add(-time.Millisecond)
+	takeoverAt := persisted.LeaseExpiresAt.Add(time.Millisecond)
+	barrier := newReceiptReadBarrier(receiptDocumentPath(persisted.TenantID, persisted.ReceiptID))
+	renewStore, err := newReceiptContendedAdmissionEmulatorStore(client, renewedAt, barrier)
+	if err != nil {
+		t.Fatalf("renew store error = %v", err)
+	}
+	claimStore, err := newReceiptContendedAdmissionEmulatorStore(client, takeoverAt, barrier)
+	if err != nil {
+		t.Fatalf("claim store error = %v", err)
+	}
+
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	var renewGrant ingest.LeaseGrant
+	var renewErr error
+	var claimGrant ingest.LeaseGrant
+	var claimStatus ingest.LeaseStatus
+	var claimErr error
+	wait.Add(2)
+	go func() {
+		defer wait.Done()
+		<-start
+		renewGrant, renewErr = renewStore.RenewLease(
+			context.Background(),
+			persisted.TenantID,
+			persisted.ReservationKey,
+			oldFence,
+			renewedAt,
+			ingest.DefaultRequestLeaseDuration,
+		)
+	}()
+	go func() {
+		defer wait.Done()
+		<-start
+		claimGrant, claimStatus, claimErr = claimStore.ClaimRecoveryLease(
+			context.Background(),
+			persisted.TenantID,
+			persisted.ReservationKey,
+			ingest.LeaseOwner{ID: emulatorSecondReceiptID, Kind: ingest.LeaseOwnerSweeper},
+			ingest.RecoveryAttemptProposal{ID: emulatorSecondReceiptID, WorkerVersion: ingest.RecoveryWorkerVersion},
+			takeoverAt,
+			ingest.DefaultRequestLeaseDuration,
+		)
+	}()
+	close(start)
+	wait.Wait()
+
+	if claimErr != nil {
+		t.Fatalf("ClaimRecoveryLease() error = %v", claimErr)
+	}
+	stored := readAdmissionEmulatorReceipt(t, client, persisted.TenantID, persisted.ReceiptID)
+	switch claimStatus {
+	case ingest.LeaseStatusHeld:
+		if renewErr != nil || renewGrant.Fence.Token != 1 || stored.FencingToken != 1 ||
+			stored.LeaseOwnerID != persisted.LeaseOwnerID || stored.RecoveryAttemptCount != 0 ||
+			!stored.LeaseExpiresAt.Equal(renewGrant.Fence.ExpiresAt) {
+			t.Fatalf("renew winner = renew:%#v/%v claim:%#v/%q receipt:%#v", renewGrant, renewErr, claimGrant, claimStatus, stored)
+		}
+	case ingest.LeaseStatusAcquired:
+		if !errors.Is(renewErr, ingest.ErrAdmissionUnavailable) || claimGrant.Fence.Token != 2 ||
+			stored.FencingToken != 2 || stored.LeaseOwnerID != emulatorSecondReceiptID ||
+			stored.RecoveryAttemptCount != 1 {
+			t.Fatalf("takeover winner = renew:%#v/%v claim:%#v/%q receipt:%#v", renewGrant, renewErr, claimGrant, claimStatus, stored)
+		}
+	default:
+		t.Fatalf("renew/takeover claim status = %q", claimStatus)
+	}
+	if stored.Revision != 2 {
+		t.Fatalf("renew/takeover revision = %d, want one committed mutation", stored.Revision)
+	}
+}
+
+func TestFirestoreAdmissionStoreEmulatorCleanupTransitionWinsDeadlineRaces(t *testing.T) {
+	tests := []struct {
+		name    string
+		compete func(*FirestoreAdmissionStore, firestoreIngestReceipt, time.Time) (ingest.LeaseStatus, error)
+	}{
+		{
+			name: "recovery claim",
+			compete: func(store *FirestoreAdmissionStore, receipt firestoreIngestReceipt, now time.Time) (ingest.LeaseStatus, error) {
+				_, status, err := store.ClaimRecoveryLease(
+					context.Background(),
+					receipt.TenantID,
+					receipt.ReservationKey,
+					ingest.LeaseOwner{ID: emulatorSecondReceiptID, Kind: ingest.LeaseOwnerSweeper},
+					ingest.RecoveryAttemptProposal{ID: emulatorSecondReceiptID, WorkerVersion: ingest.RecoveryWorkerVersion},
+					now,
+					ingest.DefaultRequestLeaseDuration,
+				)
+				return status, err
+			},
+		},
+		{
+			name: "stale stored finalizer",
+			compete: func(store *FirestoreAdmissionStore, receipt firestoreIngestReceipt, now time.Time) (ingest.LeaseStatus, error) {
+				_, err := store.MarkStored(
+					context.Background(),
+					receipt.TenantID,
+					receipt.ReservationKey,
+					receipt.leaseGrant().Fence,
+					emulatorStoredReceiptData(receipt),
+					now,
+				)
+				return "", err
+			},
+		},
+		{
+			name: "stale rejected finalizer",
+			compete: func(store *FirestoreAdmissionStore, receipt firestoreIngestReceipt, now time.Time) (ingest.LeaseStatus, error) {
+				_, err := store.MarkRejected(
+					context.Background(),
+					receipt.TenantID,
+					receipt.ReservationKey,
+					receipt.leaseGrant().Fence,
+					"object_conflict",
+					now,
+				)
+				return "", err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := newAdmissionEmulatorClient(t)
+			clearAdmissionIngestCollections(t, client)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			seedAdmissionAuthorization(t, client, now)
+			persisted := seedAdmissionReservation(t, client, now.Add(-ingest.ReservationProcessingWindow))
+			store, err := NewFirestoreAdmissionStore(client, emulatorTransactionTimout, func() time.Time { return now })
+			if err != nil {
+				t.Fatalf("NewFirestoreAdmissionStore() error = %v", err)
+			}
+
+			start := make(chan struct{})
+			var wait sync.WaitGroup
+			var transitionStatus ingest.TransitionStatus
+			var transitionErr error
+			var competingStatus ingest.LeaseStatus
+			var competingErr error
+			wait.Add(2)
+			go func() {
+				defer wait.Done()
+				<-start
+				_, transitionStatus, transitionErr = store.BeginCleanupTransition(
+					context.Background(),
+					persisted.TenantID,
+					persisted.ReservationKey,
+					now,
+				)
+			}()
+			go func() {
+				defer wait.Done()
+				<-start
+				competingStatus, competingErr = test.compete(store, persisted, now)
+			}()
+			close(start)
+			wait.Wait()
+
+			if transitionErr != nil || transitionStatus != ingest.TransitionStatusStarted {
+				t.Fatalf("cleanup transition = %q, %v", transitionStatus, transitionErr)
+			}
+			if test.name == "recovery claim" {
+				if competingErr != nil ||
+					(competingStatus != ingest.LeaseStatusDeadlineElapsed && competingStatus != ingest.LeaseStatusNotEligible) {
+					t.Fatalf("deadline recovery claim = %q, %v", competingStatus, competingErr)
+				}
+			} else if !errors.Is(competingErr, ingest.ErrAdmissionUnavailable) {
+				t.Fatalf("stale finalizer error = %v, want unavailable", competingErr)
+			}
+			stored := readAdmissionEmulatorReceipt(t, client, persisted.TenantID, persisted.ReceiptID)
+			if stored.State != ingest.ReceiptCleanupPending || stored.FencingToken != 2 || stored.Revision != 2 ||
+				stored.RecoveryAttemptCount != 0 || receiptHasLeaseFields(stored) ||
+				stored.CleanupMode != ingest.CleanupModeReservationExpiry ||
+				stored.CleanupOriginStatus != ingest.ReceiptReserved ||
+				!stored.CleanupQuiescenceUntil.Equal(now.Add(ingest.DefaultCleanupLateWriteGrace)) ||
+				hasStoredArtifactData(stored) || stored.RejectionCode != "" {
+				t.Fatalf("receipt after deadline race = %#v", stored)
 			}
 		})
 	}
@@ -385,6 +724,43 @@ type barrierAdmissionTransaction struct {
 	barrier *missingIndexBarrier
 }
 
+type receiptReadBarrier struct {
+	path     string
+	ready    chan struct{}
+	mu       sync.Mutex
+	arrivals int
+}
+
+func newReceiptReadBarrier(path string) *receiptReadBarrier {
+	return &receiptReadBarrier{path: path, ready: make(chan struct{})}
+}
+
+func (barrier *receiptReadBarrier) waitForTwo() {
+	barrier.mu.Lock()
+	barrier.arrivals++
+	if barrier.arrivals == 2 {
+		close(barrier.ready)
+	}
+	barrier.mu.Unlock()
+	<-barrier.ready
+}
+
+type receiptBarrierAdmissionTransaction struct {
+	admissionTransaction
+	barrier *receiptReadBarrier
+}
+
+func (transaction receiptBarrierAdmissionTransaction) ReadReceipt(
+	ctx context.Context,
+	path string,
+) (receiptRead, bool, error) {
+	receipt, exists, err := transaction.admissionTransaction.ReadReceipt(ctx, path)
+	if err == nil && exists && path == transaction.barrier.path {
+		transaction.barrier.waitForTwo()
+	}
+	return receipt, exists, err
+}
+
 func (transaction barrierAdmissionTransaction) LoadAuthorization(
 	ctx context.Context,
 	principal ingest.Principal,
@@ -407,13 +783,12 @@ func (transaction barrierAdmissionTransaction) ReadIndex(
 
 func newContendedAdmissionEmulatorStore(
 	client *firestore.Client,
-	now time.Time,
 	barrier *missingIndexBarrier,
 ) (*FirestoreAdmissionStore, error) {
 	store, err := NewFirestoreAdmissionStore(
 		client,
 		emulatorTransactionTimout,
-		func() time.Time { return now },
+		func() time.Time { return time.Now().UTC() },
 	)
 	if err != nil {
 		return nil, err
@@ -429,6 +804,35 @@ func newContendedAdmissionEmulatorStore(
 			func(runContext context.Context, transaction *firestore.Transaction) error {
 				base := firestoreAdmissionTransaction{client: client, transaction: transaction}
 				return operation(runContext, barrierAdmissionTransaction{
+					admissionTransaction: base,
+					barrier:              barrier,
+				})
+			},
+		)
+	}
+	return store, nil
+}
+
+func newReceiptContendedAdmissionEmulatorStore(
+	client *firestore.Client,
+	now time.Time,
+	barrier *receiptReadBarrier,
+) (*FirestoreAdmissionStore, error) {
+	store, err := NewFirestoreAdmissionStore(client, emulatorTransactionTimout, func() time.Time { return now })
+	if err != nil {
+		return nil, err
+	}
+	store.runTransaction = func(
+		ctx context.Context,
+		operation func(context.Context, admissionTransaction) error,
+	) error {
+		transactionContext, cancel := context.WithTimeout(ctx, emulatorTransactionTimout)
+		defer cancel()
+		return client.RunTransaction(
+			transactionContext,
+			func(runContext context.Context, transaction *firestore.Transaction) error {
+				base := firestoreAdmissionTransaction{client: client, transaction: transaction}
+				return operation(runContext, receiptBarrierAdmissionTransaction{
 					admissionTransaction: base,
 					barrier:              barrier,
 				})
@@ -533,6 +937,10 @@ func emulatorLeaseProposal(ownerID string) ingest.LeaseProposal {
 	return ingest.LeaseProposal{
 		Owner:    ingest.LeaseOwner{ID: ownerID, Kind: ingest.LeaseOwnerRequest},
 		Duration: ingest.DefaultRequestLeaseDuration,
+		Attempt: ingest.RecoveryAttemptProposal{
+			ID:            ownerID,
+			WorkerVersion: ingest.RecoveryWorkerVersion,
+		},
 	}
 }
 
@@ -557,6 +965,30 @@ func seedExpiredAdmissionReservation(
 	batch.Set(client.Doc(receiptDocumentPath(reservation.TenantID, reservation.ReceiptID)), receipt)
 	if _, err := batch.Commit(context.Background()); err != nil {
 		t.Fatalf("seed expired admission reservation: %v", err)
+	}
+	return receipt
+}
+
+func seedAdmissionReservation(
+	t *testing.T,
+	client *firestore.Client,
+	createdAt time.Time,
+) firestoreIngestReceipt {
+	t.Helper()
+	reservation := emulatorReservation(createdAt, emulatorFirstReceiptID)
+	index := newFirestoreIngestIndex(reservation)
+	receipt := newFirestoreIngestReceipt(
+		reservation,
+		ingest.LeaseOwner{ID: emulatorFirstReceiptID, Kind: ingest.LeaseOwnerRequest},
+		createdAt,
+		createdAt.Add(ingest.DefaultRequestLeaseDuration),
+	)
+	batch := client.Batch()
+	batch.Set(client.Doc(idempotencyDocumentPath(reservation.TenantID, reservation.ReservationKey)), index)
+	batch.Set(client.Doc(clientBatchDocumentPath(reservation.TenantID, reservation.ClientBatchKey)), index)
+	batch.Set(client.Doc(receiptDocumentPath(reservation.TenantID, reservation.ReceiptID)), receipt)
+	if _, err := batch.Commit(context.Background()); err != nil {
+		t.Fatalf("seed admission reservation: %v", err)
 	}
 	return receipt
 }
@@ -612,6 +1044,25 @@ func readAdmissionEmulatorReceipt(
 	return receipt
 }
 
+func readAdmissionEmulatorAttempt(
+	t *testing.T,
+	client *firestore.Client,
+	tenantID string,
+	receiptID string,
+	attemptID string,
+) firestoreRecoveryAttempt {
+	t.Helper()
+	document, err := client.Doc(recoveryAttemptDocumentPath(tenantID, receiptID, attemptID)).Get(context.Background())
+	if err != nil {
+		t.Fatalf("read emulator recovery attempt: %v", err)
+	}
+	var attempt firestoreRecoveryAttempt
+	if err := document.DataTo(&attempt); err != nil {
+		t.Fatalf("decode emulator recovery attempt: %v", err)
+	}
+	return attempt
+}
+
 func assertAdmissionCollectionCount(
 	t *testing.T,
 	client *firestore.Client,
@@ -632,6 +1083,28 @@ func assertAdmissionCollectionCount(
 
 func clearAdmissionIngestCollections(t *testing.T, client *firestore.Client) {
 	t.Helper()
+	receipts, err := client.Collection(
+		"tenants/" + emulatorTenantID + "/ingestReceipts",
+	).Documents(context.Background()).GetAll()
+	if err != nil {
+		t.Fatalf("list ingestReceipts for nested cleanup: %v", err)
+	}
+	for _, receipt := range receipts {
+		attempts, attemptErr := receipt.Ref.Collection("recoveryAttempts").Documents(context.Background()).GetAll()
+		if attemptErr != nil {
+			t.Fatalf("list recovery attempts for cleanup: %v", attemptErr)
+		}
+		if len(attempts) == 0 {
+			continue
+		}
+		batch := client.Batch()
+		for _, attempt := range attempts {
+			batch.Delete(attempt.Ref)
+		}
+		if _, commitErr := batch.Commit(context.Background()); commitErr != nil {
+			t.Fatalf("clear recovery attempts: %v", commitErr)
+		}
+	}
 	for _, collection := range []string{
 		"ingestIdempotency",
 		"ingestClientBatches",

@@ -154,6 +154,7 @@ PostgreSQL/PostGIS, Kafka, Kubernetes는 필요성이 측정되기 전에는 초
 - authorization 재평가와 두 uniqueness index·최초 receipt 생성을 한 Firestore transaction에 묶은 admission adapter는 [EVD-20260721-014](./evidence/2026-07.md#evd-20260721-014--원자적-telemetry-admission과-receipt-lineage)의 local fake seam과 [EVD-20260721-015](./evidence/2026-07.md#evd-20260721-015--firestore-admission-transaction-emulator-integration)의 concurrent same-batch에서 확인됐다. production ADC/IAM과 실제 철회 transaction 경쟁은 미검증이다.
 - deterministic gzip raw object, canonical manifest, exact hash·CRC·size·generation 계보와 Firestore finalizer는 [EVD-20260721-016](./evidence/2026-07.md#evd-20260721-016--immutable-telemetry-objectmanifest-lineage)의 local race test와 pinned official Storage testbench에서 확인됐다. staging bucket IAM·lifecycle·retention은 미검증이다.
 - ADR-0017의 recovery 설계 중 R1 immutable reservation input, R2 lease/fence domain contract와 R3의 **최초 lease·active replay·expired takeover·fenced finalizer forward path**가 구현됐다. 최초 reservation은 lease와 함께 생성되고, active replay는 artifact 작업에 들어가지 않으며, 만료 lease takeover는 fencing token을 증가시킨다. `MarkStored`·`MarkRejected`와 safe release는 현재 owner/token/deadline과 receipt server read time을 확인한다. 이 범위는 [EVD-20260721-017](./evidence/2026-07.md)의 local unit·Firestore Emulator와 clean CI에서 `verified`됐지만 staging·runtime 운영 성과는 아니다.
+- 다음 증분으로 `RenewLease`, sweeper 전용 `ClaimRecoveryLease`와 reserved-origin `BeginCleanupTransition`이 local worktree에 구현됐다. HTTP replay takeover와 sweeper claim은 receipt token·revision을 증가시키는 transaction 안에서 `started` recovery attempt 생성과 attempt count 증가를 함께 commit하며, renew 대 takeover·동시 sweeper claim·deadline cleanup 대 recovery/finalizer 경쟁을 Firestore Emulator에서 재현한다. HTTP replay는 authorization snapshot과 receipt read time의 coherence를 확인하고 더 늦은 receipt server time으로 같은 snapshot을 다시 평가한다. forward acceptance에는 app/server 시각의 큰 값을, 조기 cleanup 방지에는 작은 값을 사용하며 극단값·허용 skew 초과·revision overflow는 mutation 없이 fail-closed한다. reserved-origin `cleanup_pending`은 artifact-empty여야 하고 `expired`는 provisional quiet period가 지난 뒤에만 유효하다. 이 범위는 [EVD-20260721-018](./evidence/2026-07.md)에 `generated` local evidence로 정리하며 최신 전체 gate·clean CI·staging 확인 전에는 verified 성과가 아니다.
 
 native SQLite/GPS callback과 실기기 동작은 아직 검증하지 않았고, production adapter가 executable에 연결되지 않아 gateway는 의도적으로 ingest를 받지 않는다. 현재 `/healthz` 외 readiness와 ingest는 계속 fail-closed여야 한다.
 
@@ -161,7 +162,9 @@ native SQLite/GPS callback과 실기기 동작은 아직 검증하지 않았고,
 
 - background GPS와 Android/iPhone 실기기 결과는 아직 별도 증거가 필요하다.
 - Firebase verifier 구현은 runtime wiring·실제 token 검증·Cloud Run 배포 전에는 운영 인증 완료가 아니다.
-- recovery의 `RenewLease`, 별도 `ClaimRecoveryLease`, recovery attempt ledger, generation-pinned classifier·forward reconciler, bounded sweeper와 origin별 cleanup transition/purge는 아직 구현·검증되지 않았다.
+- recovery attempt는 takeover 시 `started` 원장 생성까지만 있으며 artifact 분류 뒤 completion/failure update는 없다. `BeginHeldCleanup`, `BeginAcceptedDeletion`, `BeginRejectedArtifactCleanup`, cleanup lease·target·실행·purge도 미구현이다.
+- generation-pinned classifier·forward reconciler와 bounded sweeper runtime은 아직 구현·검증되지 않았다. `ClaimRecoveryLease`는 control-plane 처리 소유권일 뿐 artifact read/write 권한이 아니다. current system authorization을 재평가하는 runtime 경계가 구현되기 전에는 worker·scheduler와 연결하지 않는다.
+- `worker_version`은 현재 server-controlled allowlist의 `telemetry-recovery.v1`만 허용한다. cleanup late-write grace 6분은 local 경쟁 검증을 위한 provisional 기본값이며 승인된 보존·삭제 정책이나 운영 SLO가 아니다.
 - `ErrIngestInProgress`의 외부 HTTP status·retry 계약과 startup dependency wiring도 아직 고정되지 않았다.
 - 수리 원본 export가 작업공간에 없으므로 실제 이관 품질과 모델 학습 가능성을 확정하지 않는다.
 - 실증 인원, 비용 절감, 모델 정확도는 실제 측정 전 숫자를 채우지 않는다.
