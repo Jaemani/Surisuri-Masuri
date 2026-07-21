@@ -68,9 +68,10 @@ func (c *readOnlyArtifactClassifier) Classify(
 		grant:      grant,
 		request:    request,
 		result: ArtifactClassificationResult{
-			RetentionPhase:   artifactRetentionPhaseAt(request, observedAt),
-			ValidatorVersion: request.ValidatorVersion,
-			ObservedAt:       observedAt,
+			RetentionPhase:     artifactRetentionPhaseAt(request, observedAt),
+			ValidatorVersion:   request.ValidatorVersion,
+			ObservedAt:         observedAt,
+			requestBindingHash: canonicalArtifactClassificationRequestBinding(request),
 		},
 	}
 	switch request.Purpose {
@@ -191,6 +192,7 @@ func (r *artifactClassificationRun) classifyForwardWithoutManifest() (ArtifactCl
 	if err := r.checkAuthorization(); err != nil {
 		return ArtifactClassificationResult{}, err
 	}
+	r.result.PinnedRaw = artifactPinnedLineageFromSnapshot(rawRead.snapshot)
 	rawValidation := r.classifier.validator.ValidateRaw(r.request, rawRead.snapshot, rawRead.content)
 	if rawValidation.Status != artifactContentValidationValid || rawValidation.ReasonCode != "" {
 		if rawValidation.Status == artifactContentValidationInvalid && rawValidation.ReasonCode != "" {
@@ -199,7 +201,6 @@ func (r *artifactClassificationRun) classifyForwardWithoutManifest() (ArtifactCl
 		}
 		return r.terminal(ArtifactClassificationUnavailable, ArtifactReasonResponseUnverifiable)
 	}
-	r.result.PinnedRaw = artifactPinnedLineageFromSnapshot(rawRead.snapshot)
 	return r.terminal(ArtifactClassificationValidRawOnly, ArtifactReasonRawValidManifestAbsent)
 }
 
@@ -248,6 +249,7 @@ func (r *artifactClassificationRun) classifyForwardReferencedRaw(
 	if err := r.checkAuthorization(); err != nil {
 		return ArtifactClassificationResult{}, err
 	}
+	r.result.PinnedRaw = artifactPinnedLineageFromSnapshot(rawRead.snapshot)
 	contentValidation := r.classifier.validator.Validate(
 		r.request,
 		manifestRead.snapshot,
@@ -262,7 +264,6 @@ func (r *artifactClassificationRun) classifyForwardReferencedRaw(
 		}
 		return r.terminal(ArtifactClassificationUnavailable, ArtifactReasonResponseUnverifiable)
 	}
-	r.result.PinnedRaw = artifactPinnedLineageFromSnapshot(rawRead.snapshot)
 	return r.terminal(ArtifactClassificationValidComplete, ArtifactReasonManifestAndReferencedRawValid)
 }
 

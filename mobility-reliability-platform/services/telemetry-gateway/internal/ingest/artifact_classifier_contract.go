@@ -209,15 +209,16 @@ type ArtifactPinnedLineage struct {
 }
 
 type ArtifactClassificationResult struct {
-	Classification    ArtifactClassification
-	ReasonCode        ArtifactReasonCode
-	RetentionPhase    ArtifactRetentionPhase
-	ManifestInventory ArtifactInventorySummary
-	RawInventory      ArtifactInventorySummary
-	PinnedManifest    *ArtifactPinnedLineage
-	PinnedRaw         *ArtifactPinnedLineage
-	ValidatorVersion  string
-	ObservedAt        time.Time
+	Classification     ArtifactClassification
+	ReasonCode         ArtifactReasonCode
+	RetentionPhase     ArtifactRetentionPhase
+	ManifestInventory  ArtifactInventorySummary
+	RawInventory       ArtifactInventorySummary
+	PinnedManifest     *ArtifactPinnedLineage
+	PinnedRaw          *ArtifactPinnedLineage
+	ValidatorVersion   string
+	ObservedAt         time.Time
+	requestBindingHash [sha256.Size]byte
 }
 
 type ArtifactClassifier interface {

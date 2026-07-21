@@ -74,6 +74,8 @@ func TestValidateLeaseGrant(t *testing.T) {
 
 func TestValidLeaseReleaseCode(t *testing.T) {
 	if !ValidLeaseReleaseCode(LeaseReleaseArtifactUnavailable) ||
+		!ValidLeaseReleaseCode(LeaseReleaseAuthorizationUnavailable) ||
+		!ValidLeaseReleaseCode(LeaseReleaseAwaitingClientReplay) ||
 		!ValidLeaseReleaseCode(LeaseReleaseFinalizerUnavailable) {
 		t.Fatal("documented release code was rejected")
 	}

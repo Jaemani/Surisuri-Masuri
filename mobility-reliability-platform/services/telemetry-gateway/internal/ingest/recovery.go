@@ -59,7 +59,11 @@ type RecoveryAttemptProposal struct {
 
 type RecoveryAttemptStatus string
 
-const RecoveryAttemptStarted RecoveryAttemptStatus = "started"
+const (
+	RecoveryAttemptStarted   RecoveryAttemptStatus = "started"
+	RecoveryAttemptCompleted RecoveryAttemptStatus = "completed"
+	RecoveryAttemptFailed    RecoveryAttemptStatus = "failed"
+)
 
 type LeaseStatus string
 
@@ -104,13 +108,18 @@ type CleanupTransitionStore interface {
 type LeaseReleaseCode string
 
 const (
-	LeaseReleaseArtifactUnavailable  LeaseReleaseCode = "artifact_unavailable"
-	LeaseReleaseFinalizerUnavailable LeaseReleaseCode = "finalizer_unavailable"
+	LeaseReleaseArtifactUnavailable      LeaseReleaseCode = "artifact_unavailable"
+	LeaseReleaseAuthorizationUnavailable LeaseReleaseCode = "authorization_unavailable"
+	LeaseReleaseAwaitingClientReplay     LeaseReleaseCode = "awaiting_client_replay"
+	LeaseReleaseFinalizerUnavailable     LeaseReleaseCode = "finalizer_unavailable"
 )
 
 func ValidLeaseReleaseCode(code LeaseReleaseCode) bool {
 	switch code {
-	case LeaseReleaseArtifactUnavailable, LeaseReleaseFinalizerUnavailable:
+	case LeaseReleaseArtifactUnavailable,
+		LeaseReleaseAuthorizationUnavailable,
+		LeaseReleaseAwaitingClientReplay,
+		LeaseReleaseFinalizerUnavailable:
 		return true
 	default:
 		return false
