@@ -17,7 +17,7 @@ audience: project team and technical reviewer
 ## 한눈에 보기
 
 - 이번 회차의 사전 목적: request와 recovery worker의 lease 인수·연장을 같은 fencing 규칙으로 직렬화하고, reservation deadline 뒤에는 forward 처리가 아닌 reserved-origin cleanup 대기 상태만 시작하게 한다.
-- 보고 기준일의 실제 상태: `RenewLease`, sweeper 전용 `ClaimRecoveryLease`, HTTP/sweeper takeover의 atomic `started` recovery attempt와 count, reserved-origin `BeginCleanupTransition`이 local worktree에 구현됐다. server/app clock 방향과 주요 경쟁은 unit·Firestore Emulator test로 고정하는 중이다.
+- 보고 기준일의 실제 상태: `RenewLease`, sweeper 전용 `ClaimRecoveryLease`, HTTP/sweeper takeover의 atomic `started` recovery attempt와 count, reserved-origin `BeginCleanupTransition`이 `main`에 반영됐고 local·clean CI 검증을 통과했다.
 - 가장 중요한 차이 또는 위험: 이 구현은 recovery 실행기가 아니며 lease claim은 artifact 접근 권한이 아니다. classifier·forward reconciler·current system authorization runtime이 없으므로 sweeper claim 뒤 artifact inspect/write를 실행해서는 안 된다. cleanup object를 claim·삭제하는 코드와 다른 origin cleanup, runtime/staging 연결도 없다.
 - 사람에게 필요한 결정·확인: EVD-018의 최신 전체 local gate와 clean CI를 확인한 뒤 generation-pinned read-only classifier를 다음 독립 gate로 시작할지 검토해야 한다.
 
@@ -65,7 +65,7 @@ audience: project team and technical reviewer
 | 실제 주장 | 증거 ID·링크 | 검증 상태 | 확인자·확인일 |
 | --- | --- | --- | --- |
 | claim·renew·origin별 cleanup의 전체 계약이 결정됨 | [ADR-0017](../../decisions/ADR-0017-fenced-ingest-recovery.md) | `accepted` decision; 구현 증거 아님 | 문서 검토 필요 |
-| renew·explicit claim·atomic started attempt·reserved cleanup transition과 Emulator races가 local worktree에서 관찰됨 | [EVD-20260721-018](../../evidence/2026-07.md) | `generated` — 최신 전체 local gate와 clean CI 확인 전 | 사람 검토 필요 |
+| renew·explicit claim·atomic started attempt·reserved cleanup transition과 Emulator races가 관찰됨 | [EVD-20260721-018](../../evidence/2026-07.md) | `verified` — local/clean CI 범위, staging 아님 | 사람 검토 필요 |
 | cleanup 대상이 exact generation으로 삭제되고 purge됨 | 확인 필요 — 현재 구현하지 않음 | `미검증` | 해당 없음 |
 | sweeper runtime과 production telemetry recovery가 활성화됨 | 확인 필요 — 현재 활성화하지 않음 | `미검증` | 해당 없음 |
 
@@ -110,5 +110,5 @@ audience: project team and technical reviewer
 - [x] local test 실패를 사용자 영향 인시던트로 기록하지 않았다.
 - [x] 참석자·사진·지출을 생성하거나 추정하지 않았다.
 - [x] 민감정보와 원본 GPS 좌표가 없다.
-- [ ] EVD-20260721-018의 최신 전체 local gate와 clean CI 결과를 확인했다.
+- [x] EVD-20260721-018의 최신 전체 local gate와 clean CI 결과를 확인했다.
 - [ ] reviewer와 발행일을 사람이 확정했다.
