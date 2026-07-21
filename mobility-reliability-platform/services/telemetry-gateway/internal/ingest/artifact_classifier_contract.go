@@ -16,6 +16,15 @@ var (
 	ErrInvalidArtifactClassificationRequest = errors.New("artifact classification request is invalid")
 	ErrInvalidArtifactReadAuthorization     = errors.New("artifact read authorization is invalid")
 	ErrArtifactReadAuthorizationExpired     = errors.New("artifact read authorization has expired")
+	ErrArtifactPermissionDenied             = errors.New("telemetry artifact provider permission denied")
+	ErrArtifactQuotaLimited                 = errors.New("telemetry artifact provider quota limited")
+	ErrArtifactProviderTimeout              = errors.New("telemetry artifact provider timed out")
+	ErrArtifactProviderCancelled            = errors.New("telemetry artifact provider cancelled the operation")
+	ErrArtifactProviderUnavailable          = errors.New("telemetry artifact provider is unavailable")
+	ErrArtifactResponseUnverifiable         = errors.New("telemetry artifact provider response is unverifiable")
+	ErrArtifactReadLimitExceeded            = errors.New("telemetry artifact read limit exceeded")
+	ErrArtifactGenerationNotFound           = errors.New("telemetry artifact generation was not found")
+	ErrArtifactPreconditionDrift            = errors.New("telemetry artifact generation precondition drifted")
 )
 
 // ArtifactReadPurpose separates pending forward recovery from audits of an

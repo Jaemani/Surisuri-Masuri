@@ -34,15 +34,18 @@
 - authorization 재평가와 두 uniqueness index·최초 receipt 생성을 결합한 Firestore transaction adapter
 - replay·두 conflict·partial/corrupt linkage의 fail-closed 판정과 30일 receipt lineage
 - raw/manifest partial failure와 finalizer retry를 같은 artifact generation으로 수렴시키는 ingest service
+- HTTP Cloud Storage client와 read-only scope를 직접 소유하는 artifact inventory reader factory
+- `Versions:true`와 `SoftDeleted:true`를 분리한 exact `Prefix`·`MatchGlob` generation inventory와 bounded `limit+1` 관찰
+- exact generation+metageneration precondition, manifest/raw compressed flag 분리, `maxBytes+1` read와 typed provider error 경계
 
 아직 구현하지 않은 production 운영 경계:
 
-- generation-pinned classifier orchestration, raw 검증·codec registry와 Storage version inventory adapter
+- generation-pinned classifier orchestration, manifest/raw cross-lineage 검증과 raw codec·validator registry
 - classifier 결과를 소비하는 forward reconciler, attempt completion/failure와 bounded sweeper runtime
 - cleanup lease·target, generation-pinned delete, nested ledger purge와 accepted deletion auditor
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 
-verifier, authorization/admission transaction, artifact store와 recovery control plane이 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. Firestore transaction은 local Emulator에서, Storage generation/replay는 official testbench에서 검증했지만 ADC/IAM·staging lifecycle 증거는 아닙니다. lease claim은 artifact read 권한이 아니며 current authorization과 classifier가 연결되기 전에는 worker나 scheduler를 활성화하지 않습니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
+verifier, authorization/admission transaction, artifact store, artifact inventory reader와 recovery control plane이 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. Firestore transaction은 local Emulator에서, write-side Storage generation/replay는 official testbench에서 검증했지만 ADC/IAM·staging lifecycle 증거는 아닙니다. 새 read-side inventory reader는 WSL2 Docker의 fake backend·local synthetic test만 통과했으며 official Storage testbench·staging·runtime은 미검증입니다. lease claim은 artifact read 권한이 아니며 current authorization과 classifier가 연결되기 전에는 worker나 scheduler를 활성화하지 않습니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
 
 ## WSL2에서 검사
 
