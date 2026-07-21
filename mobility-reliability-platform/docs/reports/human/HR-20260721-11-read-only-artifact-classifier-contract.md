@@ -17,7 +17,7 @@ audience: project team and technical reviewer
 ## 한눈에 보기
 
 - 이번 회차의 사전 목적: recovery claim을 artifact read 권한과 분리하고, exact receipt/fence에 결합된 읽기 권한과 generation-pinned 분류기의 입력·출력 계약을 먼저 닫는다.
-- 보고 기준일의 실제 상태: provider-neutral request/result/inventory 계약, purpose별 opaque grant와 strict manifest decoder가 local synthetic test·race·vet·전체 Go build gate를 통과했다.
+- 보고 기준일의 실제 상태: provider-neutral request/result/inventory 계약, purpose별 opaque grant와 strict manifest decoder가 local synthetic test·race·vet·전체 Go build gate와 GitHub clean CI를 통과했다.
 - 가장 중요한 차이 또는 위험: GCS reader와 최종 classifier orchestration은 아직 없다. 이 코드는 object 존재·무결성·복구 가능 여부를 실제로 분류하지 않으며 runtime에도 연결되지 않았다.
 - 사람에게 필요한 결정·확인: 구현 commit의 clean CI를 확인한 뒤 HTTP-only GCS inventory/read adapter 증분으로 진행할지 검토한다.
 
@@ -56,7 +56,7 @@ audience: project team and technical reviewer
 | 실제 주장 | 증거 ID·링크 | 검증 상태 | 확인자·확인일 |
 | --- | --- | --- | --- |
 | R5 authorization·inventory·classification 경계가 결정됨 | [ADR-0018](../../decisions/ADR-0018-generation-pinned-read-only-classifier.md) | `accepted` decision; 구현 증거 아님 | 문서 검토 필요 |
-| request/grant 계약과 strict manifest decoder가 local gate를 통과함 | [EVD-20260721-019](../../evidence/2026-07.md) | `generated` — clean CI 전 | 사람 검토 필요 |
+| request/grant 계약과 strict manifest decoder가 local·clean CI gate를 통과함 | [EVD-20260721-019](../../evidence/2026-07.md) | `verified` — provider·staging 증거 아님 | 사람 검토 필요 |
 | 실제 GCS artifact가 정확히 분류됨 | 확인 필요 — 현재 구현하지 않음 | `미검증` | 해당 없음 |
 | recovery worker가 활성화됨 | 확인 필요 — 현재 활성화하지 않음 | `미검증` | 해당 없음 |
 
@@ -100,5 +100,5 @@ audience: project team and technical reviewer
 - [x] local test를 사용자 영향 인시던트로 기록하지 않았다.
 - [x] 참석자·사진·지출을 생성하거나 추정하지 않았다.
 - [x] 민감정보와 원본 GPS 좌표가 없다.
-- [ ] 구현 commit의 clean CI를 확인했다.
+- [x] 구현 commit의 clean CI를 확인했다.
 - [ ] reviewer와 발행일을 사람이 확정했다.
