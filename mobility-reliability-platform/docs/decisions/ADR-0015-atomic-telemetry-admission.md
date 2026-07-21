@@ -10,7 +10,7 @@
 
 또한 서버 파생 idempotency key, tenant 범위 client batch key, server batch receipt를 독립적으로 만들면 동시 요청이나 부분 실패 후 일부 index만 남을 수 있다. Firestore transaction callback은 충돌 시 재실행될 수 있으므로 callback 안에서 batch ID, 시각, Storage object 또는 로그 같은 외부 side effect를 만들면 한 논리 요청이 서로 다른 계보를 가지거나 object를 중복 작성할 위험도 있다.
 
-현재 production adapter 코드는 존재하지만 검증 범위는 local fake transaction seam과 race test까지다. 실제 Firestore Emulator·ADC/IAM·동시 transaction integration, executable wiring과 Cloud Storage adapter는 아직 검증하거나 연결하지 않았다.
+production adapter는 local fake transaction seam과 Firestore Emulator에서 검증한다. Emulator concurrent same-batch에서 한 요청만 3-way create에 성공하고 다른 요청은 같은 receipt의 pending replay로 수렴했으며, current consent 문서가 없을 때 세 admission 문서를 만들지 않았다. 다만 실제 철회 transaction과 admission의 경쟁, ADC/IAM·production transaction, executable wiring과 Cloud Storage adapter는 아직 검증하거나 연결하지 않았다.
 
 ## 결정 기준
 
@@ -138,7 +138,7 @@ status, revision, created_at, updated_at, expires_at
 ## 결과와 위험
 
 - authorization과 최초 receipt/index 생성 사이 TOCTOU를 같은 Firestore transaction 경계로 줄였다.
-- concurrent create가 Firestore transaction에 의해 직렬화되도록 production adapter를 구현했지만, 실제 Emulator·production 동시성 검증 전에는 이 동작을 검증 완료로 주장하지 않는다.
+- local Firestore Emulator concurrent same-batch에서 한 3-way document set만 남는 직렬화를 검증했다. 이는 production 부하·네트워크·ADC/IAM의 증거가 아니다.
 - Firestore commit과 Cloud Storage write는 분산 transaction이 아니다. receipt가 `reserved`인 채 남거나 object가 저장된 뒤 `MarkStored`가 실패할 수 있다.
 - pending replay 여러 개가 같은 object write를 시도할 수 있다. Storage `DoesNotExist`는 overwrite를 막지만 lease owner·fencing token과 sweeper 복구가 후속으로 필요하다.
 - 만료 직전 `reserved` replay가 admission을 통과한 뒤 Storage 처리 중 만료되면 finalizer는 막히지만 orphan object가 생길 수 있다. object/manifest에 원 receipt 만료시각을 보존하고 lease deadline·fencing·orphan cleanup을 구현하기 전에는 runtime을 열지 않는다.
@@ -149,7 +149,7 @@ status, revision, created_at, updated_at, expires_at
 
 ## Rollout gate와 후속 검증
 
-- actual Firestore Emulator에서 신규 create, concurrent same-batch, 철회 경쟁, partial/corrupt fixture를 검증한다.
+- actual Firestore Emulator의 신규·concurrent same-batch·missing authorization 검증은 CI gate로 유지하고, 실제 철회 transaction 경쟁과 partial/corrupt fixture를 추가한다.
 - staging ADC/IAM과 실제 tenant-scoped document decode를 검증한다.
 - Cloud Storage `DoesNotExist`, object SHA-256·generation, immutable manifest와 lifecycle을 구현한다.
 - pending reservation lease, fencing token, sweeper와 orphan reconciliation을 구현한다.
@@ -159,6 +159,7 @@ status, revision, created_at, updated_at, expires_at
 ## 연결 문서
 
 - 증거: [EVD-20260721-014](../evidence/2026-07.md#evd-20260721-014--원자적-telemetry-admission과-receipt-lineage)
+- Firestore Emulator integration: [EVD-20260721-015](../evidence/2026-07.md#evd-20260721-015--firestore-admission-transaction-emulator-integration)
 - 사람 대상 리포트: [HR-20260721-07](../reports/human/HR-20260721-07-atomic-telemetry-admission.md)
 - 제품 업데이트: 해당 없음 — runtime과 사용자·운영 경로에 연결하지 않음
 - 인시던트: 해당 없음 — production·field 배포와 사용자 영향 없음

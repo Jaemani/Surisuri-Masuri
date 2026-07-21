@@ -48,6 +48,8 @@ rtk docker build \
   -t mobility-telemetry-gateway:dev .
 ```
 
+Firestore transaction의 실제 commit/retry와 concurrent same-batch 직렬화는 Firebase Emulator에서 별도 integration test로 검증합니다. host Go가 없는 WSL용 전체 명령은 [WSL Runbook](../../docs/development/WSL_RUNBOOK.md)에 있습니다. 일반 `go test`는 emulator 환경변수가 없으면 해당 integration case만 skip합니다.
+
 Docker build context는 프로젝트 root이며 `.dockerignore` allowlist가 gateway `cmd`·`internal` source, Go module 파일과 synthetic contract JSON fixture만 전달합니다. 패키지 단위 allowlist이므로 새 Go 파일이 host CI에는 보이지만 image에서 조용히 누락되는 구조를 피합니다.
 
 Firestore Emulator가 WSL host의 `8080`을 사용하므로 gateway는 host `8085`로 노출합니다. container 내부와 Cloud Run의 `PORT`는 `8080`을 유지합니다.

@@ -18,7 +18,7 @@ audience: project team and technical reviewer
 
 - 이번 회차의 사전 목적: GPS 원본 저장 전에 현재 권한을 다시 확인하고 두 고유 index와 receipt를 하나의 Firestore transaction에서 예약하도록 ingest 경계를 통합한다.
 - 보고 기준일의 실제 상태: `AdmissionStore` 경계와 `FirestoreAdmissionStore` production adapter 코드를 구현했고 local fake transaction seam에서 callback retry·철회·replay·conflict·손상된 linkage·finalizer 상태를 race test로 검증했다.
-- 가장 중요한 차이 또는 위험: actual Firestore Emulator·ADC/IAM·동시 transaction integration은 미검증이며 adapter를 executable에 연결하지 않았다. Cloud Storage adapter와 recovery lease·sweeper도 없다.
+- 가장 중요한 차이 또는 위험: local Firestore Emulator concurrent same-batch는 검증했지만 철회 transaction 경쟁·ADC/IAM·production은 미검증이며 adapter를 executable에 연결하지 않았다. Cloud Storage adapter와 recovery lease·sweeper도 없다.
 - 사람에게 필요한 결정·확인: 이번 단계에서는 readiness를 열지 않고, 다음 gate에서 Storage object/manifest 계보와 pending reservation 복구 정책을 먼저 확정한다.
 
 ## 1. 계획
@@ -40,7 +40,8 @@ audience: project team and technical reviewer
 | Transaction retry·철회 | `검증됨` | callback retry마다 result를 초기화하고 authorization snapshot을 재평가하며, retry에서 동의 철회 시 create/update 없이 거절 | 실제 concurrent transaction·철회 integration은 후속 | local race test / synthetic |
 | Receipt lineage·retention | `검증됨` | 기기·trip·installation·consent·schema lineage, revision과 30일 `expires_at`을 reservation에 포함 | Storage hash·generation·manifest는 미구현 | local unit/race test |
 | Finalizer | `검증됨` | linkage를 재확인하고 `stored` 또는 `object_conflict` rejection에서 revision과 새 `updated_at`을 기록 | 실제 Cloud Storage 성공 결과와 연결되지 않음 | local fake transaction seam |
-| Actual Firebase integration | `미착수` | Emulator·ADC/IAM·동시 create와 실제 document decode 증거 없음 | 계획 완료 조건 미충족 | 미검증 |
+| Firestore Emulator integration | `부분 검증` | concurrent same-batch가 한 3-way set과 같은 receipt로 수렴하고 missing current consent에서 write 0건, 실제 receipt `DataTo` 확인 | 철회 경쟁·partial/corrupt fixture는 후속 | local Firestore Emulator / synthetic |
+| Production Firebase integration | `미착수` | ADC/IAM·production transaction·부하 증거 없음 | 계획 완료 조건 미충족 | 미검증 |
 | Storage와 복구 | `미착수` | production Storage adapter, generation precondition, manifest, lease·sweeper 없음 | 다음 gate로 이월 | 미검증 |
 | Runtime 연결 | `미착수` | `cmd/server`에 verifier·admission·Storage를 주입하지 않음 | 의도적으로 fail-closed 유지 | 기존 local container 경계 |
 
@@ -51,6 +52,7 @@ audience: project team and technical reviewer
 - 신규 reservation은 tenant-scoped `ingestIdempotency`, `ingestClientBatches`, `ingestReceipts` 세 문서를 같은 callback에서 create하도록 구현했다.
 - 같은 body의 replay, idempotency body conflict, client-batch conflict, partial index, missing receipt, linkage mismatch와 unknown receipt state를 서로 구분하되 손상·provider 오류는 generic unavailable로 닫는다.
 - local fake seam은 callback 재실행과 철회 상태를 결정론적으로 재현한다. 이는 실제 Firestore transaction 직렬화, 네트워크 retry, IAM 또는 동시 client 동작의 증거가 아니다.
+- local Firestore Emulator에서는 두 proposed server batch ID를 가진 동일 batch 요청을 동시에 시작해 한 요청은 `created`, 다른 요청은 같은 receipt의 `replay_pending`으로 끝나고 각 collection에 문서 한 개만 남는 것을 확인했다. 이는 SDK의 local commit/retry 증거이며 production 의미론 전체를 대체하지 않는다.
 - 데이터 유형: `synthetic | test`; 실제 GPS, Firebase UID/App ID, 복지관·사용자 데이터 없음
 - 현재 executable은 새 adapter를 사용하지 않으므로 `/healthz=200`, `/readyz=503`, ingest `503 adapters_unconfigured`인 fail-closed 경계를 유지해야 한다. 새 adapter가 포함된 최종 container smoke 결과는 EVD-014에 기록하기 전까지 별도 확인 대상이다.
 
@@ -61,7 +63,8 @@ audience: project team and technical reviewer
 | atomic admission interface와 Firestore adapter 코드가 존재하고 local fake seam race test·clean CI를 통과 | [EVD-20260721-014](../../evidence/2026-07.md#evd-20260721-014--원자적-telemetry-admission과-receipt-lineage) | `verified` — local contract와 clean CI 범위 | Codex / 2026-07-21 |
 | transaction retry에서 authorization을 재평가하고 철회 시 write를 중단 | [EVD-20260721-014](../../evidence/2026-07.md#evd-20260721-014--원자적-telemetry-admission과-receipt-lineage) | `verified` — fake retry seam 범위 | local fake seam / 2026-07-21 |
 | 두 key, 세 경로, replay/conflict와 receipt lineage가 고정됨 | [ADR-0015](../../decisions/ADR-0015-atomic-telemetry-admission.md) | `accepted` decision; runtime 증거 아님 | 문서 검토 필요 |
-| actual Firestore atomic concurrency와 production admission이 활성화됨 | 확인 필요 — 현재 활성화·검증하지 않음 | `미검증` | 해당 없음 |
+| local Firestore SDK transaction이 concurrent same-batch를 한 receipt로 직렬화 | [EVD-20260721-015](../../evidence/2026-07.md#evd-20260721-015--firestore-admission-transaction-emulator-integration) | `generated` — local Emulator 통과, clean CI 대기 | Codex / 2026-07-21 |
+| production admission이 활성화됨 | 확인 필요 — 현재 활성화하지 않음 | `미검증` | 해당 없음 |
 | Cloud Storage generation·manifest와 reserved receipt 복구가 동작함 | 확인 필요 — 현재 구현하지 않음 | `미검증` | 해당 없음 |
 
 ## 결정·제품 변화·인시던트
@@ -74,7 +77,7 @@ audience: project team and technical reviewer
 ## 다음 회차
 
 - 8개월 계획상 다음 주제: Cloud Storage `DoesNotExist` adapter, object SHA-256·generation, immutable manifest와 receipt 계보
-- 실제 상태를 반영한 다음 검증: actual Firestore Emulator concurrent same-batch·철회 경쟁 test, Storage 성공 후 finalizer 실패·재시도, pending reservation lease와 sweeper recovery
+- 실제 상태를 반영한 다음 검증: actual Firestore Emulator 철회 경쟁·partial corruption, Storage 성공 후 finalizer 실패·재시도, pending reservation lease와 sweeper recovery
 - 필요한 사람의 결정·지원: 원본 위치 lifecycle의 30일 기본값과 최대 90일 예외 승인 절차, staging Firebase project·App Check·service account 일정
 
 ## 회의·증빙 확인(실제 회의가 있었을 때만)
@@ -89,7 +92,7 @@ audience: project team and technical reviewer
 ## 발행 전 검토
 
 - [x] 계획과 실제가 명확히 분리되어 있다.
-- [x] actual Firestore·Storage·runtime 미검증을 완료로 표현하지 않았다.
+- [x] local Firestore Emulator 검증과 production·Storage·runtime 미검증을 구분했다.
 - [x] 합성·테스트와 field 데이터를 구분했다.
 - [x] 제품 업데이트와 인시던트를 생성하지 않았다.
 - [x] 참석자·사진·지출을 생성하거나 추정하지 않았다.

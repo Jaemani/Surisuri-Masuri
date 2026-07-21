@@ -65,6 +65,14 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      - name: Test Firestore admission transactions
+        run: >-
+          pnpm --filter @mobility-reliability/firebase-rules exec firebase emulators:exec
+          --config ../../firebase.json
+          --project demo-mobility-reliability
+          --only firestore
+          "cd ../../services/telemetry-gateway && go test -mod=readonly -count=1 -race -timeout 60s ./internal/firebaseadapter -run FirestoreAdmissionStoreEmulator -v"
+
       - name: Check telemetry gateway
         working-directory: mobility-reliability-platform/services/telemetry-gateway
         run: |

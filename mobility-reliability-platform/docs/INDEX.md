@@ -53,7 +53,7 @@
 - Go telemetry ingest kernel의 strict decode, 멱등성·receipt·object 저장 인터페이스, fail-closed HTTP 경계
 - Firebase Admin SDK dual-token verifier·App ID allowlist·production emulator guard factory의 local synthetic 검증. executable에는 미연결
 - active tenant·beneficiary·installation·trip·assignment·current consent를 교차 검사하는 pure authorization policy와 Firestore exact-read adapter의 local synthetic 검증. executable에는 미연결
-- 위 authorization을 replay·conflict 조회보다 먼저 재평가하고 두 uniqueness index와 최초 receipt를 같은 Firestore transaction에서 생성하는 admission adapter의 local fake-seam 검증. 실제 Emulator 경쟁·ADC/IAM은 미검증이며 executable에는 미연결
+- 위 authorization을 replay·conflict 조회보다 먼저 재평가하고 두 uniqueness index와 최초 receipt를 같은 Firestore transaction에서 생성하는 admission adapter의 local fake-seam 및 Firestore Emulator concurrent same-batch 검증. ADC/IAM·production은 미검증이며 executable에는 미연결
 - server-only current consent projection의 Firebase client direct read/write 차단
 - Firestore client read를 own-person 또는 `case_worker`·`tenant_admin` 운영 범위로 제한하고 tenant/person query constraint를 고정한 local Rules Emulator 검증. production Rules에는 미배포
 - adapter 미구성 상태에서 `/healthz=200`, `/readyz`와 ingest는 `503`
@@ -63,7 +63,7 @@
 - background GPS 실기기 검증과 모바일 업로드
 - 실제 Firebase ID token/App Check가 연결된 실행 경로
 - production Firebase Rules 배포와 실제 mobile/admin query·index 검증
-- 실제 Firestore Emulator/production transaction 경쟁 검증, Cloud Storage production adapter와 receipt/object 복구
+- Firestore Emulator 철회 경쟁·손상 fixture와 production transaction·ADC/IAM 검증, Cloud Storage production adapter와 receipt/object 복구
 - 수리데이터 실제 이관, ML 학습, ONNX 배포, 생존분석
 - 기관 콘솔, field pilot, 운영 SLO, AI report agent
 

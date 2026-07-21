@@ -76,6 +76,26 @@ Windows localhost가 WSL 서비스로 전달되지 않는 구성에서는 WSL mi
 - `pnpm check`와 `pnpm test`는 둘 다 Firebase Emulator Suite를 시작하므로 같은 workspace에서 병렬 실행하지 않는다. 병렬 실행은 hub `4400`, Firestore `8080`, websocket `9150` 충돌과 orphan Java process를 만들 수 있다.
 - 테스트 실패 후 `8080`이 계속 점유되면 먼저 `rtk proxy ss -ltnp 'sport = :8080'`과 process command line으로 해당 project의 orphan emulator인지 확인한다. 확인되지 않은 Java process를 일괄 종료하지 않는다.
 
+host Go가 없는 WSL에서는 Firestore transaction 통합 테스트를 Emulator가 살아 있는 동안 host-network Docker Go로 실행한다. 이 명령도 다른 Firebase test와 병렬 실행하지 않는다.
+
+```bash
+rtk pnpm --filter @mobility-reliability/firebase-rules exec firebase emulators:exec \
+  --config ../../firebase.json \
+  --project demo-mobility-reliability \
+  --only firestore \
+  "rtk docker run --rm --network host \
+    -e FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 \
+    -v mobility-go-mod-cache:/go/pkg/mod \
+    -v mobility-go-build-cache:/root/.cache/go-build \
+    -v /home/jaeman/Codes/Surisuri-Masuri/mobility-reliability-platform:/workspace:ro \
+    -w /workspace/services/telemetry-gateway \
+    golang:1.26.5-bookworm \
+    go test -mod=readonly -count=1 -race -timeout 60s ./internal/firebaseadapter \
+      -run FirestoreAdmissionStoreEmulator -v"
+```
+
+이 검사는 demo project와 synthetic control document만 사용한다. `--network host`는 WSL localhost의 test emulator에 접근하기 위한 local 설정이며 production container network나 IAM 구성을 의미하지 않는다.
+
 ## GPS 디버깅 체크리스트
 
 - [ ] 실기기 시각과 WSL 시각의 차이를 기록했다.

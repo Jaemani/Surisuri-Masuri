@@ -11,6 +11,9 @@ node_modules/
 dist/
 .next/
 coverage/
+firebase-debug.log
+firestore-debug.log
+storage-debug.log
 
 # Go
 bin/
