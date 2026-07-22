@@ -136,7 +136,7 @@ Shape validator는 공개 hash로 내부 일관성만 검사하므로 capability
 - Accepted/rejected-origin cleanup
 - Scheduler, startup, readiness와 production 연결
 
-R8d는 response-loss-safe outcome ledger와 fresh fenced completion transaction을 별도 계약으로 정의한다.
+[ADR-0026](./ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)은 immutable target을 유지한 채 exact cleanup attempt에 response-loss-safe execution ledger를 기록하고 fresh fenced completion transaction으로 `expired`를 commit하는 계약을 정의한다. 이 ADR-0025의 구현 증거와 ADR-0026의 설계 승인은 구분한다.
 
 ### 6. Official testbench와 staging 증거를 구분한다
 
@@ -167,7 +167,7 @@ R8c local component는 commit `0d6ad55`에 구현됐다.
 - Raw delete timeout/cancel/unavailable은 empty 재감사 뒤에도 bounded error로 종료해 manifest delete call을 0으로 유지한다.
 - Local Go race, Firebase demo Firestore Emulator, pinned official Storage testbench와 GitHub clean CI 근거는 [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit)에 기록한다.
 
-구현됐다는 것은 local component와 synthetic test boundary를 뜻한다. Firestore execution/outcome ledger, target in-place state update, attempt completion/failure, cleanup lease renewal/release, receipt `expired`, purge, scheduler·startup·readiness, staging IAM·lifecycle·soft-delete drill과 production activation은 여전히 미구현이다.
+구현됐다는 것은 local component와 synthetic test boundary를 뜻한다. Firestore attempt execution/outcome ledger, attempt completion/failure, target 생성 전 cleanup lease renewal과 별도 release, receipt `expired`, purge, scheduler·startup·readiness, staging IAM·lifecycle·soft-delete drill과 production activation은 여전히 미구현이다. ADR-0026은 target in-place state update를 명시적으로 제외한다.
 
 ## 결과와 위험
 

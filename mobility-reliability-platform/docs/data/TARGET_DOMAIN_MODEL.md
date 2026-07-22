@@ -437,7 +437,7 @@ updated_at
 attempt_id, tenant_id, receipt_id,
 owner_kind(request|sweeper|cleanup), fencing_token, worker_version,
 status(started|completed|failed),
-decision_domain?(artifact_reconciliation|current_authorization),
+decision_domain?(artifact_reconciliation|current_authorization|expiry_cleanup),
 authorization_disposition?(denied|unavailable),
 phase?, classification?, reason_code?, action?, outcome?, action_hash?,
 hold_code?, release_code?, rejection_code?,
@@ -447,7 +447,21 @@ hold_review_due_at?, failure_code?,
 started_at, completed_at?, failed_at?
 ```
 
-recovery attempt는 좌표·artifact path·raw body·Firebase UID·App ID·credential token과 provider 원문 오류를 포함하지 않는 감사·운영 ledger다. `started`와 `failed`에는 decision/action terminal field가 없어야 한다. Failed prior attempt에 `decision_domain` 또는 `authorization_disposition`을 포함한 terminal residue가 있으면 takeover는 새 lease·attempt를 만들지 않고 fail-closed한다. Completed artifact action은 `decision_domain=artifact_reconciliation`, current authorization hold/release는 `decision_domain=current_authorization`과 exact bounded disposition을 사용하며 서로 교환되지 않는다. expired lease를 takeover한 request와 sweeper/cleanup claim은 claim transaction에서 `started` attempt를 만들고 후속 결과를 fenced update한다. 상태 원장은 receipt이며 current protocol의 receipt action과 attempt completion은 한 transaction에 기록한다. 응답 유실은 fresh outcome correlation으로 판별하고 mutation을 replay하지 않는다. forward recovery와 expiry cleanup은 다른 mode와 완료 조건을 사용한다. 자세한 계약은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)과 [ADR-0020](../decisions/ADR-0020-two-pass-forward-reconciliation.md)을 따른다.
+ADR-0026의 reservation-expiry cleanup attempt는 같은 문서에 다음 bounded execution field를 추가한다. 이 schema는 accepted design이며 구현 전이다.
+
+```text
+decision_domain=expiry_cleanup?,
+cleanup_target_hash?, cleanup_plan_hash?, cleanup_execution_revision?, cleanup_phase?,
+cleanup_raw_targeted?, cleanup_raw_dispatch_at?, cleanup_raw_delete_outcome?,
+cleanup_raw_audit_outcome?, cleanup_raw_audited_at?,
+cleanup_manifest_targeted?, cleanup_manifest_dispatch_at?, cleanup_manifest_delete_outcome?,
+cleanup_manifest_audit_outcome?, cleanup_manifest_audited_at?,
+cleanup_disposition?(complete|retry|hold), cleanup_error_class?, cleanup_evidence_hash?
+```
+
+Mutable execution field는 immutable cleanup target에 쓰지 않는다. `planned -> raw_dispatch_recorded -> raw_outcome_recorded -> raw_absence_confirmed -> manifest_dispatch_recorded -> manifest_outcome_recorded -> manifest_absence_confirmed -> completed`만 허용하며 receipt revision은 intermediate progress에서 바꾸지 않는다. Target 생성 뒤 lease renewal은 금지한다. Completion transaction만 exact current fence·target·durable ledger를 다시 확인해 attempt, receipt와 두 uniqueness index를 함께 갱신한다.
+
+recovery attempt는 좌표·artifact path·raw body·Firebase UID·App ID·credential token과 provider 원문 오류를 포함하지 않는 감사·운영 ledger다. Forward `started`와 `failed`에는 decision/action/cleanup terminal field가 없어야 하며 residue가 있으면 takeover는 fail-closed한다. Cleanup `started`는 ADR-0026의 exact target·plan binding과 단조 execution progress만 가질 수 있고 terminal disposition은 가질 수 없다. Expired cleanup takeover는 prior target과 progress 전체를 검증한 뒤에만 이를 보존한 `failed/lease_expired + decision_domain=expiry_cleanup`으로 원자 종료할 수 있으며 disposition residue는 계속 금지한다. Policy가 확정된 cleanup retry·hold·complete는 `completed + decision_domain=expiry_cleanup`으로 기록한다. Completed artifact action은 `decision_domain=artifact_reconciliation`, current authorization hold/release는 `decision_domain=current_authorization`과 exact bounded disposition을 사용하며 서로 교환되지 않는다. expired lease를 takeover한 request와 sweeper/cleanup claim은 claim transaction에서 prior attempt closure와 새 `started` attempt를 함께 기록한다. 상태 원장은 receipt이며 current protocol의 receipt action과 attempt completion은 한 transaction에 기록한다. 응답 유실은 fresh outcome correlation으로 판별하고 mutation을 replay하지 않는다. forward recovery와 expiry cleanup은 다른 mode와 완료 조건을 사용한다. 자세한 계약은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md), [ADR-0020](../decisions/ADR-0020-two-pass-forward-reconciliation.md), [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)을 따른다.
 
 Firestore는 parent receipt 삭제 시 `recoveryAttempts`를 cascade delete하지 않는다. attempt는 독립 TTL로 먼저 지우지 않고 receipt의 `purge_eligible_at` 이후 bounded purge job이 document name cursor로 지운다. terminal purge가 시작된 receipt에는 새 attempt 생성을 금지한다.
 
@@ -486,7 +500,11 @@ created_at, updated_at, target_hash
 
 R8b의 `cleanup_id`는 exact cleanup attempt/fence owner UUID와 같다. Target은 receipt linkage, current cleanup revision/fence와 exact `started` attempt를 같은 transaction에서 다시 확인한 뒤 create-only로 만든다. 동일 semantic content와 canonical hash의 replay는 write 0이며 다른 target, stale fence 또는 malformed attempt는 전체 write 0이다. Target create는 receipt·index·attempt를 수정하지 않고 `planned|hold`를 실행 권한으로 해석하지 않는다. Collection은 client direct read/write를 거절하며 좌표, raw body, Firebase UID/App ID, credential과 provider 원문 오류를 저장하지 않는다. 자세한 계약은 [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md)을 따른다.
 
-R8c executor는 target DTO를 갱신하지 않는다. Concrete Firestore store가 current receipt·exact `started` attempt·persisted target을 다시 읽어 발급한 30초 이하 opaque grant와 immutable plan만 GCS mutation 경계가 받는다. Exact generation+metageneration을 raw→manifest 순서로 조건부 삭제하고, target에 lineage가 없는 expected path도 complete regular/soft-deleted empty inventory로 감사한다. Timeout/cancel/unavailable은 재감사 뒤에도 full success observation이 아니며 permission/quota/412, soft-deleted/late generation과 incomplete inventory는 fail-closed한다. `raw_deleted|manifest_deleted|completed|failed`, durable delete outcome/error class와 completion time을 저장하는 schema는 R8d 이후 범위다. Non-authoritative success observation을 target·attempt·receipt finalizer가 직접 신뢰해서는 안 된다. 자세한 계약은 [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md)을 따른다.
+R8c executor는 target DTO를 갱신하지 않는다. Concrete Firestore store가 current receipt·exact `started` attempt·persisted target을 다시 읽어 발급한 30초 이하 opaque grant와 immutable plan만 GCS mutation 경계가 받는다. Exact generation+metageneration을 raw→manifest 순서로 조건부 삭제하고, target에 lineage가 없는 expected path도 complete regular/soft-deleted empty inventory로 감사한다. Timeout/cancel/unavailable은 재감사 뒤에도 full success observation이 아니며 permission/quota/412, soft-deleted/late generation과 incomplete inventory는 fail-closed한다. Non-authoritative success observation을 target·attempt·receipt finalizer가 직접 신뢰해서는 안 된다. 자세한 delete 계약은 [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md)을 따른다.
+
+R8d execution state도 target을 in-place update하지 않고 exact cleanup attempt에 기록한다. Delete dispatch와 delete RPC outcome, `confirmed_absent` audit을 분리하며 raw audit 전 manifest dispatch는 0이다. Fresh terminal transaction만 durable two-path audit을 근거로 receipt `expired`, attempt completed와 세 linkage 문서의 같은 `purge_eligible_at`을 commit한다. Response-loss outcome query는 `committed|not_committed|unverifiable`만 반환한다. 이 계약은 [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)에 확정됐지만 현재 문서 시점에는 구현 전이다.
+
+`verified_empty/planned`와 dispatch-response-loss 재개는 destructive delete grant가 아니라 current target·fence·expected paths에 결합된 별도 30초 이하 read-only absence-audit capability를 사용한다. Classification 당시 empty였다는 사실만으로 완료하지 않고 regular/soft-deleted inventory를 fresh complete-empty로 다시 확인한다. Finalization은 `cleanup_phase=completed`와 execution revision +1도 attempt·receipt·두 index와 같은 transaction에서 기록한다.
 
 reserved-origin expiry cleanup은 exact prior forward attempt가 있으면 먼저 같은 transaction에서 terminal로 닫고 receipt를 `cleanup_pending`으로 바꾸며 모든 forward lease를 fence-out한 뒤 `cleanup_quiescence_until`까지 기다린다. Attempt closure와 receipt transition은 함께 commit 또는 rollback되어야 하고 recovery attempt count는 누적값으로 유지한다. 현재 `cleanup_policy_version=telemetry-cleanup-transition.v1`은 transition 11분 뒤 quiescence를 고정하며 이는 최대 lease 5분과 raw+manifest 전체 `StoreBatch` 5분 합보다 strict하게 길다. Quiet boundary 뒤 `telemetry-cleanup.v1` owner만 claim하고 expired cleanup takeover는 prior attempt를 `failed/lease_expired`로 닫는다. 현재 target create와 local delete/audit는 `reservation_expiry + reserved` origin만 구현됐다. Accepted retention cleanup, rejected cleanup, durable outcome/completion과 purge는 future 범위이며 새 generation이 보이면 원 target을 바꾸지 않고 finding 또는 별도 linked target으로 분리해야 한다. 자세한 claim 계약은 [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md)을 따른다.
 

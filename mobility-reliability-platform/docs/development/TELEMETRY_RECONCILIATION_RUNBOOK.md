@@ -97,19 +97,29 @@
 
 ## 8. Expiry cleanup 재개 규칙
 
-expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인한다. 만료 lease에 recovery attempt count가 있으면 exact nested attempt의 owner·token·version·started time을 함께 검증하고 `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token을 증가시켜 `cleanup_pending`으로 전환한다. Attempt가 누락·변조·completed이면 receipt도 바꾸지 않고 조사 가능한 lease 증거를 보존한다. Application·receipt·attempt read clock 중 가장 이른 시각이 deadline/lease expiry 전이면 `not_ready`다. 현재 구현은 `reservation_expiry + reserved` origin의 transition, cleanup claim, `absent -> planned|hold` dry-run target과 generation-pinned local delete/complete-empty audit까지다. [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md), [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target), [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md), [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit)을 따른다.
+expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인한다. 만료 lease에 recovery attempt count가 있으면 exact nested attempt의 owner·token·version·started time을 함께 검증하고 `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token을 증가시켜 `cleanup_pending`으로 전환한다. Attempt가 누락·변조·completed이면 receipt도 바꾸지 않고 조사 가능한 lease 증거를 보존한다. Application·receipt·attempt read clock 중 가장 이른 시각이 deadline/lease expiry 전이면 `not_ready`다. 현재 구현은 `reservation_expiry + reserved` origin의 transition, cleanup claim, `absent -> planned|hold` dry-run target과 generation-pinned local delete/complete-empty audit까지다. [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md), [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target), [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md), [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit), [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)을 따른다. ADR-0026은 현재 accepted design이며 실행 원장·terminal code evidence는 아직 없다.
 
-R8c delete/audit component는 local·synthetic 범위에서 구현됐지만 **현재 runtime 실행 금지**다. Delete 전송과 complete-empty audit를 분리하고 raw audit 전 manifest delete를 금지한다. 아래 durable state machine과 crash outcome ledger, reserved-origin hold, accepted deletion과 rejected side cleanup은 아직 구현되지 않았다.
+R8c delete/audit component는 local·synthetic 범위에서 구현됐지만 **현재 runtime 실행 금지**다. Delete 전송과 complete-empty audit를 분리하고 raw audit 전 manifest delete를 금지한다. 아래 상태는 immutable target이 아니라 exact cleanup attempt의 future execution ledger다. Durable state machine과 crash outcome ledger, reserved-origin hold, accepted deletion과 rejected side cleanup은 아직 구현되지 않았다.
 
 ```text
 planned
-  -> raw_deleted
-  -> manifest_deleted
+  -> raw_dispatch_recorded
+  -> raw_outcome_recorded
+  -> raw_absence_confirmed
+  -> manifest_dispatch_recorded
+  -> manifest_outcome_recorded
+  -> manifest_absence_confirmed
   -> completed
 ```
 
-- raw delete 뒤 crash: 같은 raw delete outcome을 idempotently 확인하고 같은 manifest generation으로 재개한다.
-- manifest delete 뒤 crash: 같은 target의 두 outcome을 확인하고 receipt 상태만 finalization한다.
+- raw dispatch 뒤 crash: mutation을 바로 반복하지 않고 expected raw path의 complete inventory audit부터 수행한다.
+- manifest dispatch 뒤 crash: 같은 target과 durable phase를 확인하고 expected manifest path의 audit부터 수행한다.
+- delete RPC outcome과 absence audit outcome은 별도 field로 보존하며 `not_found_observed`를 `confirmed_absent`로 해석하지 않는다.
+- target은 create-only로 유지하고 execution phase를 target status로 기록하지 않는다.
+- target 생성 뒤 lease renewal은 target의 immutable revision·heartbeat·expiry binding을 깨므로 금지한다.
+- progress가 있는 attempt의 lease가 만료되면 next claim은 prior target·plan hash와 단조 phase를 함께 검증하고, progress를 보존한 `failed/lease_expired` closure와 새 fence·attempt를 한 transaction에 기록한다. Malformed residue나 disposition이 있으면 takeover write는 0이다.
+- `verified_empty` target과 dispatch 응답 유실은 delete capability가 아닌 별도 read-only absence-audit capability로 두 expected path를 fresh 감사한다. Classification 당시 empty였다는 이유만으로 `expired` 처리하지 않는다.
+- Finalization은 attempt phase를 `completed`로 바꾸고 execution revision도 정확히 1 증가시키는 write를 receipt·두 index와 같은 transaction에 포함한다.
 - target 생성 뒤 새 generation 발견: 기존 target을 교체하지 않고 hold한다.
 - 삭제 뒤 version-aware live generation을 다시 검사하고, late generation이 있으면 `expired` 완료를 금지한다.
 - exact generation NotFound: 단독 성공으로 기록하지 않는다. Regular-version과 soft-deleted inventory가 모두 complete empty인지 확인한 뒤에만 `confirmed_absent`로 분류한다.

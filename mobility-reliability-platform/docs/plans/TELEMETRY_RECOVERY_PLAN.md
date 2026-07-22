@@ -307,9 +307,11 @@ forward sweeper와 별도 mode로 구현한다.
 13. 세 집합을 재조회해 empty를 증명하고 삭제 수·cursor·receipt revision을 purge job에 기록한다. 그 뒤 마지막 transaction만 job 완료 증거와 3-way linkage를 재검증하고 두 uniqueness index와 receipt를 함께 삭제한다. attempt 수가 transaction limit을 넘어도 한 번에 cascade 삭제하지 않는다.
 14. purge job에는 위치·UID·object path 없이 hash·count·완료시각만 남기고 자체 retention 뒤 제거한다.
 
+[ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)은 8~9단계와 11단계의 구현 계약을 먼저 확정한다. Immutable target은 갱신하지 않고 exact cleanup attempt를 dispatch intent·delete outcome·complete-empty audit의 단조 실행 원장으로 확장한다. Target 생성 뒤 lease renewal은 금지하며, fresh finalization transaction만 attempt completion, receipt `expired`, lease clear와 두 index·receipt의 동일 purge eligibility를 commit한다. Commit 응답 유실은 exact terminal correlation read로만 판별한다. 이 결정은 accepted design이고 아직 code evidence는 없다.
+
 Local R8c executor와 official testbench synthetic generation delete는 구현·검증했지만 executable에는 연결하지 않는다. 실제 staging/production artifact delete는 staging versioning·soft-delete·lifecycle·retention·IAM과 복구 절차를 승인·검증한 뒤에만 별도 활성화한다.
 
-2026-07-22 현재 1~7단계와 8단계의 complete-empty success observation까지 local component로 구현·검증했다. R8c는 current Firestore target/fence를 다시 승인하고 exact conditional delete, raw-first·missing-counterpart audit와 fail-closed error taxonomy를 제공하며 근거는 [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit)에 기록한다. Claim, dry-run target과 success observation 어느 것도 `expired` 권한이 아니다. 8단계의 durable outcome ledger와 9~14단계의 cleanup completion, held/accepted/rejected cleanup, purge와 scheduler/startup은 미구현이다.
+2026-07-22 현재 1~7단계와 8단계의 complete-empty success observation까지 local component로 구현·검증했다. R8c는 current Firestore target/fence를 다시 승인하고 exact conditional delete, raw-first·missing-counterpart audit와 fail-closed error taxonomy를 제공하며 근거는 [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit)에 기록한다. Claim, dry-run target과 success observation 어느 것도 `expired` 권한이 아니다. ADR-0026이 8단계 durable outcome ledger와 9·11단계 success finalization 계약을 정의했지만 구현은 아직 시작 전이며, held/accepted/rejected cleanup, purge job과 scheduler/startup도 미구현이다.
 
 ### R9. Staging과 운영 gate
 
