@@ -2,9 +2,9 @@
 
 ## 1. 현재 사용 상태
 
-이 문서는 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)의 운영 절차를 구현·검증하기 위한 사전 runbook이다. 2026-07-21 현재 sweeper, cleanup command, staging IAM은 구현되지 않았으므로 production artifact를 조회·수정·삭제하는 실행 지침이 아니다.
+이 문서는 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)의 운영 절차를 구현·검증하기 위한 사전 runbook이다. 2026-07-22 현재 single-receipt reconciler component는 구현됐지만 candidate sweeper, cleanup command, startup wiring과 staging IAM은 구현되지 않았으므로 production artifact를 조회·수정·삭제하는 실행 지침이 아니다.
 
-- 허용: synthetic fixture, Firestore Emulator, pinned official Storage testbench의 read-only/classifier 검증
+- 허용: synthetic fixture, Firestore Emulator, pinned official Storage testbench의 read-only/classifier와 bounded single-receipt protocol 검증
 - 금지: 실제 bucket에서 path/latest/prefix 기준 삭제, receipt 수동 수정, 실제 사용자 좌표를 로그·문서에 복사
 - runtime 상태: adapter wiring 전 `/readyz`와 ingest는 계속 `503`
 
@@ -29,8 +29,11 @@
 9. manifest candidate가 없을 때만 raw path의 version-aware inventory를 읽고 유일 candidate를 고정한다.
 10. permission, quota, timeout, malformed provider response를 NotFound로 기록하지 않는다. inventory 뒤 exact generation이 사라진 경우도 no-artifact가 아니라 drift다.
 11. read 전후 exact attrs·metageneration을 비교하고 strict manifest/raw validation을 수행한다.
-12. R5는 분류 결과를 반환하기만 한다. 이후 R6/R7 orchestration caller가 현재 fence를 다시 확인하고 허용 action과 attempt completion을 기록하며, classifier 자체는 recovery attempt를 수정하지 않는다.
-13. hold·data-loss 후보는 자동 retry/delete를 중지하고 사람 검토로 escalation한다.
+12. R5 classifier는 분류 결과를 반환하기만 한다. R6 reconciler가 current authorization, two-pass confirmation, optional manifest-only write, action/disposition과 attempt completion을 순서대로 호출하며 classifier 자체는 recovery attempt를 수정하지 않는다.
+13. Lease remaining이 45초 이하이면 stage 경계에서만 renew한다. 성공하면 old evidence를 모두 폐기하고 initial authorization부터 다시 시작하며, 응답이 불명확하면 old fence로 진행하지 않는다.
+14. Action/disposition commit 오류는 old mutation을 재호출하지 않고 exact outcome을 읽는다. 첫 결과가 not-committed면 attempt-failure transaction barrier를 먼저 시도하고, 실패 시 old outcome을 다시 확인한 뒤 current disposition만 허용한다.
+15. Caller cancellation 뒤 detached tail에서는 outcome read, attempt failure와 current disposition만 허용한다. Artifact I/O, renewal, normal action은 계속하지 않는다.
+16. hold·data-loss 후보는 자동 retry/delete를 중지하고 사람 검토로 escalation한다.
 
 ## 4. 분류별 운영 판단
 

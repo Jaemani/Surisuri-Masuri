@@ -89,3 +89,4 @@
 | [HR-20260722-16](./HR-20260722-16-manifest-only-forward-repair.md) | manifest-only forward repair boundary | `draft` |
 | [HR-20260722-17](./HR-20260722-17-forward-recovery-outcome.md) | forward recovery outcome·attempt failure boundary | `draft` |
 | [HR-20260722-18](./HR-20260722-18-authorization-disposition.md) | current authorization disposition boundary | `draft` |
+| [HR-20260722-19](./HR-20260722-19-bounded-forward-reconciler.md) | bounded single-receipt forward reconciler | `draft` |

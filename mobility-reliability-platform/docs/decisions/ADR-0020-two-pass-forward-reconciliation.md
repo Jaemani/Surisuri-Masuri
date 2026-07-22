@@ -271,6 +271,51 @@ Current authorization 자체가 denied 또는 unavailable인 경우에는 classi
 
 이 필드가 도입되기 전 완료 attempt에 `decision_domain`이 없다면 outcome correlation은 추정 마이그레이션하지 않고 unverifiable로 닫는다. 현재 runtime이 연결되지 않은 단계에서는 운영 데이터 migration을 수행하지 않는다. 향후 기존 attempt 원장을 보존한 채 배포해야 한다면 별도 migration evidence와 rollout 결정을 먼저 남긴다.
 
+### 10. Bounded single-receipt composition과 commit finalizer tail
+
+R6 component를 실제 순서로 합성하는 `ForwardRecoveryReconciler`는 이미 claim된 receipt 하나만 처리한다. Candidate query, claim, pagination과 poison-item 격리는 R7 worker 책임으로 남긴다. Production constructor는 provider-neutral `ArtifactInventoryReader`, `TelemetryManifestRecoveryStore`와 하나의 `ForwardRecoveryControlStore`만 받고 package-private validator registry, classifier, current authorizer와 outcome authorizer를 내부에서 만든다. Arbitrary classifier·capability minter를 받는 constructor는 package-private test seam뿐이다.
+
+`ForwardRecoveryControlStore`는 lease renewal, current authorization read, action/disposition/attempt mutation과 outcome read 계약을 합성한다. Firestore adapter가 이 전체 interface를 구현하는지 compile-time assertion으로 고정한다. Storage 쪽은 raw body나 generic object store가 아니라 manifest-only port만 전달되므로 reconciler에서 raw create·rewrite·delete를 호출할 type surface가 없다.
+
+기본 단일 receipt budget은 다음과 같다.
+
+```text
+total wall budget: 2m
+operational budget: total - 5s outcome/finalizer tail
+max evidence epochs: 2
+max operational logical steps: 24
+max detached control-plane finalizer steps: 12
+renewal threshold: <= 45s
+renewal duration: 2m
+```
+
+- Operational context는 authorize, classify, manifest create, normal action과 renew에만 사용한다.
+- Commit을 호출한 뒤에는 caller cancellation과 별개인 bounded tail에서 exact outcome read, attempt-failure barrier와 필요 시 disposition만 허용한다.
+- Detached tail에서 artifact read/write, renewal 또는 normal action replay는 금지한다.
+- Renewal 성공은 hard epoch barrier다. 이전 request, grant, result, plan, manifest evidence와 outcome query를 모두 버리고 initial authorization부터 다시 시작한다.
+- Renewal 호출 오류·취소는 새 exact fence를 증명할 계약이 없으므로 `lease unknown`으로 끝내고 이전 fence로 mutation하지 않는다.
+- Classifier/read, manifest 또는 action capability expiry는 old evidence를 버리고 새 epoch에서 다시 authorization한다. Unknown contract는 bounded attempt failure 외 artifact·receipt action 0으로 닫는다.
+
+Action/disposition commit의 nil이 아닌 모든 응답은 잠재 response loss로 취급한다. Exact command에서 만든 fresh outcome query가 `committed`를 증명하면 caller cancellation보다 authoritative commit을 우선한다. 첫 read가 `not_committed`여도 pending transaction이 늦게 commit할 수 있으므로 old query를 즉시 폐기하지 않는다.
+
+```text
+commit error
+  -> exact outcome read
+  -> committed: adopt, mutation replay 0
+  -> not_committed:
+       attempt-failure transaction barrier
+       -> barrier success: late action conflicts, attempt closed
+       -> barrier failure: exact old outcome read once more
+            -> late committed: adopt
+            -> policy denial/unavailable: fresh disposition transaction
+            -> otherwise: unverified, mutation guess 0
+  -> unverifiable/unavailable: unverified, old action replay 0
+```
+
+Caller cancellation/deadline이 normal operation 중 발생하면 같은 bounded tail에서 `caller_canceled|caller_deadline` attempt failure를 fresh authorize한다. 현재 정책 때문에 failure capability를 받을 수 없을 때만 fresh disposition으로 전환한다. Disposition direct/correlated commit이 증명되면 authoritative success로 반환하고, failure/disposition commit ambiguity는 caller error와 `commit unverified`를 함께 보존한다.
+
+Completed attempt에 decision provenance가 섞인 채 `failed`로 바뀐 오염 원장이 takeover를 통과하지 않도록 failed-attempt validator도 `decision_domain`과 `authorization_disposition` empty invariant를 강제한다. 이는 새 owner가 provenance가 모순된 prior attempt 위에서 실행되는 것을 차단한다.
+
 ## 구현·검증 gate
 
 ### Provider-neutral unit·race
@@ -330,5 +375,5 @@ Current authorization 자체가 denied 또는 unavailable인 경우에는 classi
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 사전절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
 - 제품 업데이트: 해당 없음 — runtime·사용자 흐름 변화 없음
-- 증거: [EVD-20260722-025](../evidence/2026-07.md#evd-20260722-025--two-pass-forward-recovery-planner와-manifest-only-repair-boundary), [EVD-20260722-026](../evidence/2026-07.md#evd-20260722-026--forward-recovery-action-outcome과-attempt-failure-원자-경계), [EVD-20260722-027](../evidence/2026-07.md#evd-20260722-027--current-authorization-disposition-원자-경계) — local protocol component까지, reconciler runtime·staging은 미구현
+- 증거: [EVD-20260722-025](../evidence/2026-07.md#evd-20260722-025--two-pass-forward-recovery-planner와-manifest-only-repair-boundary), [EVD-20260722-026](../evidence/2026-07.md#evd-20260722-026--forward-recovery-action-outcome과-attempt-failure-원자-경계), [EVD-20260722-027](../evidence/2026-07.md#evd-20260722-027--current-authorization-disposition-원자-경계), [EVD-20260722-028](../evidence/2026-07.md#evd-20260722-028--bounded-forward-reconciler-composition) — single-receipt local composition까지, candidate worker·startup·staging은 미구현
 - 인시던트: 해당 없음 — production·staging·field 영향 없음
