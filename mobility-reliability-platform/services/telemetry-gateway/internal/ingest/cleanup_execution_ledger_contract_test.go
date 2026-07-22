@@ -277,11 +277,36 @@ func TestCleanupExecutionLedgerRejectsSkippedConflictingAndUnknownProgress(t *te
 	unknown := initial
 	for _, step := range []CleanupExecutionTransition{
 		{Phase: CleanupExecutionPhaseRawDispatchRecorded, ObservedAt: now.Add(time.Second)},
-		{Phase: CleanupExecutionPhaseRawOutcomeRecorded, DeleteOutcome: CleanupDeleteUnknown, ObservedAt: now.Add(2 * time.Second)},
+		{Phase: CleanupExecutionPhaseRawOutcomeRecorded, DeleteOutcome: CleanupDeleteUnknown,
+			ErrorClass: CleanupExecutionErrorProviderTimeout, ObservedAt: now.Add(2 * time.Second)},
 	} {
 		unknown, err = AdvanceCleanupExecutionLedger(plan, unknown, step)
 		if err != nil {
 			t.Fatalf("unknown raw step %q = %v", step.Phase, err)
+		}
+	}
+	if unknown.ErrorClass != CleanupExecutionErrorProviderTimeout ||
+		ValidateCleanupExecutionLedger(plan, unknown, now.Add(2*time.Second)) != nil {
+		t.Fatalf("unknown error class was not durable: %#v", unknown)
+	}
+	for _, transition := range []CleanupExecutionTransition{
+		{Phase: CleanupExecutionPhaseRawOutcomeRecorded, DeleteOutcome: CleanupDeleteUnknown,
+			ObservedAt: now.Add(2 * time.Second)},
+		{Phase: CleanupExecutionPhaseRawOutcomeRecorded, DeleteOutcome: CleanupDeleteObserved,
+			ErrorClass: CleanupExecutionErrorProviderTimeout, ObservedAt: now.Add(2 * time.Second)},
+		{Phase: CleanupExecutionPhaseRawOutcomeRecorded, DeleteOutcome: CleanupDeleteUnknown,
+			ErrorClass: CleanupExecutionErrorPermissionDenied, ObservedAt: now.Add(2 * time.Second)},
+	} {
+		if _, err := AdvanceCleanupExecutionLedger(plan, initial, CleanupExecutionTransition{
+			Phase: CleanupExecutionPhaseRawDispatchRecorded, ObservedAt: now.Add(time.Second),
+		}); err != nil {
+			t.Fatalf("prepare invalid error-class transition = %v", err)
+		}
+		dispatched, _ := AdvanceCleanupExecutionLedger(plan, initial, CleanupExecutionTransition{
+			Phase: CleanupExecutionPhaseRawDispatchRecorded, ObservedAt: now.Add(time.Second),
+		})
+		if _, err := AdvanceCleanupExecutionLedger(plan, dispatched, transition); !errors.Is(err, ErrCleanupExecutionConflict) {
+			t.Fatalf("invalid outcome/error class accepted: %#v, %v", transition, err)
 		}
 	}
 	if _, err := AdvanceCleanupExecutionLedger(plan, unknown, CleanupExecutionTransition{

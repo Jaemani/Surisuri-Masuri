@@ -101,6 +101,7 @@ type CleanupExecutionTransition struct {
 	Phase         CleanupExecutionPhase
 	DeleteOutcome CleanupDeleteRPCOutcome
 	AuditOutcome  CleanupAuditOutcome
+	ErrorClass    CleanupExecutionErrorClass
 	ObservedAt    time.Time
 }
 
@@ -324,46 +325,52 @@ func AdvanceCleanupExecutionLedger(
 
 	switch transition.Phase {
 	case CleanupExecutionPhaseRawDispatchRecorded:
-		if transition.DeleteOutcome != "" || transition.AuditOutcome != "" {
+		if transition.DeleteOutcome != "" || transition.AuditOutcome != "" || transition.ErrorClass != "" {
 			return CleanupExecutionLedger{}, ErrCleanupExecutionConflict
 		}
 		next.Raw.DispatchedAt = observedAt
 	case CleanupExecutionPhaseRawOutcomeRecorded:
 		if transition.AuditOutcome != "" ||
-			!validCleanupLedgerDeleteOutcome(next.Raw.Targeted, transition.DeleteOutcome) {
+			!validCleanupLedgerDeleteOutcome(next.Raw.Targeted, transition.DeleteOutcome) ||
+			!validCleanupOutcomeErrorClass(transition.DeleteOutcome, transition.ErrorClass) {
 			return CleanupExecutionLedger{}, ErrCleanupExecutionConflict
 		}
 		next.Raw.DeleteOutcome = transition.DeleteOutcome
 		next.Raw.OutcomeRecordedAt = observedAt
+		next.ErrorClass = transition.ErrorClass
 	case CleanupExecutionPhaseRawAbsenceConfirmed:
 		if transition.DeleteOutcome != "" || transition.AuditOutcome != CleanupAuditConfirmedAbsent ||
+			transition.ErrorClass != "" ||
 			next.Raw.DeleteOutcome == CleanupDeleteUnknown {
 			return CleanupExecutionLedger{}, ErrCleanupExecutionConflict
 		}
 		next.Raw.AuditOutcome = transition.AuditOutcome
 		next.Raw.AuditedAt = observedAt
 	case CleanupExecutionPhaseManifestDispatchRecorded:
-		if transition.DeleteOutcome != "" || transition.AuditOutcome != "" ||
+		if transition.DeleteOutcome != "" || transition.AuditOutcome != "" || transition.ErrorClass != "" ||
 			next.Raw.DeleteOutcome == CleanupDeleteUnknown {
 			return CleanupExecutionLedger{}, ErrCleanupExecutionConflict
 		}
 		next.Manifest.DispatchedAt = observedAt
 	case CleanupExecutionPhaseManifestOutcomeRecorded:
 		if transition.AuditOutcome != "" ||
-			!validCleanupLedgerDeleteOutcome(next.Manifest.Targeted, transition.DeleteOutcome) {
+			!validCleanupLedgerDeleteOutcome(next.Manifest.Targeted, transition.DeleteOutcome) ||
+			!validCleanupOutcomeErrorClass(transition.DeleteOutcome, transition.ErrorClass) {
 			return CleanupExecutionLedger{}, ErrCleanupExecutionConflict
 		}
 		next.Manifest.DeleteOutcome = transition.DeleteOutcome
 		next.Manifest.OutcomeRecordedAt = observedAt
+		next.ErrorClass = transition.ErrorClass
 	case CleanupExecutionPhaseManifestAbsenceConfirmed:
 		if transition.DeleteOutcome != "" || transition.AuditOutcome != CleanupAuditConfirmedAbsent ||
+			transition.ErrorClass != "" ||
 			next.Manifest.DeleteOutcome == CleanupDeleteUnknown {
 			return CleanupExecutionLedger{}, ErrCleanupExecutionConflict
 		}
 		next.Manifest.AuditOutcome = transition.AuditOutcome
 		next.Manifest.AuditedAt = observedAt
 	case CleanupExecutionPhaseCompleted:
-		if transition.DeleteOutcome != "" || transition.AuditOutcome != "" ||
+		if transition.DeleteOutcome != "" || transition.AuditOutcome != "" || transition.ErrorClass != "" ||
 			next.Raw.DeleteOutcome == CleanupDeleteUnknown ||
 			next.Manifest.DeleteOutcome == CleanupDeleteUnknown {
 			return CleanupExecutionLedger{}, ErrCleanupExecutionConflict
@@ -468,6 +475,9 @@ func addCleanupArtifactExecutionLedgerBinding(
 func validateCleanupExecutionPhaseShape(ledger CleanupExecutionLedger, observedAt time.Time) error {
 	emptyTerminal := ledger.Disposition == "" && ledger.ErrorClass == "" &&
 		ledger.EvidenceHash == "" && ledger.CompletedAt.IsZero()
+	ambiguousOutcome := ledger.Disposition == "" &&
+		validAmbiguousCleanupExecutionErrorClass(ledger.ErrorClass) &&
+		ledger.EvidenceHash == "" && ledger.CompletedAt.IsZero()
 	switch ledger.Phase {
 	case CleanupExecutionPhasePlanned:
 		if !emptyTerminal || !emptyCleanupArtifactProgress(ledger.Raw) ||
@@ -480,7 +490,8 @@ func validateCleanupExecutionPhaseShape(ledger CleanupExecutionLedger, observedA
 			return ErrInvalidCleanupExecutionLedger
 		}
 	case CleanupExecutionPhaseRawOutcomeRecorded:
-		if !emptyTerminal || !outcomeCleanupArtifactProgress(ledger.Raw, observedAt) ||
+		if (!emptyTerminal && !(ambiguousOutcome && ledger.Raw.DeleteOutcome == CleanupDeleteUnknown)) ||
+			!outcomeCleanupArtifactProgress(ledger.Raw, observedAt) ||
 			!emptyCleanupArtifactProgress(ledger.Manifest) {
 			return ErrInvalidCleanupExecutionLedger
 		}
@@ -498,7 +509,8 @@ func validateCleanupExecutionPhaseShape(ledger CleanupExecutionLedger, observedA
 			return ErrInvalidCleanupExecutionLedger
 		}
 	case CleanupExecutionPhaseManifestOutcomeRecorded:
-		if !emptyTerminal || !auditedCleanupArtifactProgress(ledger.Raw, observedAt) ||
+		if (!emptyTerminal && !(ambiguousOutcome && ledger.Manifest.DeleteOutcome == CleanupDeleteUnknown)) ||
+			!auditedCleanupArtifactProgress(ledger.Raw, observedAt) ||
 			ledger.Raw.DeleteOutcome == CleanupDeleteUnknown ||
 			!outcomeCleanupArtifactProgress(ledger.Manifest, observedAt) ||
 			ledger.Manifest.DispatchedAt.Before(ledger.Raw.AuditedAt) {
@@ -543,6 +555,28 @@ func validCleanupLedgerDeleteOutcome(targeted bool, outcome CleanupDeleteRPCOutc
 	}
 	switch outcome {
 	case CleanupDeleteNotAttempted, CleanupDeleteObserved, CleanupDeleteNotFound, CleanupDeleteUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func validCleanupOutcomeErrorClass(
+	outcome CleanupDeleteRPCOutcome,
+	errorClass CleanupExecutionErrorClass,
+) bool {
+	if outcome == CleanupDeleteUnknown {
+		return validAmbiguousCleanupExecutionErrorClass(errorClass)
+	}
+	return errorClass == ""
+}
+
+func validAmbiguousCleanupExecutionErrorClass(value CleanupExecutionErrorClass) bool {
+	switch value {
+	case CleanupExecutionErrorProviderTimeout,
+		CleanupExecutionErrorProviderCancelled,
+		CleanupExecutionErrorProviderUnavailable,
+		CleanupExecutionErrorResponseUnverifiable:
 		return true
 	default:
 		return false

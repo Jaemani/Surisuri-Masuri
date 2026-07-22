@@ -123,7 +123,8 @@ func TestFirestoreAdmissionStoreEmulatorPersistsUnknownCleanupArtifactOutcome(t 
 	)
 	if err != nil || status != ingest.CleanupExecutionMutationApplied ||
 		ledger.Phase != ingest.CleanupExecutionPhaseRawOutcomeRecorded ||
-		ledger.Raw.DeleteOutcome != ingest.CleanupDeleteUnknown {
+		ledger.Raw.DeleteOutcome != ingest.CleanupDeleteUnknown ||
+		ledger.ErrorClass != ingest.CleanupExecutionErrorProviderTimeout {
 		t.Fatalf("RecordCleanupArtifactExecutionOutcome() = %#v, %q, %v", ledger, status, err)
 	}
 	_, outcomeUpdateTime := readCleanupExecutionAttemptSnapshot(

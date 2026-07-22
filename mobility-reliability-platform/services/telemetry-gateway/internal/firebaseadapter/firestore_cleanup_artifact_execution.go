@@ -170,8 +170,8 @@ func (s *FirestoreAdmissionStore) BeginCleanupArtifactExecution(
 	return request, grant, ledger, mutationStatus, nil
 }
 
-// RecordCleanupArtifactExecutionOutcome persists only the bounded delete RPC
-// outcome. ErrorClass remains in the in-process result for R8g reporting; the
+// RecordCleanupArtifactExecutionOutcome persists the bounded delete RPC
+// outcome and, only for an ambiguous unknown, its bounded ErrorClass. The
 // durable unknown outcome blocks signed audit and the counterpart artifact.
 func (s *FirestoreAdmissionStore) RecordCleanupArtifactExecutionOutcome(
 	ctx context.Context,
@@ -259,6 +259,7 @@ func (s *FirestoreAdmissionStore) RecordCleanupArtifactExecutionOutcome(
 			current,
 			ingest.CleanupExecutionTransition{
 				Phase: request.OutcomePhase, DeleteOutcome: result.DeleteOutcome,
+				ErrorClass: result.ErrorClass,
 				ObservedAt: state.effectiveAt,
 			},
 		)

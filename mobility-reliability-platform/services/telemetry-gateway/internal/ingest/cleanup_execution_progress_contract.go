@@ -25,6 +25,9 @@ type CleanupExecutionProgressCommand struct {
 	Phase                   CleanupExecutionPhase
 	DeleteOutcome           CleanupDeleteRPCOutcome
 	AuditOutcome            CleanupAuditOutcome
+	// ErrorClass is accepted only by the artifact-outcome persistence path.
+	// Generic progress persistence rejects a non-empty value.
+	ErrorClass CleanupExecutionErrorClass
 }
 
 type CleanupExecutionLedgerStore interface {
@@ -98,17 +101,19 @@ func ValidateCleanupExecutionProgressCommand(command CleanupExecutionProgressCom
 	switch command.Phase {
 	case CleanupExecutionPhaseRawDispatchRecorded,
 		CleanupExecutionPhaseManifestDispatchRecorded:
-		if command.DeleteOutcome != "" || command.AuditOutcome != "" {
+		if command.DeleteOutcome != "" || command.AuditOutcome != "" || command.ErrorClass != "" {
 			return ErrInvalidCleanupExecutionLedger
 		}
 	case CleanupExecutionPhaseRawOutcomeRecorded,
 		CleanupExecutionPhaseManifestOutcomeRecorded:
-		if command.AuditOutcome != "" || !validCleanupDeleteOutcome(command.DeleteOutcome) {
+		if command.AuditOutcome != "" || !validCleanupDeleteOutcome(command.DeleteOutcome) ||
+			!validCleanupOutcomeErrorClass(command.DeleteOutcome, command.ErrorClass) {
 			return ErrInvalidCleanupExecutionLedger
 		}
 	case CleanupExecutionPhaseRawAbsenceConfirmed,
 		CleanupExecutionPhaseManifestAbsenceConfirmed:
-		if command.DeleteOutcome != "" || command.AuditOutcome != CleanupAuditConfirmedAbsent {
+		if command.DeleteOutcome != "" || command.AuditOutcome != CleanupAuditConfirmedAbsent ||
+			command.ErrorClass != "" {
 			return ErrInvalidCleanupExecutionLedger
 		}
 	default:
@@ -143,11 +148,11 @@ func CleanupExecutionProgressAlreadyApplied(
 		CleanupExecutionPhaseManifestDispatchRecorded:
 		return true
 	case CleanupExecutionPhaseRawOutcomeRecorded:
-		return ledger.Raw.DeleteOutcome == command.DeleteOutcome
+		return ledger.Raw.DeleteOutcome == command.DeleteOutcome && ledger.ErrorClass == command.ErrorClass
 	case CleanupExecutionPhaseRawAbsenceConfirmed:
 		return ledger.Raw.AuditOutcome == command.AuditOutcome
 	case CleanupExecutionPhaseManifestOutcomeRecorded:
-		return ledger.Manifest.DeleteOutcome == command.DeleteOutcome
+		return ledger.Manifest.DeleteOutcome == command.DeleteOutcome && ledger.ErrorClass == command.ErrorClass
 	case CleanupExecutionPhaseManifestAbsenceConfirmed:
 		return ledger.Manifest.AuditOutcome == command.AuditOutcome
 	default:

@@ -142,7 +142,9 @@ func TestCleanupAbsenceAuditRequestRejectsUnknownDeleteOutcome(t *testing.T) {
 	}
 	ledger, err = AdvanceCleanupExecutionLedger(plan, ledger, CleanupExecutionTransition{
 		Phase:         CleanupExecutionPhaseRawOutcomeRecorded,
-		DeleteOutcome: CleanupDeleteUnknown, ObservedAt: now.Add(2 * time.Second),
+		DeleteOutcome: CleanupDeleteUnknown,
+		ErrorClass:    CleanupExecutionErrorProviderTimeout,
+		ObservedAt:    now.Add(2 * time.Second),
 	})
 	if err != nil {
 		t.Fatalf("raw unknown outcome = %v", err)

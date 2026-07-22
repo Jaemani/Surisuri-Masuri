@@ -218,6 +218,7 @@ func BuildCleanupArtifactExecutionOutcomeCommand(
 		ExpectedLedgerRevision:  request.DispatchRevision,
 		Phase:                   request.OutcomePhase,
 		DeleteOutcome:           result.DeleteOutcome,
+		ErrorClass:              result.ErrorClass,
 	}
 	if ValidateCleanupExecutionProgressCommand(command) != nil {
 		return CleanupExecutionProgressCommand{}, ErrInvalidCleanupExecutionLedger

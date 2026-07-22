@@ -185,7 +185,8 @@ func TestFirestoreCleanupArtifactExecutionPersistsUnknownAndReplaysExactly(t *te
 	)
 	if err != nil || status != ingest.CleanupExecutionMutationApplied ||
 		ledger.Phase != ingest.CleanupExecutionPhaseRawOutcomeRecorded ||
-		ledger.Raw.DeleteOutcome != ingest.CleanupDeleteUnknown {
+		ledger.Raw.DeleteOutcome != ingest.CleanupDeleteUnknown ||
+		ledger.ErrorClass != ingest.CleanupExecutionErrorProviderTimeout {
 		t.Fatalf("RecordCleanupArtifactExecutionOutcome() = %#v, %q, %v", ledger, status, err)
 	}
 	if len(fixture.transaction.updates) != 1 {
@@ -200,6 +201,15 @@ func TestFirestoreCleanupArtifactExecutionPersistsUnknownAndReplaysExactly(t *te
 	if err != nil || status != ingest.CleanupExecutionMutationReplayed ||
 		!reflect.DeepEqual(replayed, ledger) {
 		t.Fatalf("unknown outcome replay = %#v, %q, %v", replayed, status, err)
+	}
+	fixture.assertNoWrites(t)
+
+	differentClass := result
+	differentClass.ErrorClass = ingest.CleanupExecutionErrorProviderUnavailable
+	if _, _, err := fixture.store.RecordCleanupArtifactExecutionOutcome(
+		context.Background(), grant, request, differentClass,
+	); !errors.Is(err, ingest.ErrCleanupExecutionConflict) {
+		t.Fatalf("different error-class replay error = %v", err)
 	}
 	fixture.assertNoWrites(t)
 

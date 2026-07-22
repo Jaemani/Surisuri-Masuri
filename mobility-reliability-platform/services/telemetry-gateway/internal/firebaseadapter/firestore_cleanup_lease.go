@@ -362,7 +362,7 @@ func expiredProgressingCleanupAttemptClosure(
 	}
 	ledger, present, err := decodeHistoricalCleanupExecutionLedger(plan, attemptResult.Attempt)
 	if err != nil || !present || ledger.Phase == ingest.CleanupExecutionPhaseCompleted ||
-		ledger.Disposition != "" || ledger.ErrorClass != "" || ledger.EvidenceHash != "" ||
+		ledger.Disposition != "" || ledger.EvidenceHash != "" ||
 		!ledger.CompletedAt.IsZero() {
 		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
 	}

@@ -96,6 +96,7 @@ func (s *FirestoreAdmissionStore) RecordCleanupExecutionProgress(
 ) (ingest.CleanupExecutionLedger, ingest.CleanupExecutionMutationStatus, error) {
 	if s == nil || s.runTransaction == nil || s.now == nil || ctx == nil ||
 		ingest.ValidateCleanupExecutionProgressCommand(command) != nil ||
+		command.ErrorClass != "" ||
 		ingest.CleanupExecutionProgressRequiresAbsenceEvidence(command) {
 		return ingest.CleanupExecutionLedger{}, "", ingest.ErrInvalidCleanupExecutionLedger
 	}
@@ -156,7 +157,8 @@ func (s *FirestoreAdmissionStore) recordCleanupExecutionProgress(
 			current,
 			ingest.CleanupExecutionTransition{
 				Phase: command.Phase, DeleteOutcome: command.DeleteOutcome,
-				AuditOutcome: command.AuditOutcome, ObservedAt: state.effectiveAt,
+				AuditOutcome: command.AuditOutcome, ErrorClass: command.ErrorClass,
+				ObservedAt: state.effectiveAt,
 			},
 		)
 		if advanceErr != nil {

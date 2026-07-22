@@ -127,7 +127,8 @@ func TestCleanupArtifactExecutionResultPreservesUnknownWithBoundedError(t *testi
 	command, err := BuildCleanupArtifactExecutionOutcomeCommand(request, result)
 	if err != nil || command.Phase != CleanupExecutionPhaseRawOutcomeRecorded ||
 		command.ExpectedLedgerRevision != request.DispatchRevision ||
-		command.DeleteOutcome != CleanupDeleteUnknown {
+		command.DeleteOutcome != CleanupDeleteUnknown ||
+		command.ErrorClass != CleanupExecutionErrorProviderTimeout {
 		t.Fatalf("unknown outcome command = %#v, %v", command, err)
 	}
 
