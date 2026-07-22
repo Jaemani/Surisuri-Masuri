@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/authorization"
+	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/cleanupattest"
 	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/ingest"
 	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/telemetry"
 )
@@ -47,8 +48,10 @@ type runAdmissionTransaction func(
 // the initial receipt in one Firestore transaction. Object storage deliberately
 // remains outside this boundary and runs only after the transaction commits.
 type FirestoreAdmissionStore struct {
-	runTransaction runAdmissionTransaction
-	now            func() time.Time
+	runTransaction                      runAdmissionTransaction
+	now                                 func() time.Time
+	cleanupAbsenceAuditEvidenceVerifier cleanupattest.Verifier
+	cleanupAbsenceAuditContext          func(context.Context, time.Time) (context.Context, context.CancelFunc)
 }
 
 var _ ingest.AdmissionStore = (*FirestoreAdmissionStore)(nil)
