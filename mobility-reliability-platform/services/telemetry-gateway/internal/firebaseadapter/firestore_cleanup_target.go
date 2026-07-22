@@ -86,6 +86,79 @@ func (s *FirestoreAdmissionStore) LoadCurrentCleanup(
 	return result, nil
 }
 
+func (s *FirestoreAdmissionStore) LoadCurrentCleanupExecution(
+	ctx context.Context,
+	query ingest.CleanupExecutionQuery,
+) (ingest.CurrentCleanupExecutionSnapshot, error) {
+	if s == nil || s.runTransaction == nil || ctx == nil ||
+		!telemetry.IsUUID(query.TenantID) || !lowerHexDigest(query.ReservationKey) ||
+		!telemetry.IsUUID(query.AttemptID) {
+		return ingest.CurrentCleanupExecutionSnapshot{}, ingest.ErrCleanupExecutionUnavailable
+	}
+	var result ingest.CurrentCleanupExecutionSnapshot
+	err := s.runTransaction(ctx, func(runContext context.Context, transaction admissionTransaction) error {
+		result = ingest.CurrentCleanupExecutionSnapshot{}
+		linked, loadErr := loadLinkedReceipt(runContext, transaction, query.TenantID, query.ReservationKey)
+		if loadErr != nil {
+			return loadErr
+		}
+		reader, ok := transaction.(cleanupTargetTransaction)
+		if !ok {
+			return ingest.ErrCleanupExecutionUnavailable
+		}
+		attemptResult, attemptExists, attemptErr := reader.ReadRecoveryAttempt(
+			runContext,
+			recoveryAttemptDocumentPath(query.TenantID, linked.Receipt.Receipt.ReceiptID, query.AttemptID),
+		)
+		if attemptErr != nil {
+			return attemptErr
+		}
+		if !attemptExists || validateCleanupStartedAttempt(
+			attemptResult.Attempt,
+			linked.Receipt.Receipt,
+			query.AttemptID,
+		) != nil {
+			return ingest.ErrCleanupExecutionUnauthorized
+		}
+		targetResult, targetExists, targetErr := reader.ReadCleanupTarget(
+			runContext,
+			cleanupTargetDocumentPath(query.TenantID, query.AttemptID),
+		)
+		if targetErr != nil {
+			return targetErr
+		}
+		if !targetExists {
+			return ingest.ErrCleanupExecutionUnauthorized
+		}
+		target, domainErr := targetResult.Target.toDomain()
+		if domainErr != nil {
+			return ingest.ErrCleanupExecutionUnavailable
+		}
+		readTime, clockErr := coherentCleanupTargetReadTime(
+			linked.Receipt.ReadTime,
+			attemptResult.ReadTime,
+			targetResult.ReadTime,
+		)
+		if clockErr != nil {
+			return clockErr
+		}
+		result = ingest.CurrentCleanupExecutionSnapshot{
+			Receipt:  linked.Receipt.Receipt.toDomain(),
+			Attempt:  currentCleanupAttempt(attemptResult.Attempt),
+			Target:   target,
+			ReadTime: readTime,
+		}
+		return nil
+	})
+	if err != nil {
+		return ingest.CurrentCleanupExecutionSnapshot{}, normalizeCleanupExecutionStoreError(ctx, err)
+	}
+	if result.Receipt.ReceiptID == "" || result.Target.TargetHash == "" || result.ReadTime.IsZero() {
+		return ingest.CurrentCleanupExecutionSnapshot{}, ingest.ErrCleanupExecutionUnavailable
+	}
+	return result, nil
+}
+
 func (s *FirestoreAdmissionStore) CreateCleanupDryRunTarget(
 	ctx context.Context,
 	grant ingest.CleanupTargetAuthorizationGrant,
@@ -321,6 +394,27 @@ func normalizeCleanupTargetStoreError(
 		return ingest.ErrCleanupTargetAuthorizationExpired
 	}
 	return ingest.ErrCleanupArtifactAuthorizationUnavailable
+}
+
+func normalizeCleanupExecutionStoreError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctx != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
+	}
+	if errors.Is(err, ingest.ErrCleanupExecutionUnauthorized) {
+		return ingest.ErrCleanupExecutionUnauthorized
+	}
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	return ingest.ErrCleanupExecutionUnavailable
 }
 
 func cloneCleanupTargetCommand(command ingest.CleanupTargetCommand) ingest.CleanupTargetCommand {

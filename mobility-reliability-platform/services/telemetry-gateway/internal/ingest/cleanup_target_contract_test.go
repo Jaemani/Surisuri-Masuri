@@ -538,6 +538,11 @@ func cleanupClassificationResultFixture(
 		result.ManifestInventory = complete(1)
 		result.PinnedRaw = raw
 		result.PinnedManifest = manifest
+	case ArtifactClassificationManifestOnly:
+		result.ReasonCode = ArtifactReasonReferencedRawNotFound
+		result.RawInventory = complete(0)
+		result.ManifestInventory = complete(1)
+		result.PinnedManifest = manifest
 	case ArtifactClassificationGenerationDrift:
 		result.ReasonCode = ArtifactReasonMultipleRawGenerations
 		result.RawInventory = complete(2)

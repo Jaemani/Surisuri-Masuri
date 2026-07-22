@@ -14,6 +14,166 @@ import (
 	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/ingest"
 )
 
+func TestFirestoreAdmissionStoreEmulatorLoadsCurrentCleanupExecutionTarget(t *testing.T) {
+	client := newAdmissionEmulatorClient(t)
+	clearAdmissionIngestCollections(t, client)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	store, receiptBefore, attemptBefore := seedClaimedCleanupTargetFixture(t, client, now)
+	command := cleanupTargetCommandFixture(t, receiptBefore, ingest.ArtifactClassificationValidComplete)
+	target, status, err := store.createCleanupDryRunTarget(
+		context.Background(),
+		ingest.CleanupTargetAuthorizationGrant{},
+		command,
+		command.CreatedAt,
+		exactCleanupTargetSnapshotValidator(receiptBefore, attemptBefore),
+	)
+	if err != nil || status != ingest.CleanupTargetCreated {
+		t.Fatalf("createCleanupDryRunTarget() = %#v, %q, %v", target, status, err)
+	}
+
+	snapshot, err := store.LoadCurrentCleanupExecution(context.Background(), ingest.CleanupExecutionQuery{
+		TenantID:       receiptBefore.TenantID,
+		ReservationKey: receiptBefore.ReservationKey,
+		AttemptID:      attemptBefore.AttemptID,
+	})
+	if err != nil {
+		t.Fatalf("LoadCurrentCleanupExecution() = %v", err)
+	}
+	if snapshot.ReadTime.IsZero() || snapshot.Receipt.ReceiptID != receiptBefore.ReceiptID ||
+		snapshot.Attempt.AttemptID != attemptBefore.AttemptID ||
+		snapshot.Target.TargetHash != target.TargetHash ||
+		!reflect.DeepEqual(snapshot.Target.Command, command) {
+		t.Fatalf("cleanup execution snapshot = %#v", snapshot)
+	}
+	plan, grant, err := store.AuthorizeCleanupExecution(context.Background(), ingest.CleanupExecutionQuery{
+		TenantID:       receiptBefore.TenantID,
+		ReservationKey: receiptBefore.ReservationKey,
+		AttemptID:      attemptBefore.AttemptID,
+	})
+	if err != nil || plan.Target.TargetHash != target.TargetHash ||
+		ValidateCleanupExecutionAuthorization(grant, plan, now) != nil ||
+		!grant.expiresAt.After(grant.checkedAt) ||
+		grant.expiresAt.Sub(grant.checkedAt) > CleanupExecutionGrantTTL ||
+		grant.expiresAt.After(plan.Target.Command.LeaseExpiresAt) {
+		t.Fatalf("AuthorizeCleanupExecution() = %#v, %#v, %v", plan, grant, err)
+	}
+	assertCleanupControlDocumentsUnchanged(t, client, receiptBefore, attemptBefore)
+}
+
+func TestFirestoreAdmissionStoreEmulatorRejectsMissingOrMalformedCleanupExecutionTarget(t *testing.T) {
+	client := newAdmissionEmulatorClient(t)
+	clearAdmissionIngestCollections(t, client)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	store, receiptBefore, attemptBefore := seedClaimedCleanupTargetFixture(t, client, now)
+	query := ingest.CleanupExecutionQuery{
+		TenantID:       receiptBefore.TenantID,
+		ReservationKey: receiptBefore.ReservationKey,
+		AttemptID:      attemptBefore.AttemptID,
+	}
+
+	_, err := store.LoadCurrentCleanupExecution(context.Background(), query)
+	if !errors.Is(err, ingest.ErrCleanupExecutionUnauthorized) {
+		t.Fatalf("missing target error = %v", err)
+	}
+	plan, grant, err := store.AuthorizeCleanupExecution(context.Background(), query)
+	if !errors.Is(err, ingest.ErrCleanupExecutionUnauthorized) ||
+		plan != (ingest.CleanupExecutionPlan{}) || grant != (CleanupExecutionAuthorizationGrant{}) {
+		t.Fatalf("missing target authorization = %#v, %#v, %v", plan, grant, err)
+	}
+	command := cleanupTargetCommandFixture(t, receiptBefore, ingest.ArtifactClassificationValidComplete)
+	targetHash, err := ingest.CleanupTargetHash(command)
+	if err != nil {
+		t.Fatalf("CleanupTargetHash() = %v", err)
+	}
+	malformed := newFirestoreCleanupTarget(command, targetHash)
+	malformed.TargetHash = strings.Repeat("f", 64)
+	if _, err := client.Doc(cleanupTargetDocumentPath(
+		receiptBefore.TenantID,
+		attemptBefore.AttemptID,
+	)).Create(context.Background(), malformed); err != nil {
+		t.Fatalf("create malformed target: %v", err)
+	}
+	_, err = store.LoadCurrentCleanupExecution(context.Background(), query)
+	if !errors.Is(err, ingest.ErrCleanupExecutionUnavailable) {
+		t.Fatalf("malformed target error = %v", err)
+	}
+	plan, grant, err = store.AuthorizeCleanupExecution(context.Background(), query)
+	if !errors.Is(err, ingest.ErrCleanupExecutionUnavailable) ||
+		plan != (ingest.CleanupExecutionPlan{}) || grant != (CleanupExecutionAuthorizationGrant{}) {
+		t.Fatalf("malformed target authorization = %#v, %#v, %v", plan, grant, err)
+	}
+	assertCleanupControlDocumentsUnchanged(t, client, receiptBefore, attemptBefore)
+}
+
+func TestFirestoreAdmissionStoreEmulatorRejectsStaleCleanupExecutionControlState(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, *firestore.Client, firestoreIngestReceipt, firestoreRecoveryAttempt)
+	}{
+		{
+			name: "receipt revision",
+			mutate: func(t *testing.T, client *firestore.Client, receipt firestoreIngestReceipt, _ firestoreRecoveryAttempt) {
+				t.Helper()
+				if _, err := client.Doc(receiptDocumentPath(receipt.TenantID, receipt.ReceiptID)).Update(
+					context.Background(), []firestore.Update{{Path: "revision", Value: receipt.Revision + 1}},
+				); err != nil {
+					t.Fatalf("advance receipt revision: %v", err)
+				}
+			},
+		},
+		{
+			name: "receipt fence",
+			mutate: func(t *testing.T, client *firestore.Client, receipt firestoreIngestReceipt, _ firestoreRecoveryAttempt) {
+				t.Helper()
+				if _, err := client.Doc(receiptDocumentPath(receipt.TenantID, receipt.ReceiptID)).Update(
+					context.Background(), []firestore.Update{{Path: "fencing_token", Value: receipt.FencingToken + 1}},
+				); err != nil {
+					t.Fatalf("advance receipt fence: %v", err)
+				}
+			},
+		},
+		{
+			name: "terminal attempt",
+			mutate: func(t *testing.T, client *firestore.Client, receipt firestoreIngestReceipt, attempt firestoreRecoveryAttempt) {
+				t.Helper()
+				if _, err := client.Doc(recoveryAttemptDocumentPath(
+					receipt.TenantID, receipt.ReceiptID, attempt.AttemptID,
+				)).Update(context.Background(), []firestore.Update{{
+					Path: "status", Value: ingest.RecoveryAttemptCompleted,
+				}}); err != nil {
+					t.Fatalf("complete cleanup attempt: %v", err)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := newAdmissionEmulatorClient(t)
+			clearAdmissionIngestCollections(t, client)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			store, receipt, attempt := seedClaimedCleanupTargetFixture(t, client, now)
+			command := cleanupTargetCommandFixture(t, receipt, ingest.ArtifactClassificationValidComplete)
+			if _, status, err := store.createCleanupDryRunTarget(
+				context.Background(), ingest.CleanupTargetAuthorizationGrant{}, command,
+				command.CreatedAt, exactCleanupTargetSnapshotValidator(receipt, attempt),
+			); err != nil || status != ingest.CleanupTargetCreated {
+				t.Fatalf("createCleanupDryRunTarget() status=%q err=%v", status, err)
+			}
+			test.mutate(t, client, receipt, attempt)
+			plan, grant, err := store.AuthorizeCleanupExecution(
+				context.Background(), ingest.CleanupExecutionQuery{
+					TenantID: receipt.TenantID, ReservationKey: receipt.ReservationKey,
+					AttemptID: attempt.AttemptID,
+				},
+			)
+			if !errors.Is(err, ingest.ErrCleanupExecutionUnauthorized) ||
+				plan != (ingest.CleanupExecutionPlan{}) || grant != (CleanupExecutionAuthorizationGrant{}) {
+				t.Fatalf("stale control authorization = %#v, %#v, %v", plan, grant, err)
+			}
+		})
+	}
+}
+
 func TestFirestoreAdmissionStoreEmulatorConcurrentCleanupTargetCreateConverges(t *testing.T) {
 	client := newAdmissionEmulatorClient(t)
 	clearAdmissionIngestCollections(t, client)
