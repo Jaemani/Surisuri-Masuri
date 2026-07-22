@@ -302,18 +302,36 @@ func TestValidateFailedRecoveryAttemptForOwnerEnforcesFenceTime(t *testing.T) {
 		code       ingest.RecoveryAttemptFailureCode
 		failedAt   time.Time
 		observedAt time.Time
+		mutate     func(*firestoreRecoveryAttempt)
 		wantErr    bool
 	}{
 		{name: "lease expiry at fence", code: ingest.RecoveryAttemptFailureLeaseExpired, failedAt: fence.ExpiresAt, observedAt: fence.ExpiresAt, wantErr: false},
 		{name: "lease expiry before fence", code: ingest.RecoveryAttemptFailureLeaseExpired, failedAt: fence.ExpiresAt.Add(-time.Nanosecond), observedAt: fence.ExpiresAt, wantErr: true},
 		{name: "live failure before fence", code: ingest.RecoveryAttemptFailureCallerCanceled, failedAt: now.Add(time.Second), observedAt: fence.ExpiresAt, wantErr: false},
 		{name: "live failure at fence", code: ingest.RecoveryAttemptFailureCallerCanceled, failedAt: fence.ExpiresAt, observedAt: fence.ExpiresAt, wantErr: true},
+		{
+			name: "decision domain residue", code: ingest.RecoveryAttemptFailureCallerCanceled,
+			failedAt: now.Add(time.Second), observedAt: fence.ExpiresAt, wantErr: true,
+			mutate: func(attempt *firestoreRecoveryAttempt) {
+				attempt.DecisionDomain = ingest.ForwardRecoveryDecisionArtifactReconciliation
+			},
+		},
+		{
+			name: "authorization disposition residue", code: ingest.RecoveryAttemptFailureCallerCanceled,
+			failedAt: now.Add(time.Second), observedAt: fence.ExpiresAt, wantErr: true,
+			mutate: func(attempt *firestoreRecoveryAttempt) {
+				attempt.AuthorizationDisposition = ingest.ForwardRecoveryAuthorizationDenied
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			attempt := baseAttempt
 			attempt.FailureCode = test.code
 			attempt.FailedAt = test.failedAt
+			if test.mutate != nil {
+				test.mutate(&attempt)
+			}
 			err := validateFailedRecoveryAttemptForOwner(
 				attempt, receipt, expected, fence, ingest.LeaseOwnerSweeper, test.observedAt,
 			)

@@ -259,6 +259,7 @@ func validateFailedRecoveryAttemptForOwner(
 		!attempt.StartedAt.Equal(receipt.LeaseAcquiredAt) ||
 		!ingest.ValidRecoveryAttemptFailureCode(attempt.FailureCode) || attempt.FailedAt.IsZero() ||
 		!attempt.FailedAt.After(attempt.StartedAt) || attempt.FailedAt.After(observedAt) ||
+		attempt.DecisionDomain != "" || attempt.AuthorizationDisposition != "" ||
 		attempt.Phase != "" || attempt.Classification != "" || attempt.ReasonCode != "" ||
 		attempt.Action != "" || attempt.Outcome != "" || attempt.ActionHash != "" ||
 		attempt.HoldCode != "" || attempt.ReleaseCode != "" || attempt.RejectionCode != "" ||

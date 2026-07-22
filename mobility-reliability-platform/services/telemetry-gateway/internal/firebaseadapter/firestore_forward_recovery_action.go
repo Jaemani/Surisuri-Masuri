@@ -14,6 +14,7 @@ import (
 )
 
 var _ ingest.ForwardRecoveryActionStore = (*FirestoreAdmissionStore)(nil)
+var _ ingest.ForwardRecoveryControlStore = (*FirestoreAdmissionStore)(nil)
 
 type recoveryAttemptRead struct {
 	Attempt  firestoreRecoveryAttempt
