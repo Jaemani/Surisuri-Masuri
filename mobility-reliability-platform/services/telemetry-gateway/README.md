@@ -61,11 +61,14 @@
 - exact `manifest_absence_confirmed/revision 7`, non-unknown outcome·fresh evidence와 immutable fence deadline만 받는 cleanup expiry finalizer
 - attempt `completed/outcome=expired`, receipt `expired`와 receipt·두 uniqueness index의 같은 `purge_eligible_at`을 한 transaction으로 commit하고 immutable target을 보존하는 terminal 경계
 - commit response loss에서 mutation을 반복하지 않고 terminal historical plan·evidence·purge를 재계산해 `committed|not_committed|unverifiable`만 반환하는 short-lived read-only correlation
+- 10개 bounded cleanup error class의 exhaustive retry·hold policy와 durable `unknown` error-class persistence
+- 실제 마지막 phase/revision을 보존한 `completed/cleanup_retry|cleanup_hold`, attempt+receipt 2문서 atomic commit과 immutable target·두 uniqueness index write 0
+- cleanup 전용 receipt cursor, old fence expiry를 포함한 exact-boundary retry claim·pristine attempt, hold auto-claim 0과 commit-response-loss read-only correlation
 
 아직 구현하지 않은 production 운영 경계:
 
 - scheduler·startup composition과 실제 metrics exporter를 포함한 bounded sweeper runtime
-- [ADR-0030](../../docs/decisions/ADR-0030-atomic-cleanup-expiry-finalization.md) 이후에도 남은 retry·hold disposition, phase executor의 terminal call wiring과 nested ledger purge
+- [ADR-0031](../../docs/decisions/ADR-0031-phase-preserving-cleanup-retry-hold-disposition.md)까지 local adapter로 구현했지만 phase executor의 typed-error→disposition/terminal call wiring, operator hold release와 nested ledger purge는 미구현
 - accepted deletion auditor, held/rejected cleanup과 auditor key rotation·cross-process lifecycle. Immutable target은 execution state로 갱신하지 않고 target 생성 뒤 renewal도 허용하지 않음
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 

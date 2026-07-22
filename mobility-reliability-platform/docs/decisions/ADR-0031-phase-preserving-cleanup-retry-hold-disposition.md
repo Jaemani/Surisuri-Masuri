@@ -1,7 +1,7 @@
 ---
 id: ADR-0031
 title: Phase-preserving cleanup retry and hold disposition
-status: proposed
+status: accepted
 decided_at: 2026-07-22
 owners:
   - project owner
@@ -190,6 +190,7 @@ Phase executor가 typed error를 이 계약에 연결하는 composition, operato
 - 선행 결정: [ADR-0026](./ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md), [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md), [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md), [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md)
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
-- 구현 증거: 아직 없음 — proposed contract
-- 제품 업데이트: 해당 없음 — 설계 문서이며 executable·사용자·staging·production 경로 미변경
+- 구현 증거: [EVD-20260723-039](../evidence/2026-07.md#evd-20260723-039--phase-preserving-cleanup-retryhold-disposition)
+- 제품 업데이트: [UPD-20260723-05](../product-updates/UPD-20260723-05-cleanup-retry-hold-control.md)
+- 사람 대상 리포트: [HR-20260723-30](../reports/human/HR-20260723-30-cleanup-retry-hold-disposition.md)
 - 인시던트: 해당 없음 — production·staging·field 영향 없음
