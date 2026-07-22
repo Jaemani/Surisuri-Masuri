@@ -85,6 +85,11 @@ const (
 	// RecoveryAttemptOutcomeExpired is cleanup-only. Forward recovery action
 	// validators must continue to require their exact action/outcome mapping.
 	RecoveryAttemptOutcomeExpired RecoveryAttemptOutcome = "expired"
+	// Cleanup retry/hold outcomes are cleanup-only terminal control decisions.
+	// They deliberately remain outside ValidRecoveryAttemptOutcome so forward
+	// recovery cannot persist them through its action contract.
+	RecoveryAttemptOutcomeCleanupRetry RecoveryAttemptOutcome = "cleanup_retry"
+	RecoveryAttemptOutcomeCleanupHold  RecoveryAttemptOutcome = "cleanup_hold"
 )
 
 func ValidRecoveryAttemptOutcome(outcome RecoveryAttemptOutcome) bool {

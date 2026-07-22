@@ -140,6 +140,21 @@ func TestCleanupArtifactExecutionResultPreservesUnknownWithBoundedError(t *testi
 	) {
 		t.Fatal("unknown result without bounded error class was accepted")
 	}
+	for _, hardClass := range []CleanupExecutionErrorClass{
+		CleanupExecutionErrorQuotaLimited,
+		CleanupExecutionErrorInventoryIncomplete,
+		CleanupExecutionErrorPermissionDenied,
+		CleanupExecutionErrorGenerationDrift,
+	} {
+		hardFailure := result
+		hardFailure.ErrorClass = hardClass
+		if !errors.Is(
+			ValidateCleanupArtifactExecutionResult(request, hardFailure),
+			ErrInvalidCleanupExecutionObservation,
+		) {
+			t.Fatalf("unknown result accepted non-ambiguous class %q", hardClass)
+		}
+	}
 	missingStart := result
 	missingStart.MutationStartedAt = time.Time{}
 	if !errors.Is(

@@ -194,7 +194,7 @@ func ValidateCleanupArtifactExecutionResult(
 		}
 	case CleanupDeleteUnknown:
 		if result.MutationStartedAt.IsZero() ||
-			!validCleanupExecutionErrorClass(result.ErrorClass) {
+			!validAmbiguousCleanupExecutionErrorClass(result.ErrorClass) {
 			return ErrInvalidCleanupExecutionObservation
 		}
 	default:

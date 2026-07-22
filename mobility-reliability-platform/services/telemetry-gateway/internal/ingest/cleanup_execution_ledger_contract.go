@@ -10,9 +10,14 @@ import (
 const (
 	CleanupExecutionLedgerSchemaVersion = "telemetry-cleanup-execution.v1"
 	CleanupCompletionAuditWindow        = 7 * 24 * time.Hour
+	CleanupRetryBackoffTransient        = 15 * time.Minute
+	CleanupRetryBackoffInventory        = 30 * time.Minute
+	CleanupRetryBackoffQuota            = 60 * time.Minute
+	CleanupHoldReviewWindow             = 24 * time.Hour
 
-	cleanupExecutionLedgerPlanBindingVersion = "cleanup-execution-ledger-plan@1"
-	cleanupExecutionEvidenceBindingVersion   = "cleanup-execution-evidence@1"
+	cleanupExecutionLedgerPlanBindingVersion          = "cleanup-execution-ledger-plan@1"
+	cleanupExecutionEvidenceBindingVersion            = "cleanup-execution-evidence@1"
+	cleanupExecutionDispositionEvidenceBindingVersion = "cleanup-execution-disposition-evidence@1"
 )
 
 var (
@@ -103,6 +108,74 @@ type CleanupExecutionTransition struct {
 	AuditOutcome  CleanupAuditOutcome
 	ErrorClass    CleanupExecutionErrorClass
 	ObservedAt    time.Time
+}
+
+// CleanupExecutionFailurePolicy is a closed mapping from a bounded execution
+// error to one cleanup-only terminal disposition and its control delay.
+// Delay means retry backoff for retry and human review window for hold.
+type CleanupExecutionFailurePolicy struct {
+	Disposition CleanupExecutionDisposition
+	Delay       time.Duration
+}
+
+func CleanupExecutionFailurePolicyFor(
+	errorClass CleanupExecutionErrorClass,
+) (CleanupExecutionFailurePolicy, error) {
+	switch errorClass {
+	case CleanupExecutionErrorProviderTimeout,
+		CleanupExecutionErrorProviderCancelled,
+		CleanupExecutionErrorProviderUnavailable,
+		CleanupExecutionErrorResponseUnverifiable:
+		return CleanupExecutionFailurePolicy{
+			Disposition: CleanupExecutionDispositionRetry,
+			Delay:       CleanupRetryBackoffTransient,
+		}, nil
+	case CleanupExecutionErrorInventoryIncomplete:
+		return CleanupExecutionFailurePolicy{
+			Disposition: CleanupExecutionDispositionRetry,
+			Delay:       CleanupRetryBackoffInventory,
+		}, nil
+	case CleanupExecutionErrorQuotaLimited:
+		return CleanupExecutionFailurePolicy{
+			Disposition: CleanupExecutionDispositionRetry,
+			Delay:       CleanupRetryBackoffQuota,
+		}, nil
+	case CleanupExecutionErrorPermissionDenied,
+		CleanupExecutionErrorPreconditionDrift,
+		CleanupExecutionErrorGenerationDrift,
+		CleanupExecutionErrorLineageMismatch:
+		return CleanupExecutionFailurePolicy{
+			Disposition: CleanupExecutionDispositionHold,
+			Delay:       CleanupHoldReviewWindow,
+		}, nil
+	default:
+		return CleanupExecutionFailurePolicy{}, ErrInvalidCleanupExecutionLedger
+	}
+}
+
+// CleanupExecutionDispositionCursorAt returns exactly one cleanup control
+// cursor. Retry waits for both policy backoff and the old provider fence;
+// hold exposes only a deterministic human-review due time.
+func CleanupExecutionDispositionCursorAt(
+	fence LeaseFence,
+	errorClass CleanupExecutionErrorClass,
+	completedAt time.Time,
+) (nextCleanupAt time.Time, holdReviewDueAt time.Time, err error) {
+	completedAt = completedAt.UTC()
+	policy, policyErr := CleanupExecutionFailurePolicyFor(errorClass)
+	cursorAt := completedAt.Add(policy.Delay)
+	if policyErr != nil || ValidateLeaseFence(fence) != nil ||
+		!validCleanupFirestoreTimestamp(completedAt) ||
+		!validCleanupFirestoreTimestamp(cursorAt) || !cursorAt.After(completedAt) {
+		return time.Time{}, time.Time{}, ErrInvalidCleanupExecutionLedger
+	}
+	if policy.Disposition == CleanupExecutionDispositionRetry {
+		if fence.ExpiresAt.UTC().After(cursorAt) {
+			cursorAt = fence.ExpiresAt.UTC()
+		}
+		return cursorAt, time.Time{}, nil
+	}
+	return time.Time{}, cursorAt, nil
 }
 
 func BuildCleanupExecutionLedgerPlan(
@@ -405,6 +478,67 @@ func CleanupExecutionEvidenceHash(
 	return cleanupExecutionEvidenceHash(prior, ledger.CompletedAt), nil
 }
 
+// CompleteCleanupExecutionDisposition closes an execution-stage cleanup
+// failure without inventing later success progress. Phase and revision remain
+// exactly as persisted; only bounded terminal evidence is added.
+func CompleteCleanupExecutionDisposition(
+	plan CleanupExecutionLedgerPlan,
+	ledger CleanupExecutionLedger,
+	errorClass CleanupExecutionErrorClass,
+	completedAt time.Time,
+) (CleanupExecutionLedger, CleanupExecutionFailurePolicy, error) {
+	completedAt = completedAt.UTC()
+	policy, err := CleanupExecutionFailurePolicyFor(errorClass)
+	if err != nil || !cleanupExecutionDispositionPhaseAllowed(ledger.Phase) ||
+		ledger.Revision != cleanupExecutionPhaseRevision(ledger.Phase) ||
+		ledger.Disposition != "" || ledger.EvidenceHash != "" || !ledger.CompletedAt.IsZero() ||
+		ValidateCleanupExecutionLedger(plan, ledger, completedAt) != nil {
+		return CleanupExecutionLedger{}, CleanupExecutionFailurePolicy{},
+			ErrInvalidCleanupExecutionLedger
+	}
+	if cleanupExecutionLedgerHasAmbiguousOutcome(ledger) {
+		if ledger.ErrorClass != errorClass {
+			return CleanupExecutionLedger{}, CleanupExecutionFailurePolicy{},
+				ErrInvalidCleanupExecutionLedger
+		}
+	} else if ledger.ErrorClass != "" {
+		return CleanupExecutionLedger{}, CleanupExecutionFailurePolicy{},
+			ErrInvalidCleanupExecutionLedger
+	}
+
+	terminal := ledger
+	terminal.Disposition = policy.Disposition
+	terminal.ErrorClass = errorClass
+	terminal.CompletedAt = completedAt
+	terminal.EvidenceHash = cleanupExecutionDispositionEvidenceHash(
+		ledger, policy.Disposition, errorClass, completedAt,
+	)
+	if ValidateCleanupExecutionLedger(plan, terminal, completedAt) != nil {
+		return CleanupExecutionLedger{}, CleanupExecutionFailurePolicy{},
+			ErrInvalidCleanupExecutionLedger
+	}
+	return terminal, policy, nil
+}
+
+// CleanupExecutionDispositionEvidenceHash recomputes the terminal evidence
+// after validating the complete phase-preserving ledger.
+func CleanupExecutionDispositionEvidenceHash(
+	plan CleanupExecutionLedgerPlan,
+	ledger CleanupExecutionLedger,
+) (string, error) {
+	if !cleanupExecutionTerminalDisposition(ledger.Disposition) ||
+		ValidateCleanupExecutionLedger(plan, ledger, ledger.CompletedAt) != nil {
+		return "", ErrInvalidCleanupExecutionLedger
+	}
+	prior, err := cleanupExecutionLedgerBeforeDisposition(ledger)
+	if err != nil {
+		return "", ErrInvalidCleanupExecutionLedger
+	}
+	return cleanupExecutionDispositionEvidenceHash(
+		prior, ledger.Disposition, ledger.ErrorClass, ledger.CompletedAt,
+	), nil
+}
+
 func CleanupPurgeEligibleAt(receiptRetentionFloor, completedAt time.Time) (time.Time, error) {
 	receiptRetentionFloor = receiptRetentionFloor.UTC()
 	completedAt = completedAt.UTC()
@@ -456,6 +590,31 @@ func cleanupExecutionEvidenceHash(ledger CleanupExecutionLedger, completedAt tim
 	return hex.EncodeToString(sum[:])
 }
 
+func cleanupExecutionDispositionEvidenceHash(
+	ledger CleanupExecutionLedger,
+	disposition CleanupExecutionDisposition,
+	errorClass CleanupExecutionErrorClass,
+	completedAt time.Time,
+) string {
+	encoder := newArtifactBindingEncoder(cleanupExecutionDispositionEvidenceBindingVersion)
+	encoder.addString(ledger.SchemaVersion)
+	encoder.addString(string(ledger.DecisionDomain))
+	encoder.addString(ledger.TargetHash)
+	encoder.addString(ledger.PlanHash)
+	encoder.addInt64(ledger.ReceiptRevision)
+	encoder.addLeaseFence(&ledger.Fence)
+	encoder.addInt64(ledger.Revision)
+	encoder.addString(string(ledger.Phase))
+	addCleanupArtifactExecutionLedgerBinding(encoder, ledger.Raw)
+	addCleanupArtifactExecutionLedgerBinding(encoder, ledger.Manifest)
+	encoder.addString(string(ledger.ErrorClass))
+	encoder.addString(string(disposition))
+	encoder.addString(string(errorClass))
+	encoder.addTime(completedAt)
+	sum := encoder.sum()
+	return hex.EncodeToString(sum[:])
+}
+
 func addCleanupArtifactExecutionLedgerBinding(
 	encoder *artifactBindingEncoder,
 	record CleanupArtifactExecutionLedger,
@@ -473,6 +632,9 @@ func addCleanupArtifactExecutionLedgerBinding(
 }
 
 func validateCleanupExecutionPhaseShape(ledger CleanupExecutionLedger, observedAt time.Time) error {
+	if cleanupExecutionTerminalDisposition(ledger.Disposition) {
+		return validateCleanupExecutionDispositionShape(ledger, observedAt)
+	}
 	emptyTerminal := ledger.Disposition == "" && ledger.ErrorClass == "" &&
 		ledger.EvidenceHash == "" && ledger.CompletedAt.IsZero()
 	ambiguousOutcome := ledger.Disposition == "" &&
@@ -547,6 +709,72 @@ func validateCleanupExecutionPhaseShape(ledger CleanupExecutionLedger, observedA
 		return ErrInvalidCleanupExecutionLedger
 	}
 	return nil
+}
+
+func validateCleanupExecutionDispositionShape(
+	ledger CleanupExecutionLedger,
+	observedAt time.Time,
+) error {
+	policy, err := CleanupExecutionFailurePolicyFor(ledger.ErrorClass)
+	if err != nil || policy.Disposition != ledger.Disposition ||
+		!cleanupExecutionDispositionPhaseAllowed(ledger.Phase) ||
+		!isLowerHexDigest(ledger.EvidenceHash) || ledger.CompletedAt.IsZero() ||
+		ledger.CompletedAt.After(observedAt) {
+		return ErrInvalidCleanupExecutionLedger
+	}
+	prior, err := cleanupExecutionLedgerBeforeDisposition(ledger)
+	if err != nil || validateCleanupExecutionPhaseShape(prior, ledger.CompletedAt) != nil ||
+		ledger.EvidenceHash != cleanupExecutionDispositionEvidenceHash(
+			prior, ledger.Disposition, ledger.ErrorClass, ledger.CompletedAt,
+		) {
+		return ErrInvalidCleanupExecutionLedger
+	}
+	return nil
+}
+
+func cleanupExecutionLedgerBeforeDisposition(
+	ledger CleanupExecutionLedger,
+) (CleanupExecutionLedger, error) {
+	if !cleanupExecutionTerminalDisposition(ledger.Disposition) ||
+		!cleanupExecutionDispositionPhaseAllowed(ledger.Phase) {
+		return CleanupExecutionLedger{}, ErrInvalidCleanupExecutionLedger
+	}
+	prior := ledger
+	prior.Disposition = ""
+	prior.EvidenceHash = ""
+	prior.CompletedAt = time.Time{}
+	if !cleanupExecutionLedgerHasAmbiguousOutcome(prior) {
+		prior.ErrorClass = ""
+	}
+	return prior, nil
+}
+
+func cleanupExecutionLedgerHasAmbiguousOutcome(ledger CleanupExecutionLedger) bool {
+	switch ledger.Phase {
+	case CleanupExecutionPhaseRawOutcomeRecorded:
+		return ledger.Raw.DeleteOutcome == CleanupDeleteUnknown
+	case CleanupExecutionPhaseManifestOutcomeRecorded:
+		return ledger.Manifest.DeleteOutcome == CleanupDeleteUnknown
+	default:
+		return false
+	}
+}
+
+func cleanupExecutionTerminalDisposition(disposition CleanupExecutionDisposition) bool {
+	return disposition == CleanupExecutionDispositionRetry ||
+		disposition == CleanupExecutionDispositionHold
+}
+
+func cleanupExecutionDispositionPhaseAllowed(phase CleanupExecutionPhase) bool {
+	switch phase {
+	case CleanupExecutionPhaseRawDispatchRecorded,
+		CleanupExecutionPhaseRawOutcomeRecorded,
+		CleanupExecutionPhaseManifestDispatchRecorded,
+		CleanupExecutionPhaseManifestOutcomeRecorded:
+		return true
+	default:
+		return false
+	}
 }
 
 func validCleanupLedgerDeleteOutcome(targeted bool, outcome CleanupDeleteRPCOutcome) bool {

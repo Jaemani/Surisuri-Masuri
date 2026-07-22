@@ -173,6 +173,9 @@ func cleanupExecutionLedgerLatestTime(
 	plan CleanupExecutionLedgerPlan,
 	ledger CleanupExecutionLedger,
 ) time.Time {
+	if cleanupExecutionTerminalDisposition(ledger.Disposition) && !ledger.CompletedAt.IsZero() {
+		return ledger.CompletedAt.UTC()
+	}
 	switch ledger.Phase {
 	case CleanupExecutionPhasePlanned:
 		return plan.Target.Command.CreatedAt.UTC()
