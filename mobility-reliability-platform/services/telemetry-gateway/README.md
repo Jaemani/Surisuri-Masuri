@@ -50,12 +50,18 @@
 - raw-first exact generation+metageneration conditional delete, regular/soft-deleted complete-empty audit와 raw-only/manifest-only counterpart path 확인
 - delete·inspect 404 분리, timeout/cancel/unavailable 재감사 후 manifest mutation 0, permission/quota/412·soft-deleted/late generation fail-closed
 - completion capability가 아닌 plan/target hash-bound non-authoritative success observation
+- exact target·plan hash, receipt revision, cleanup fence, ledger revision, artifact·path·next phase를 묶는 30초 이하 Firestore current-state absence-audit grant
+- private Ed25519 key를 내부 보관하고 paired verifier만 반환하는 exact-path inventory-only GCS auditor와 opaque evidence
+- signed request·concrete grant binding·artifact·`ObservedAt`을 current transaction에서 재검증하는 raw·manifest absence phase persistence, exact replay write-zero와 generic progress 우회 차단
 
 아직 구현하지 않은 production 운영 경계:
 
 - scheduler·startup composition과 실제 metrics exporter를 포함한 bounded sweeper runtime
-- [ADR-0026](../../docs/decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)에 정의한 attempt execution/outcome ledger, target 생성 전 cleanup renewal·별도 release·attempt completion, receipt `expired`, nested ledger purge와 accepted deletion auditor. Immutable target은 execution state로 갱신하지 않고 target 생성 뒤 renewal도 허용하지 않음
+- [ADR-0026](../../docs/decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)·[ADR-0027](../../docs/decisions/ADR-0027-paired-read-only-cleanup-absence-attestation.md) 이후에도 남은 delete dispatch→outcome→signed audit phase executor, progress-bearing expired takeover, retry·hold disposition, terminal attempt completion·receipt `expired`·purge eligibility, response-loss correlation과 nested ledger purge
+- accepted deletion auditor, held/rejected cleanup과 auditor key rotation·cross-process lifecycle. Immutable target은 execution state로 갱신하지 않고 target 생성 뒤 renewal도 허용하지 않음
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
+
+현재 absence evidence는 원자적 Cloud Storage snapshot이 아니다. HTTP reader가 regular generation과 soft-deleted generation을 순차 조회하므로 두 호출 사이의 out-of-band writer race가 남는다. Post-quiescence application writer fencing과 staging의 least-privilege IAM/write exclusion을 검증하기 전에는 production readiness 또는 point-in-time proof로 해석하지 않는다.
 
 verifier, authorization/admission transaction, artifact store, artifact inventory reader와 recovery control plane이 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. Firestore transaction과 bounded candidate/checkpoint component는 local Emulator에서, Storage generation/replay는 official testbench에서 검증했지만 ADC/IAM·staging lifecycle·production composite index 증거는 아닙니다. Candidate와 advisory checkpoint는 artifact 권한이 아니며 fresh transaction claim의 검증된 `Acquired`만 single-receipt reconciler 진입을 허용합니다. `status`·`next_recovery_at` 누락 receipt는 due query에 보이지 않아 별도 control-integrity audit가 필요합니다. Scheduler/startup과 metrics exporter를 연결하기 전에는 worker를 활성화하지 않습니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
 

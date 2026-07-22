@@ -53,7 +53,7 @@
 
 ### Telemetry Gateway
 
-다음 목록은 target architecture다. Lease·fencing, single-receipt reconciler, bounded candidate/checkpoint와 expiry cleanup의 claim·read-only classification·dry-run target·generation-pinned delete/audit component는 local code로 구현됐지만 `cmd/server`·scheduler에 연결되지 않았다. Cleanup execution ledger와 terminal completion은 [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)의 accepted design이며 아직 구현되지 않았다. Recovery 결정은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md), [ADR-0020](../decisions/ADR-0020-two-pass-forward-reconciliation.md), [ADR-0021](../decisions/ADR-0021-bounded-forward-recovery-worker.md), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md), [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)을 따른다.
+다음 목록은 target architecture다. Lease·fencing, single-receipt reconciler, bounded candidate/checkpoint와 expiry cleanup의 claim·read-only classification·dry-run target·generation-pinned delete/audit, execution progress ledger와 paired signed absence persistence는 local code로 구현됐지만 `cmd/server`·scheduler에 연결되지 않았다. [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)의 terminal completion·response-loss correlation과 phase executor, progress-bearing takeover, retry·hold·purge는 아직 구현되지 않았다. [ADR-0027](../decisions/ADR-0027-paired-read-only-cleanup-absence-attestation.md)의 regular/soft-deleted inventory는 순차 관측이므로 atomic snapshot이 아니며 staging IAM writer-exclusion 전에는 production readiness가 아니다. Recovery 결정은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md), [ADR-0020](../decisions/ADR-0020-two-pass-forward-reconciliation.md), [ADR-0021](../decisions/ADR-0021-bounded-forward-recovery-worker.md), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md), [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md), [ADR-0027](../decisions/ADR-0027-paired-read-only-cleanup-absence-attestation.md)을 따른다.
 
 - 비즈니스 CRUD를 모두 담당하는 범용 백엔드가 아니다.
 - 모바일 텔레메트리의 인증, 계약 검증, 멱등성, receipt만 책임진다.
@@ -69,6 +69,7 @@
 - lease takeover마다 receipt의 fencing token을 증가시키며 renew·release·stored/rejected finalizer는 현재 owner와 token이 일치할 때만 허용한다.
 - reservation 처리 deadline, raw/manifest lifecycle expiry와 receipt purge 시점을 분리해 cleanup 근거가 artifact보다 먼저 사라지지 않게 한다. parent receipt 삭제 전 bounded purge job이 nested recovery attempt와 linked cleanup target·integrity finding을 먼저 제거하고, 마지막 transaction만 두 uniqueness index와 receipt를 함께 삭제한다.
 - Cleanup lease를 Storage 권한으로 쓰지 않는다. Cleanup 전용 read grant가 exact receipt·started attempt·fence를 확인하고 classifier의 request와 mutable result 전체를 seal한 뒤, 별도 target-create grant가 exact generation dry-run target 하나만 만들 수 있다.
+- Absence audit은 destructive grant와 다른 exact-path inventory-only grant를 사용한다. Paired GCS auditor만 private Ed25519 key를 소유해 request·concrete grant·artifact·관측시각에 결합된 evidence를 만들고 Firestore store는 public verifier와 fresh current transaction으로 raw·manifest audit phase만 저장한다.
 
 ### Domain Command API
 
