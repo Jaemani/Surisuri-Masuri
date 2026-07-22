@@ -123,13 +123,16 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 
 2026-07-22 bounded candidate query·fixed-cutoff checkpoint·claim outer loop의 local/Emulator gate는 [EVD-20260722-029](../evidence/2026-07.md#evd-20260722-029--bounded-forward-recovery-worker와-cross-run-checkpoint)에 기록한다. 이는 executable startup·scheduler·production index/IAM을 연결한 운영 검증이 아니다.
 
-2026-07-22 cleanup transition의 expired forward attempt 원자 종료와 missing-attempt rollback은 [EVD-20260722-030](../evidence/2026-07.md#evd-20260722-030--cleanup-transition의-expired-forward-attempt-원자-종료)에서 local/Emulator로 검증했다. 이는 cleanup owner claim, target·delete·`expired` 완료 또는 purge 증거가 아니다.
+2026-07-22 cleanup transition의 expired forward attempt 원자 종료와 missing-attempt rollback은 [EVD-20260722-030](../evidence/2026-07.md#evd-20260722-030--cleanup-transition의-expired-forward-attempt-원자-종료)에서 local/Emulator로 검증했다.
 
-- [ ] fake clock으로 lease exact-expiry boundary 재현
-- [ ] 두 request/sweeper의 concurrent claim winner 1명
+같은 날 [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md)에 따라 transition time·quiescence·mode·origin·policy를 immutable하게 기록하고, `11분 > 최대 lease 5분 + StoreBatch 전체 5분` 뒤 cleanup-only owner가 claim하도록 구현했다. First claim과 expired takeover는 exact `started` attempt를 transaction으로 만들고 forward mutation port를 거부한다. Local/Emulator/pinned testbench 근거는 [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim)이다. 이 claim은 target·artifact read/delete·`expired`·purge 권한이 아니며 runtime에 연결하지 않는다.
+
+- [x] fake clock으로 lease exact-expiry boundary 재현
+- [x] 두 request/sweeper/cleanup의 concurrent claim winner 1명
 - [ ] recovery claim 대 `BeginCleanupTransition` 경계 경쟁에서 cleanup/recovery 중 허용된 winner만 1명
 - [x] expired forward `started` attempt와 reserved cleanup transition이 같은 transaction에서 terminal+pending으로 commit되고 missing·malformed attempt는 write 0
-- [ ] takeover 뒤 stale renew/release/stored/rejected update 0
+- [x] cleanup takeover 뒤 stale forward renew/release/stored/rejected update 0
+- [x] quiet boundary·immutable policy 뒤 cleanup first claim과 expired takeover가 attempt ledger와 함께 한 winner로 수렴
 - [ ] raw-only → same raw generation manifest → stored
 - [ ] no-artifact → Storage write 0
 - [ ] forward/pre-expiry manifest-only·stored-missing → create/delete/finalize 0

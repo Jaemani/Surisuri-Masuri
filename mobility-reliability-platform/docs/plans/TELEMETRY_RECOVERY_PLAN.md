@@ -293,8 +293,8 @@ expired lease를 takeover한 request와 sweeper/cleanup claim은 claim transacti
 forward sweeper와 별도 mode로 구현한다.
 
 1. `BeginCleanupTransition` transaction이 `reserved`, deadline 경과, active lease 없음과 3-way linkage를 확인한다. 만료 forward lease에 recovery attempt count가 있으면 exact nested attempt owner·token·version·started time을 함께 읽고, `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token·revision +1, `cleanup_pending`, `cleanup_mode=reservation_expiry`, `cleanup_origin_status=reserved`를 기록한다. Missing·malformed·completed prior attempt는 receipt write도 0으로 fail-closed한다. Cleanup effective time은 application·receipt·attempt snapshot 전체의 최솟값이며 전체 clock 폭이 허용 skew를 넘으면 거부한다. 일반 forward finalizer는 이 전환을 수행할 수 없다. 상세 결정과 local/Emulator 근거는 [ADR-0022](../decisions/ADR-0022-atomic-cleanup-transition-attempt-closure.md), [EVD-20260722-030](../evidence/2026-07.md#evd-20260722-030--cleanup-transition의-expired-forward-attempt-원자-종료)을 따른다.
-2. `cleanup_quiescence_until = max(last lease expiry, transition time) + late-write grace`를 고정한다. grace는 최대 lease+Storage operation timeout보다 길다.
-3. quiet period 뒤 owner kind `cleanup`으로 별도 lease를 claim한다.
+2. `cleanup_quiescence_until = max(last lease expiry, transition time) + late-write grace`를 고정한다. 현재 policy v1은 `11분 > 최대 lease 5분 + raw·manifest 전체 StoreBatch 5분`을 strict하게 만족하며 transition time·quiescence·mode·origin·policy version을 claim이 다시 쓰지 못한다.
+3. quiet period 뒤 owner kind `cleanup`, worker version `telemetry-cleanup.v1`로 별도 lease를 claim한다. First claim과 expired takeover는 token·revision·attempt count를 1 증가시키고 `started` cleanup attempt를 같은 transaction에 만든다. Forward mutation port는 cleanup owner를 거부하고 `next_recovery_at`은 제거한다. 상세 결정과 local/Emulator/testbench 근거는 [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md), [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim)을 따른다.
 4. version-aware classifier로 artifact를 찾는다.
 5. 삭제 전 immutable target document에 path·generation·hash·삭제 순서를 기록한다.
 6. raw exact generation을 먼저 조건부 삭제한다.
@@ -308,6 +308,8 @@ forward sweeper와 별도 mode로 구현한다.
 14. purge job에는 위치·UID·object path 없이 hash·count·완료시각만 남기고 자체 retention 뒤 제거한다.
 
 이번 구현에서 actual delete까지 진행할지는 staging retention/IAM 결정 뒤 확정한다. 그 전에는 dry-run target 생성과 read-only 검증까지만 허용한다.
+
+2026-07-22 현재 1~3단계 중 reserved-origin transition, exact forward-attempt closure와 cleanup-only claim/takeover까지만 local component로 구현했다. 4단계 이후 classifier binding, immutable target, delete·completion·purge와 scheduler/startup은 미구현이며 claim 자체를 artifact 권한으로 해석하지 않는다.
 
 ### R9. Staging과 운영 gate
 

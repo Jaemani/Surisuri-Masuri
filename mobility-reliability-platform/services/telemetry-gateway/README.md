@@ -17,6 +17,8 @@
 - current fence를 요구하는 `MarkStored`·`MarkRejected`와 safe lease release
 - request lease 갱신, sweeper 전용 recovery claim, recovery attempt `started` 원장과 reserved-origin cleanup transition
 - deadline cleanup에서 exact expired forward attempt를 같은 transaction으로 `failed/lease_expired` 종료하고 missing·malformed linkage를 write-zero로 거부하는 원장 경계
+- immutable transition time·policy와 `11m > max lease 5m + complete StoreBatch 5m` quiet-period, cleanup-only fenced lease·attempt claim과 expired takeover
+- caller deadline을 포함해 전체 raw+manifest `StoreBatch`를 최대 5분으로 제한하고 cancellation 뒤 추가 GCS create·trusted late-success를 차단하는 artifact mutation 경계
 - replay authorization의 receipt read-time coherence와 deadline·clock skew·revision overflow fail-closed 검사
 - forward recovery와 accepted integrity audit를 분리하는 provider-neutral artifact classification 계약과 opaque read grant
 - duplicate key·unknown field·invalid UTF-8·64KiB 초과 입력을 거부하는 strict telemetry manifest decoder
@@ -41,11 +43,12 @@
 - generation-pinned classifier orchestration, manifest/raw cross-lineage 검증과 raw codec·validator registry
 - classifier 결과를 소비하는 bounded single-receipt reconciler와 attempt completion/failure
 - tenant-scoped due query, deterministic pagination, fixed-cutoff advisory checkpoint와 transactional claim을 합성한 bounded outer worker component
+- cleanup first claim·expired takeover transaction adapter와 concurrent winner·rollback 회귀 검증
 
 아직 구현하지 않은 production 운영 경계:
 
 - scheduler·startup composition과 실제 metrics exporter를 포함한 bounded sweeper runtime
-- cleanup lease·target, generation-pinned delete, nested ledger purge와 accepted deletion auditor
+- cleanup immutable target, generation-pinned delete, cleanup renewal·completion, nested ledger purge와 accepted deletion auditor
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 
 verifier, authorization/admission transaction, artifact store, artifact inventory reader와 recovery control plane이 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. Firestore transaction과 bounded candidate/checkpoint component는 local Emulator에서, Storage generation/replay는 official testbench에서 검증했지만 ADC/IAM·staging lifecycle·production composite index 증거는 아닙니다. Candidate와 advisory checkpoint는 artifact 권한이 아니며 fresh transaction claim의 검증된 `Acquired`만 single-receipt reconciler 진입을 허용합니다. `status`·`next_recovery_at` 누락 receipt는 due query에 보이지 않아 별도 control-integrity audit가 필요합니다. Scheduler/startup과 metrics exporter를 연결하기 전에는 worker를 활성화하지 않습니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
