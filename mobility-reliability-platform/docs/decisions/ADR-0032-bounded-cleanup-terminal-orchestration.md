@@ -1,7 +1,7 @@
 ---
 id: ADR-0032
 title: Bounded cleanup terminal orchestration
-status: proposed
+status: accepted
 decided_at: 2026-07-23
 owners:
   - project owner
@@ -212,7 +212,7 @@ Raw·manifest path, receipt document path, UID, device·trip·person ID, telemet
 - `PhaseExecutor`의 exact durable intent 생성
 - Exact inventory-incomplete sentinel과 bounded mapper
 - Terminal outcome resolver와 `TerminalOrchestrator`
-- Unit/race test와 Firestore Emulator vertical slice
+- Orchestrator unit/race test와 terminal-store Firestore Emulator 경쟁 검증. Concrete `TerminalOrchestrator.Run`의 Firestore/GCS end-to-end vertical slice는 후속 gate
 - Success 4문서 transaction, retry·hold 2문서 transaction과 immutable target/index write 0 확인
 - Finalizer와 disposition 경쟁에서 single valid lineage 확인
 
@@ -233,7 +233,7 @@ Scheduler, startup, readiness, metrics exporter, operator hold release, accepted
 - 선행 결정: [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md), [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md), [ADR-0031](./ADR-0031-phase-preserving-cleanup-retry-hold-disposition.md)
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
-- 구현 증거: 구현 후 별도 EVD로 연결
-- 제품 업데이트: 구현 후 별도 UPD로 연결
-- 사람 대상 리포트: 구현 후 별도 HR로 연결
+- 구현 증거: [EVD-20260723-040](../evidence/2026-07.md#evd-20260723-040--bounded-cleanup-terminal-orchestration)
+- 제품 업데이트: [UPD-20260723-06](../product-updates/UPD-20260723-06-cleanup-terminal-orchestration.md)
+- 사람 대상 리포트: [HR-20260723-31](../reports/human/HR-20260723-31-cleanup-terminal-orchestration.md)
 - 인시던트: 해당 없음 — 설계 변경이며 production·staging·field 영향 없음

@@ -101,3 +101,4 @@
 | [HR-20260722-28](./HR-20260722-28-durable-cleanup-phase-execution.md) | durable artifact-phase cleanup execution | `draft` |
 | [HR-20260722-29](./HR-20260722-29-atomic-cleanup-expiry-finalization.md) | atomic cleanup expiry finalization | `draft` |
 | [HR-20260723-30](./HR-20260723-30-cleanup-retry-hold-disposition.md) | phase-preserving cleanup retry·hold disposition | `draft` |
+| [HR-20260723-31](./HR-20260723-31-cleanup-terminal-orchestration.md) | bounded cleanup terminal orchestration | `draft` |

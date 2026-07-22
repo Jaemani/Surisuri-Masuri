@@ -64,11 +64,14 @@
 - 10개 bounded cleanup error class의 exhaustive retry·hold policy와 durable `unknown` error-class persistence
 - 실제 마지막 phase/revision을 보존한 `completed/cleanup_retry|cleanup_hold`, attempt+receipt 2문서 atomic commit과 immutable target·두 uniqueness index write 0
 - cleanup 전용 receipt cursor, old fence expiry를 포함한 exact-boundary retry claim·pristine attempt, hold auto-claim 0과 commit-response-loss read-only correlation
+- package-private sealed terminal intent만 success finalization 또는 retry·hold disposition으로 합성하고 두 mutation의 호출 합계를 invocation당 최대 1회로 제한하는 `TerminalOrchestrator`
+- durable `unknown` stored class 복원, outcome/audit persistence ambiguity·generic/internal/복수-class error의 terminal mutation 0과 incomplete inventory 전용 bounded sentinel
+- terminal commit 응답 유실 뒤 mutation 재호출 없이 parent cancellation과 분리한 최대 5초 read-only correlation, direct/correlated lineage 재검증과 민감 control object를 제외한 bounded terminal result
 
 아직 구현하지 않은 production 운영 경계:
 
 - scheduler·startup composition과 실제 metrics exporter를 포함한 bounded sweeper runtime
-- [ADR-0031](../../docs/decisions/ADR-0031-phase-preserving-cleanup-retry-hold-disposition.md)까지 local adapter로 구현했지만 phase executor의 typed-error→disposition/terminal call wiring, operator hold release와 nested ledger purge는 미구현
+- [ADR-0032](../../docs/decisions/ADR-0032-bounded-cleanup-terminal-orchestration.md)까지 local component로 구현했지만 operator hold release와 nested ledger purge는 미구현
 - accepted deletion auditor, held/rejected cleanup과 auditor key rotation·cross-process lifecycle. Immutable target은 execution state로 갱신하지 않고 target 생성 뒤 renewal도 허용하지 않음
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 
