@@ -97,3 +97,4 @@
 | [HR-20260722-24](./HR-20260722-24-generation-pinned-cleanup-delete.md) | generation-pinned cleanup delete와 complete-empty audit | `draft` |
 | [HR-20260722-25](./HR-20260722-25-cleanup-execution-ledger.md) | fenced cleanup execution ledger와 Firestore progress persistence | `draft` |
 | [HR-20260722-26](./HR-20260722-26-signed-cleanup-absence-audit.md) | signed read-only cleanup absence audit boundary | `draft` |
+| [HR-20260722-27](./HR-20260722-27-progress-aware-cleanup-takeover.md) | progress-aware expired cleanup takeover | `draft` |

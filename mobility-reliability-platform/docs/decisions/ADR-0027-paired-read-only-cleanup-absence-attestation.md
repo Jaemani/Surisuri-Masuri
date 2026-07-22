@@ -115,10 +115,9 @@ Persistence는 먼저 paired verifier로 evidence를 확인하고 grant가 evide
 
 ### 6. 실행·운영 활성화는 계속 닫아 둔다
 
-이 증분은 raw 또는 manifest 한 단계의 read-only audit와 persistence component만 제공한다. 다음은 계속 미연결·미구현이다.
+이 R8e 증분은 raw 또는 manifest 한 단계의 read-only audit와 persistence component만 제공한다. 당시 후속 범위였던 progress-bearing expired cleanup takeover는 [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md)에서 local transaction component로 구현했지만 runtime에는 연결하지 않았다. 다음은 계속 미연결·미구현이다.
 
 - Delete dispatch/outcome과 absence audit을 순서대로 호출하는 phase executor
-- Progress-bearing expired cleanup takeover
 - Retry·hold disposition persistence
 - Attempt `completed`, receipt `expired`와 세 control document의 `purge_eligible_at`을 묶는 terminal finalizer
 - Commit response-loss `committed|not_committed|unverifiable` correlation
