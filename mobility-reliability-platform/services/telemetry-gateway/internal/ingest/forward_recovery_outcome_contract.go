@@ -27,6 +27,7 @@ type ForwardRecoveryOutcomeQuery struct {
 	TenantID                string
 	ReservationKey          string
 	AttemptID               string
+	ExpectedDecisionDomain  ForwardRecoveryDecisionDomain
 	ExpectedFence           LeaseFence
 	ExpectedActionHash      string
 	ExpectedReceiptRevision int64
@@ -59,37 +60,39 @@ type RecoveryActionOutcome struct {
 }
 
 type CurrentForwardRecoveryOutcomeAttempt struct {
-	AttemptID              string
-	TenantID               string
-	ReceiptID              string
-	OwnerKind              LeaseOwnerKind
-	FencingToken           int64
-	WorkerVersion          string
-	Status                 RecoveryAttemptStatus
-	Phase                  RecoveryActionPhase
-	Classification         ArtifactClassification
-	ReasonCode             ArtifactReasonCode
-	Action                 ForwardRecoveryAction
-	Outcome                RecoveryAttemptOutcome
-	ActionHash             string
-	HoldCode               RecoveryHoldCode
-	ReleaseCode            LeaseReleaseCode
-	RejectionCode          string
-	RawSHA256              string
-	RawCRC32C              uint32
-	RawSize                int64
-	RawGeneration          int64
-	RawMetageneration      int64
-	ManifestSHA256         string
-	ManifestCRC32C         uint32
-	ManifestSize           int64
-	ManifestGeneration     int64
-	ManifestMetageneration int64
-	HoldReviewDueAt        time.Time
-	StartedAt              time.Time
-	CompletedAt            time.Time
-	FailureCode            RecoveryAttemptFailureCode
-	FailedAt               time.Time
+	AttemptID                string
+	TenantID                 string
+	ReceiptID                string
+	OwnerKind                LeaseOwnerKind
+	FencingToken             int64
+	WorkerVersion            string
+	Status                   RecoveryAttemptStatus
+	DecisionDomain           ForwardRecoveryDecisionDomain
+	AuthorizationDisposition ForwardRecoveryAuthorizationDisposition
+	Phase                    RecoveryActionPhase
+	Classification           ArtifactClassification
+	ReasonCode               ArtifactReasonCode
+	Action                   ForwardRecoveryAction
+	Outcome                  RecoveryAttemptOutcome
+	ActionHash               string
+	HoldCode                 RecoveryHoldCode
+	ReleaseCode              LeaseReleaseCode
+	RejectionCode            string
+	RawSHA256                string
+	RawCRC32C                uint32
+	RawSize                  int64
+	RawGeneration            int64
+	RawMetageneration        int64
+	ManifestSHA256           string
+	ManifestCRC32C           uint32
+	ManifestSize             int64
+	ManifestGeneration       int64
+	ManifestMetageneration   int64
+	HoldReviewDueAt          time.Time
+	StartedAt                time.Time
+	CompletedAt              time.Time
+	FailureCode              RecoveryAttemptFailureCode
+	FailedAt                 time.Time
 }
 
 // CurrentForwardRecoveryOutcomeReceipt is the minimum receipt projection
@@ -180,6 +183,27 @@ func ForwardRecoveryOutcomeQueryForAction(
 	query := ForwardRecoveryOutcomeQuery{
 		TenantID: command.TenantID, ReservationKey: command.ReservationKey,
 		AttemptID: command.Attempt.ID, ExpectedFence: command.Fence,
+		ExpectedDecisionDomain:  ForwardRecoveryDecisionArtifactReconciliation,
+		ExpectedActionHash:      actionHash,
+		ExpectedReceiptRevision: command.ReceiptRevision + 1,
+	}
+	if validateForwardRecoveryOutcomeQuery(query) != nil {
+		return ForwardRecoveryOutcomeQuery{}, ErrInvalidForwardRecoveryOutcomeAuthorization
+	}
+	return query, nil
+}
+
+func ForwardRecoveryOutcomeQueryForDisposition(
+	command ForwardRecoveryDispositionCommand,
+) (ForwardRecoveryOutcomeQuery, error) {
+	actionHash, err := ForwardRecoveryDispositionHash(command)
+	if err != nil || command.ReceiptRevision == int64(^uint64(0)>>1) {
+		return ForwardRecoveryOutcomeQuery{}, ErrInvalidForwardRecoveryOutcomeAuthorization
+	}
+	query := ForwardRecoveryOutcomeQuery{
+		TenantID: command.TenantID, ReservationKey: command.ReservationKey,
+		AttemptID: command.Attempt.ID, ExpectedFence: command.Fence,
+		ExpectedDecisionDomain:  ForwardRecoveryDecisionCurrentAuthorization,
 		ExpectedActionHash:      actionHash,
 		ExpectedReceiptRevision: command.ReceiptRevision + 1,
 	}
@@ -292,6 +316,7 @@ func EvaluateForwardRecoveryActionOutcome(
 func validateForwardRecoveryOutcomeQuery(query ForwardRecoveryOutcomeQuery) error {
 	if !telemetry.IsUUID(query.TenantID) || !isLowerHexDigest(query.ReservationKey) ||
 		!telemetry.IsUUID(query.AttemptID) || !isLowerHexDigest(query.ExpectedActionHash) ||
+		!validForwardRecoveryDecisionDomain(query.ExpectedDecisionDomain) ||
 		ValidateLeaseFence(query.ExpectedFence) != nil ||
 		query.AttemptID != query.ExpectedFence.OwnerID || query.ExpectedReceiptRevision <= 1 {
 		return ErrInvalidForwardRecoveryOutcomeAuthorization
@@ -333,6 +358,7 @@ func validateCurrentForwardRecoveryOutcomeShape(
 	case RecoveryAttemptFailed:
 		if !ValidRecoveryAttemptFailureCode(attempt.FailureCode) || attempt.FailedAt.IsZero() ||
 			!attempt.FailedAt.After(attempt.StartedAt) || attempt.FailedAt.After(observedAt) ||
+			attempt.DecisionDomain != "" || attempt.AuthorizationDisposition != "" ||
 			attempt.Phase != "" || attempt.Classification != "" || attempt.ReasonCode != "" ||
 			attempt.Action != "" || attempt.Outcome != "" || attempt.ActionHash != "" ||
 			attempt.HoldCode != "" || attempt.ReleaseCode != "" || attempt.RejectionCode != "" ||
@@ -344,7 +370,8 @@ func validateCurrentForwardRecoveryOutcomeShape(
 			return ErrForwardRecoveryOutcomeUnavailable
 		}
 	case RecoveryAttemptCompleted:
-		if !validCompletedOutcomeAttempt(attempt) || attempt.FailureCode != "" ||
+		if attempt.DecisionDomain != query.ExpectedDecisionDomain ||
+			!validCompletedOutcomeAttempt(attempt) || attempt.FailureCode != "" ||
 			!attempt.FailedAt.IsZero() || attempt.CompletedAt.After(observedAt) ||
 			!attempt.CompletedAt.Before(receipt.ReservationDeadline) ||
 			!attempt.CompletedAt.Before(query.ExpectedFence.ExpiresAt) {
@@ -357,7 +384,8 @@ func validateCurrentForwardRecoveryOutcomeShape(
 }
 
 func emptyOutcomeAttemptTerminalFields(attempt CurrentForwardRecoveryOutcomeAttempt) bool {
-	return attempt.Phase == "" && attempt.Classification == "" && attempt.ReasonCode == "" &&
+	return attempt.DecisionDomain == "" && attempt.AuthorizationDisposition == "" &&
+		attempt.Phase == "" && attempt.Classification == "" && attempt.ReasonCode == "" &&
 		attempt.Action == "" && attempt.Outcome == "" && attempt.ActionHash == "" &&
 		attempt.HoldCode == "" && attempt.ReleaseCode == "" && attempt.RejectionCode == "" &&
 		emptyOutcomeAttemptLineage(attempt) && attempt.HoldReviewDueAt.IsZero() && attempt.CompletedAt.IsZero() &&
@@ -406,9 +434,15 @@ func validFailedOutcomeAttemptTime(
 func validCompletedOutcomeAttempt(attempt CurrentForwardRecoveryOutcomeAttempt) bool {
 	if !isLowerHexDigest(attempt.ActionHash) || attempt.CompletedAt.IsZero() ||
 		!attempt.CompletedAt.After(attempt.StartedAt) ||
-		!validRecoveryActionPhase(attempt.Phase) ||
-		!validArtifactClassificationOutcome(ArtifactReadForwardRecovery, attempt.Classification, attempt.ReasonCode) ||
-		!ValidRecoveryAttemptOutcome(attempt.Outcome) {
+		!ValidRecoveryAttemptOutcome(attempt.Outcome) ||
+		!validForwardRecoveryDecisionDomain(attempt.DecisionDomain) {
+		return false
+	}
+	if attempt.DecisionDomain == ForwardRecoveryDecisionCurrentAuthorization {
+		return validCompletedAuthorizationDispositionOutcome(attempt)
+	}
+	if attempt.AuthorizationDisposition != "" || !validRecoveryActionPhase(attempt.Phase) ||
+		!validArtifactClassificationOutcome(ArtifactReadForwardRecovery, attempt.Classification, attempt.ReasonCode) {
 		return false
 	}
 	switch attempt.Action {
@@ -447,6 +481,30 @@ func validCompletedOutcomeAttempt(attempt CurrentForwardRecoveryOutcomeAttempt) 
 			validOutcomeReleaseMapping(attempt) && emptyOutcomeAttemptLineage(attempt) &&
 			attempt.HoldCode == "" &&
 			attempt.RejectionCode == "" && attempt.HoldReviewDueAt.IsZero()
+	default:
+		return false
+	}
+}
+
+func validCompletedAuthorizationDispositionOutcome(
+	attempt CurrentForwardRecoveryOutcomeAttempt,
+) bool {
+	if attempt.Phase != "" || attempt.Classification != "" || attempt.ReasonCode != "" ||
+		!emptyOutcomeAttemptLineage(attempt) || attempt.RejectionCode != "" {
+		return false
+	}
+	switch attempt.AuthorizationDisposition {
+	case ForwardRecoveryAuthorizationDenied:
+		return attempt.Action == ForwardRecoveryActionMarkHold &&
+			attempt.Outcome == RecoveryAttemptOutcomeHold &&
+			attempt.HoldCode == RecoveryHoldCurrentAuthorizationDenied &&
+			attempt.ReleaseCode == "" && !attempt.HoldReviewDueAt.IsZero() &&
+			attempt.CompletedAt.Before(attempt.HoldReviewDueAt)
+	case ForwardRecoveryAuthorizationUnavailable:
+		return attempt.Action == ForwardRecoveryActionReleaseLease &&
+			attempt.Outcome == RecoveryAttemptOutcomeLeaseReleased &&
+			attempt.ReleaseCode == LeaseReleaseAuthorizationUnavailable &&
+			attempt.HoldCode == "" && attempt.HoldReviewDueAt.IsZero()
 	default:
 		return false
 	}
@@ -569,7 +627,7 @@ func completedOutcomeMatchesReceipt(
 	case RecoveryAttemptOutcomeHold:
 		return receipt.State == ReceiptRecoveryHold && receipt.RecoveryHoldCode == attempt.HoldCode &&
 			receipt.RecoveryHoldReviewDueAt.Equal(attempt.HoldReviewDueAt) &&
-			!receipt.RecoveryHoldReviewDueAt.After(receipt.ArtifactExpiresAt) &&
+			receipt.RecoveryHoldReviewDueAt.Before(receipt.ArtifactExpiresAt) &&
 			outcomeReceiptHasNoArtifactLineage(receipt) && receipt.SampleCount == 0 &&
 			receipt.RejectionCode == "" && receipt.NextRecoveryAt.IsZero() &&
 			receipt.LastRecoveryCode == "" && outcomeReceiptHasNoLease(receipt)
@@ -625,6 +683,7 @@ func canonicalForwardRecoveryOutcomeQueryBinding(
 	encoder.addString(query.TenantID)
 	encoder.addString(query.ReservationKey)
 	encoder.addString(query.AttemptID)
+	encoder.addString(string(query.ExpectedDecisionDomain))
 	encoder.addLeaseFence(&query.ExpectedFence)
 	encoder.addString(query.ExpectedActionHash)
 	encoder.addInt64(query.ExpectedReceiptRevision)

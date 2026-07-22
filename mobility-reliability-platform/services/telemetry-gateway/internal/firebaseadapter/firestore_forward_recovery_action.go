@@ -290,6 +290,7 @@ func validateStartedRecoveryAttemptForOwner(
 		attempt.WorkerVersion != expected.WorkerVersion ||
 		attempt.Status != ingest.RecoveryAttemptStarted || attempt.StartedAt.IsZero() ||
 		!attempt.StartedAt.Equal(receipt.LeaseAcquiredAt) ||
+		attempt.DecisionDomain != "" || attempt.AuthorizationDisposition != "" ||
 		attempt.Phase != "" || attempt.Classification != "" || attempt.ReasonCode != "" ||
 		attempt.Action != "" || attempt.Outcome != "" || attempt.ActionHash != "" ||
 		attempt.HoldCode != "" || attempt.ReleaseCode != "" || attempt.RejectionCode != "" ||
@@ -467,6 +468,7 @@ func forwardRecoveryAttemptCompletionUpdates(
 	}
 	updates := []firestore.Update{
 		{Path: "status", Value: string(ingest.RecoveryAttemptCompleted)},
+		{Path: "decision_domain", Value: string(ingest.ForwardRecoveryDecisionArtifactReconciliation)},
 		{Path: "phase", Value: string(command.Plan.Phase)},
 		{Path: "classification", Value: string(command.Plan.Classification)},
 		{Path: "reason_code", Value: string(command.Plan.ReasonCode)},

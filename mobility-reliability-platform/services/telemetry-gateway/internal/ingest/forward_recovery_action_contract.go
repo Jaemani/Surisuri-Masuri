@@ -114,10 +114,13 @@ func (a *SystemRecoveryAuthorizer) AuthorizeForwardRecoveryAction(
 		Plan:            cloneForwardRecoveryActionPlan(plan),
 	}
 	if plan.Action == ForwardRecoveryActionMarkHold {
-		command.HoldReviewDueAt = earlierRecoveryTime(
-			readGrant.checkedAt.Add(DefaultRecoveryHoldReviewWindow),
-			request.ArtifactExpiresAt,
+		command.HoldReviewDueAt, err = boundedRecoveryHoldReviewDueAt(
+			readGrant.checkedAt, request.ArtifactExpiresAt,
 		)
+		if err != nil {
+			return ForwardRecoveryActionCommand{}, ForwardRecoveryActionGrant{},
+				ErrInvalidForwardRecoveryActionAuthorization
+		}
 	}
 	grant, err := mintForwardRecoveryActionGrant(
 		command,
@@ -230,10 +233,27 @@ func ValidateCurrentForwardRecoveryAction(
 	}
 	if command.Plan.Action == ForwardRecoveryActionMarkHold &&
 		(!checkedAt.Before(command.HoldReviewDueAt) ||
-			command.HoldReviewDueAt.After(snapshot.Receipt.ArtifactExpiresAt)) {
+			!command.HoldReviewDueAt.Before(snapshot.Receipt.ArtifactExpiresAt)) {
 		return ErrInvalidForwardRecoveryActionAuthorization
 	}
 	return nil
+}
+
+func boundedRecoveryHoldReviewDueAt(
+	checkedAt time.Time,
+	artifactExpiresAt time.Time,
+) (time.Time, error) {
+	if checkedAt.IsZero() || artifactExpiresAt.IsZero() || !checkedAt.Before(artifactExpiresAt) {
+		return time.Time{}, ErrInvalidForwardRecoveryActionAuthorization
+	}
+	dueAt := checkedAt.Add(DefaultRecoveryHoldReviewWindow)
+	if !dueAt.Before(artifactExpiresAt) {
+		dueAt = artifactExpiresAt.Add(-time.Nanosecond)
+	}
+	if !checkedAt.Before(dueAt) {
+		return time.Time{}, ErrInvalidForwardRecoveryActionAuthorization
+	}
+	return dueAt.UTC(), nil
 }
 
 func validateCurrentForwardRecoveryAttempt(
@@ -325,12 +345,16 @@ func validateForwardRecoveryActionCommand(command ForwardRecoveryActionCommand) 
 			return ErrInvalidForwardRecoveryActionAuthorization
 		}
 	case ForwardRecoveryActionMarkHold:
-		if !ValidRecoveryHoldCode(plan.HoldCode) || plan.Raw != nil || plan.Manifest != nil ||
+		if !ValidRecoveryHoldCode(plan.HoldCode) ||
+			plan.HoldCode == RecoveryHoldCurrentAuthorizationDenied ||
+			plan.Raw != nil || plan.Manifest != nil ||
 			plan.ReleaseCode != "" || plan.RejectionCode != "" || command.HoldReviewDueAt.IsZero() {
 			return ErrInvalidForwardRecoveryActionAuthorization
 		}
 	case ForwardRecoveryActionReleaseLease:
-		if !ValidLeaseReleaseCode(plan.ReleaseCode) || plan.Raw != nil || plan.Manifest != nil ||
+		if !ValidLeaseReleaseCode(plan.ReleaseCode) ||
+			plan.ReleaseCode == LeaseReleaseAuthorizationUnavailable ||
+			plan.Raw != nil || plan.Manifest != nil ||
 			plan.HoldCode != "" || plan.RejectionCode != "" || !command.HoldReviewDueAt.IsZero() {
 			return ErrInvalidForwardRecoveryActionAuthorization
 		}

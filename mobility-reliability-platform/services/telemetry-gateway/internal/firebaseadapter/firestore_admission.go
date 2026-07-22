@@ -1215,37 +1215,39 @@ type firestoreIngestReceipt struct {
 }
 
 type firestoreRecoveryAttempt struct {
-	AttemptID              string                            `firestore:"attempt_id"`
-	TenantID               string                            `firestore:"tenant_id"`
-	ReceiptID              string                            `firestore:"receipt_id"`
-	OwnerKind              ingest.LeaseOwnerKind             `firestore:"owner_kind"`
-	FencingToken           int64                             `firestore:"fencing_token"`
-	WorkerVersion          string                            `firestore:"worker_version"`
-	Status                 ingest.RecoveryAttemptStatus      `firestore:"status"`
-	Phase                  ingest.RecoveryActionPhase        `firestore:"phase,omitempty"`
-	Classification         ingest.ArtifactClassification     `firestore:"classification,omitempty"`
-	ReasonCode             ingest.ArtifactReasonCode         `firestore:"reason_code,omitempty"`
-	Action                 ingest.ForwardRecoveryAction      `firestore:"action,omitempty"`
-	Outcome                ingest.RecoveryAttemptOutcome     `firestore:"outcome,omitempty"`
-	ActionHash             string                            `firestore:"action_hash,omitempty"`
-	HoldCode               ingest.RecoveryHoldCode           `firestore:"hold_code,omitempty"`
-	ReleaseCode            ingest.LeaseReleaseCode           `firestore:"release_code,omitempty"`
-	RejectionCode          string                            `firestore:"rejection_code,omitempty"`
-	RawSHA256              string                            `firestore:"raw_sha256,omitempty"`
-	RawCRC32C              int64                             `firestore:"raw_crc32c,omitempty"`
-	RawSize                int64                             `firestore:"raw_size,omitempty"`
-	RawGeneration          int64                             `firestore:"raw_generation,omitempty"`
-	RawMetageneration      int64                             `firestore:"raw_metageneration,omitempty"`
-	ManifestSHA256         string                            `firestore:"manifest_sha256,omitempty"`
-	ManifestCRC32C         int64                             `firestore:"manifest_crc32c,omitempty"`
-	ManifestSize           int64                             `firestore:"manifest_size,omitempty"`
-	ManifestGeneration     int64                             `firestore:"manifest_generation,omitempty"`
-	ManifestMetageneration int64                             `firestore:"manifest_metageneration,omitempty"`
-	HoldReviewDueAt        time.Time                         `firestore:"hold_review_due_at,omitempty"`
-	StartedAt              time.Time                         `firestore:"started_at"`
-	CompletedAt            time.Time                         `firestore:"completed_at,omitempty"`
-	FailureCode            ingest.RecoveryAttemptFailureCode `firestore:"failure_code,omitempty"`
-	FailedAt               time.Time                         `firestore:"failed_at,omitempty"`
+	AttemptID                string                                         `firestore:"attempt_id"`
+	TenantID                 string                                         `firestore:"tenant_id"`
+	ReceiptID                string                                         `firestore:"receipt_id"`
+	OwnerKind                ingest.LeaseOwnerKind                          `firestore:"owner_kind"`
+	FencingToken             int64                                          `firestore:"fencing_token"`
+	WorkerVersion            string                                         `firestore:"worker_version"`
+	Status                   ingest.RecoveryAttemptStatus                   `firestore:"status"`
+	DecisionDomain           ingest.ForwardRecoveryDecisionDomain           `firestore:"decision_domain,omitempty"`
+	AuthorizationDisposition ingest.ForwardRecoveryAuthorizationDisposition `firestore:"authorization_disposition,omitempty"`
+	Phase                    ingest.RecoveryActionPhase                     `firestore:"phase,omitempty"`
+	Classification           ingest.ArtifactClassification                  `firestore:"classification,omitempty"`
+	ReasonCode               ingest.ArtifactReasonCode                      `firestore:"reason_code,omitempty"`
+	Action                   ingest.ForwardRecoveryAction                   `firestore:"action,omitempty"`
+	Outcome                  ingest.RecoveryAttemptOutcome                  `firestore:"outcome,omitempty"`
+	ActionHash               string                                         `firestore:"action_hash,omitempty"`
+	HoldCode                 ingest.RecoveryHoldCode                        `firestore:"hold_code,omitempty"`
+	ReleaseCode              ingest.LeaseReleaseCode                        `firestore:"release_code,omitempty"`
+	RejectionCode            string                                         `firestore:"rejection_code,omitempty"`
+	RawSHA256                string                                         `firestore:"raw_sha256,omitempty"`
+	RawCRC32C                int64                                          `firestore:"raw_crc32c,omitempty"`
+	RawSize                  int64                                          `firestore:"raw_size,omitempty"`
+	RawGeneration            int64                                          `firestore:"raw_generation,omitempty"`
+	RawMetageneration        int64                                          `firestore:"raw_metageneration,omitempty"`
+	ManifestSHA256           string                                         `firestore:"manifest_sha256,omitempty"`
+	ManifestCRC32C           int64                                          `firestore:"manifest_crc32c,omitempty"`
+	ManifestSize             int64                                          `firestore:"manifest_size,omitempty"`
+	ManifestGeneration       int64                                          `firestore:"manifest_generation,omitempty"`
+	ManifestMetageneration   int64                                          `firestore:"manifest_metageneration,omitempty"`
+	HoldReviewDueAt          time.Time                                      `firestore:"hold_review_due_at,omitempty"`
+	StartedAt                time.Time                                      `firestore:"started_at"`
+	CompletedAt              time.Time                                      `firestore:"completed_at,omitempty"`
+	FailureCode              ingest.RecoveryAttemptFailureCode              `firestore:"failure_code,omitempty"`
+	FailedAt                 time.Time                                      `firestore:"failed_at,omitempty"`
 }
 
 func newFirestoreRecoveryAttempt(
@@ -1723,7 +1725,7 @@ func validateRecoveryHold(receipt firestoreIngestReceipt) error {
 	if !ingest.ValidRecoveryHoldCode(receipt.RecoveryHoldCode) ||
 		receipt.RecoveryHoldReviewDueAt.IsZero() ||
 		!receipt.UpdatedAt.Before(receipt.RecoveryHoldReviewDueAt) ||
-		receipt.RecoveryHoldReviewDueAt.After(receipt.ArtifactExpiresAt) ||
+		!receipt.RecoveryHoldReviewDueAt.Before(receipt.ArtifactExpiresAt) ||
 		receipt.LastRecoveryCode != "" {
 		return ingest.ErrAdmissionUnavailable
 	}
