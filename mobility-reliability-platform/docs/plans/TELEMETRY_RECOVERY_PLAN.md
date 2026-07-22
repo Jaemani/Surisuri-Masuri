@@ -297,9 +297,9 @@ forward sweeper와 별도 mode로 구현한다.
 3. quiet period 뒤 owner kind `cleanup`, worker version `telemetry-cleanup.v1`로 별도 lease를 claim한다. First claim과 expired takeover는 token·revision·attempt count를 1 증가시키고 `started` cleanup attempt를 같은 transaction에 만든다. Forward mutation port는 cleanup owner를 거부하고 `next_recovery_at`은 제거한다. 상세 결정과 local/Emulator/testbench 근거는 [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md), [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim)을 따른다.
 4. Cleanup 전용 read purpose·issuer와 exact cleanup fence로 version-aware classifier를 실행한다. Request binding뿐 아니라 classification, inventory, pinned lineage와 observed time 전체를 classifier-produced seal로 검증한다.
 5. 삭제 전 immutable dry-run target document에 exact path·generation·hash, bounded inventory와 decision을 create-once로 기록한다. 동일 target replay는 write 0이며 conflict는 fail-closed한다. 이 target은 delete 또는 `expired` 권한이 아니다. 상세 결정과 local/Emulator 근거는 [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target)을 따른다.
-6. raw exact generation을 먼저 조건부 삭제한다.
-7. manifest exact generation을 삭제한다.
-8. 두 deletion outcome과 NotFound 의미를 target에 기록하고 live generation을 다시 검사한다.
+6. [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md)에 따라 persisted target과 current cleanup fence를 다시 승인하고 raw exact generation+metageneration을 먼저 조건부 삭제한다. Delete 2xx와 direct 404는 부재 증거가 아니다.
+7. Raw path의 regular-version·soft-deleted inventory가 complete empty일 때만 manifest exact generation+metageneration을 조건부 삭제한다. Raw 결과가 drift·unknown·present·soft-deleted·audit unavailable이면 manifest delete는 0이다.
+8. Manifest를 포함한 모든 expected path의 complete empty inventory를 별도로 확인한다. Delete 전송 outcome과 post-delete audit outcome을 분리해 보존하며 soft-deleted 또는 late generation이 있으면 완료하지 않는다.
 9. linked late generation이 없고 target·receipt linkage가 완전할 때만 receipt를 `expired`로 전환한다. 발견되면 hold 또는 별도 linked target으로 분리한다.
 10. reserved-origin `recovery_hold`는 retention expiry가 오면 `BeginHeldCleanup` transaction으로 `cleanup_pending`에 진입하고 `cleanup_origin_status=recovery_hold`를 고정한다. accepted `stored|queued|projected` finding은 승인된 lifecycle/deletion evidence를 대조한 뒤 `BeginAcceptedDeletion`으로 `deleting -> deleted`를 사용하며 replay-complete를 보존한다. rejected artifact는 receipt를 `rejected`로 유지하고 exact ownership과 명시적 보안 승인이 있을 때만 side cleanup target을 만든다.
 11. terminal cleanup·감사 완료 뒤에만 두 index와 receipt의 `purge_eligible_at`을 같은 transaction에서 설정한다. linkage 문서는 독립 TTL로 삭제하지 않는다.
@@ -309,7 +309,7 @@ forward sweeper와 별도 mode로 구현한다.
 
 이번 구현에서 actual delete까지 진행할지는 staging retention/IAM 결정 뒤 확정한다. 그 전에는 dry-run target 생성과 read-only 검증까지만 허용한다.
 
-2026-07-22 현재 1~5단계의 reserved-origin transition, exact forward-attempt closure, cleanup-only claim/takeover, cleanup-specific read authorization·sealed classification과 immutable dry-run target까지 local component로 구현·검증했다. Claim 자체는 artifact read/target 권한이 아니고 dry-run target도 delete/`expired` 권한이 아니다. 6~14단계의 GCS delete, outcome·live-generation audit, cleanup completion, held/accepted/rejected cleanup, purge와 scheduler/startup은 미구현이다.
+2026-07-22 현재 1~5단계의 reserved-origin transition, exact forward-attempt closure, cleanup-only claim/takeover, cleanup-specific read authorization·sealed classification과 immutable dry-run target까지 local component로 구현·검증했다. 6~8단계의 exact conditional delete·post-delete audit 계약은 ADR-0025에 고정했지만 구현 증거는 아직 없다. Claim 자체는 artifact read/target/delete 권한이 아니고 dry-run target이나 delete result도 `expired` 권한이 아니다. 9~14단계의 cleanup completion, held/accepted/rejected cleanup, purge와 scheduler/startup은 미구현이다.
 
 ### R9. Staging과 운영 gate
 

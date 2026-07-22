@@ -99,7 +99,7 @@
 
 expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인한다. 만료 lease에 recovery attempt count가 있으면 exact nested attempt의 owner·token·version·started time을 함께 검증하고 `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token을 증가시켜 `cleanup_pending`으로 전환한다. Attempt가 누락·변조·completed이면 receipt도 바꾸지 않고 조사 가능한 lease 증거를 보존한다. Application·receipt·attempt read clock 중 가장 이른 시각이 deadline/lease expiry 전이면 `not_ready`다. 현재 구현은 `reservation_expiry + reserved` origin의 transition, cleanup claim과 `absent -> planned|hold` dry-run target create까지다. [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md), [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target)을 따른다.
 
-아래 state machine과 delete/crash 재개 절차는 **R8c+ future executor 계약이며 현재 실행 금지**다. Reserved-origin hold, accepted deletion과 rejected side cleanup도 아직 구현되지 않았다.
+아래 state machine과 delete/crash 재개 절차는 [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md)의 **R8c 계약이며 현재 runtime 실행 금지**다. Delete 전송과 complete-empty audit를 분리하고 raw audit 전 manifest delete를 금지한다. Reserved-origin hold, accepted deletion, rejected side cleanup과 terminal outcome ledger도 아직 구현되지 않았다.
 
 ```text
 planned
@@ -112,7 +112,8 @@ planned
 - manifest delete 뒤 crash: 같은 target의 두 outcome을 확인하고 receipt 상태만 finalization한다.
 - target 생성 뒤 새 generation 발견: 기존 target을 교체하지 않고 hold한다.
 - 삭제 뒤 version-aware live generation을 다시 검사하고, late generation이 있으면 `expired` 완료를 금지한다.
-- exact generation NotFound: provider error가 아닌지, 승인된 lifecycle/deletion evidence가 있는지 확인한 뒤 outcome을 확정한다.
+- exact generation NotFound: 단독 성공으로 기록하지 않는다. Regular-version과 soft-deleted inventory가 모두 complete empty인지 확인한 뒤에만 `confirmed_absent`로 분류한다.
+- target generation이 soft-deleted 상태이거나 같은 path에 다른 generation이 있으면 기존 target을 바꾸지 않고 hold/finding으로 분리한다.
 - artifact expiry 전 stored-missing만 즉시 data-loss finding으로 분류한다. expiry 이후에는 승인된 lifecycle/deletion evidence와 `deleting/deleted` workflow를 먼저 대조한다.
 - 만료 전 hold는 review due를 artifact expiry보다 앞에 둔다. 이미 만료된 finding은 review due를 현재시각으로 두고 즉시 integrity cleanup 대상으로 보내며, cleanup이 막히면 privacy/operations incident로 escalate한다.
 - artifact cleanup·감사가 끝날 때까지 `purge_eligible_at`은 null이다. 완료 transaction이 두 index와 receipt에 같은 eligibility를 설정하되 독립 TTL 삭제는 사용하지 않는다.
