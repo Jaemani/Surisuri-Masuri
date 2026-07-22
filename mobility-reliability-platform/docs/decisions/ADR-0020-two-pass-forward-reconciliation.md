@@ -315,5 +315,5 @@ bounded error_class, pinned lineage summary, completed_at
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 사전절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
 - 제품 업데이트: 해당 없음 — runtime·사용자 흐름 변화 없음
-- 증거: 구현 전 결정이므로 아직 없음
+- 증거: [EVD-20260722-025](../evidence/2026-07.md#evd-20260722-025--two-pass-forward-recovery-planner와-manifest-only-repair-boundary) — planner·manifest-only capability/GCS 경계까지, Firestore final action·runtime은 미구현
 - 인시던트: 해당 없음 — production·staging·field 영향 없음
