@@ -12,6 +12,40 @@ import (
 	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/ingest"
 )
 
+func emulatorForwardRecoveryDispositionCheckedAt(
+	t *testing.T,
+	grant ingest.ForwardRecoveryDispositionGrant,
+	command ingest.ForwardRecoveryDispositionCommand,
+) time.Time {
+	t.Helper()
+	deadline, err := ingest.ForwardRecoveryDispositionAuthorizationDeadline(grant, command)
+	if err != nil {
+		t.Fatalf("ForwardRecoveryDispositionAuthorizationDeadline() = %v", err)
+	}
+	checkedAt := deadline.Add(-ingest.ForwardRecoveryArtifactReadGrantTTL)
+	if err := ingest.ValidateForwardRecoveryDispositionAuthorization(grant, command, checkedAt); err != nil {
+		t.Fatalf("disposition fixture grant is not TTL-bound: %v", err)
+	}
+	return checkedAt
+}
+
+func emulatorForwardRecoveryOutcomeCheckedAt(
+	t *testing.T,
+	grant ingest.ForwardRecoveryOutcomeReadGrant,
+	query ingest.ForwardRecoveryOutcomeQuery,
+) time.Time {
+	t.Helper()
+	deadline, err := ingest.ForwardRecoveryOutcomeAuthorizationDeadline(grant, query)
+	if err != nil {
+		t.Fatalf("ForwardRecoveryOutcomeAuthorizationDeadline() = %v", err)
+	}
+	checkedAt := deadline.Add(-ingest.ForwardRecoveryOutcomeGrantTTL)
+	if err := ingest.ValidateForwardRecoveryOutcomeAuthorization(grant, query, checkedAt); err != nil {
+		t.Fatalf("outcome fixture grant is not TTL-bound: %v", err)
+	}
+	return checkedAt
+}
+
 func TestFirestoreAdmissionStoreEmulatorCommitsAuthorizationDispositionsAtomically(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -69,7 +103,8 @@ func TestFirestoreAdmissionStoreEmulatorCommitsAuthorizationDispositionsAtomical
 				t.Fatalf("AuthorizeForwardRecoveryDisposition() = %#v, %v", command, err)
 			}
 			got, err := fixture.store.CommitForwardRecoveryDisposition(
-				context.Background(), grant, command, time.Now().UTC(),
+				context.Background(), grant, command,
+				emulatorForwardRecoveryDispositionCheckedAt(t, grant, command),
 			)
 			if err != nil {
 				t.Fatalf("CommitForwardRecoveryDisposition() = %v", err)
@@ -110,7 +145,8 @@ func TestFirestoreAdmissionStoreEmulatorCommitsAuthorizationDispositionsAtomical
 				t.Fatalf("outcome Authorize() = %v", err)
 			}
 			outcome, err := fixture.store.GetForwardRecoveryActionOutcome(
-				context.Background(), outcomeGrant, query, time.Now().UTC(),
+				context.Background(), outcomeGrant, query,
+				emulatorForwardRecoveryOutcomeCheckedAt(t, outcomeGrant, query),
 			)
 			if err != nil || outcome.CommitStatus != ingest.RecoveryActionCommitted ||
 				outcome.Outcome != test.wantOutcome || outcome.ActionHash != query.ExpectedActionHash {
@@ -195,7 +231,8 @@ func TestFirestoreAdmissionStoreEmulatorDispositionChangeBeforeCommitWritesZero(
 			)
 			test.change(t, fixture.client)
 			_, err = fixture.store.CommitForwardRecoveryDisposition(
-				context.Background(), grant, command, time.Now().UTC(),
+				context.Background(), grant, command,
+				emulatorForwardRecoveryDispositionCheckedAt(t, grant, command),
 			)
 			if !errors.Is(err, ingest.ErrInvalidForwardRecoveryDispositionAuthorization) {
 				t.Fatalf("CommitForwardRecoveryDisposition() = %v", err)
@@ -241,7 +278,8 @@ func TestFirestoreAdmissionStoreEmulatorMissingDispositionAttemptRollsBackReceip
 		t.Fatalf("delete recovery attempt: %v", err)
 	}
 	_, err = fixture.store.CommitForwardRecoveryDisposition(
-		context.Background(), grant, command, time.Now().UTC(),
+		context.Background(), grant, command,
+		emulatorForwardRecoveryDispositionCheckedAt(t, grant, command),
 	)
 	if !errors.Is(err, ingest.ErrInvalidForwardRecoveryDispositionAuthorization) {
 		t.Fatalf("CommitForwardRecoveryDisposition() = %v", err)
