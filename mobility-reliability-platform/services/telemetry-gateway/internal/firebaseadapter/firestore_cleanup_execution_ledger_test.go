@@ -199,13 +199,39 @@ func TestFirestoreCleanupExecutionLedgerRejectsConflictAndPartialResidueWithoutW
 
 	t.Run("exact lease expiry", func(t *testing.T) {
 		fixture := newCleanupExecutionLedgerStoreFixture(t)
+		expiresAt := fixture.plan.Target.Command.LeaseExpiresAt
 		fixture.store.now = func() time.Time {
-			return fixture.plan.Target.Command.LeaseExpiresAt
+			return expiresAt
+		}
+		fixture.transaction.readTime = expiresAt
+		targetPath := cleanupTargetDocumentPath(
+			fixture.query.TenantID, fixture.query.AttemptID,
+		)
+		target := fixture.transaction.targets[targetPath]
+		target.ReadTime = expiresAt
+		fixture.transaction.targets[targetPath] = target
+		if _, _, err := fixture.store.initializeCleanupExecutionLedger(
+			context.Background(), fixture.query,
+		); !errors.Is(err, ingest.ErrCleanupExecutionUnauthorized) {
+			t.Fatalf("exact expiry state gate error = %v", err)
 		}
 		if _, _, err := fixture.store.InitializeCleanupExecutionLedger(
 			context.Background(), fixture.query,
 		); !errors.Is(err, ingest.ErrCleanupExecutionUnauthorized) {
 			t.Fatalf("exact expiry error = %v", err)
+		}
+		fixture.assertNoWrites(t)
+	})
+
+	t.Run("incoherent application and read clocks", func(t *testing.T) {
+		fixture := newCleanupExecutionLedgerStoreFixture(t)
+		fixture.store.now = func() time.Time {
+			return fixture.plan.Target.Command.LeaseExpiresAt
+		}
+		if _, _, err := fixture.store.InitializeCleanupExecutionLedger(
+			context.Background(), fixture.query,
+		); !errors.Is(err, ingest.ErrCleanupExecutionUnavailable) {
+			t.Fatalf("incoherent clock error = %v", err)
 		}
 		fixture.assertNoWrites(t)
 	})
