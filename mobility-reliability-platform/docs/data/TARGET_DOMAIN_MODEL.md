@@ -55,6 +55,7 @@
   /trips/{tripId}                              # metadata/summary only
   /ingestReceipts/{batchId}                    # server-only write
     /recoveryAttempts/{attemptId}              # 좌표 없는 복구 감사 ledger
+  /recoveryWorkerState/{workerId}              # advisory scan checkpoint, server-only
   /ingestIdempotency/{derivedKey}              # server-only read/write
   /ingestClientBatches/{derivedKey}            # server-only client-batch uniqueness
   /ingestCleanupTargets/{cleanupId}             # exact-generation 삭제 target
@@ -141,7 +142,7 @@ active 상태에 `revoked_at`이 있거나 path/field tenant, installation ID, U
 - 초기 operational direct read role은 `case_worker`, `tenant_admin`으로 제한한다. guardian·repairer·auditor의 타인·기관 간·감사 목적 조회는 relationship·grant·purpose를 검사하는 backend DTO를 사용한다.
 - devices·repairs·inspections·prediction·evidence·report처럼 문서 자체에서 본인 person 관계를 안전하게 증명할 수 없는 데이터는 operational staff만 직접 읽고 beneficiary는 backend DTO를 사용한다. 상세 matrix는 [ADR-0014](../decisions/ADR-0014-firestore-client-read-boundary.md)를 따른다.
 - membership, role, tenant, server timestamp, projection version, model score, object path/hash, delivery provider ID는 **server-only field**다.
-- `privatePeople`, `appInstallations`, `ingestReceipts`, `ingestIdempotency`, `ingestClientBatches`, `consentStates`, `domainEvents`, `projectionCheckpoints`, `deadLetters`, `externalIdentifiers`, `dataAccessGrants`, `authzIndex`의 client write는 항상 거절한다.
+- `privatePeople`, `appInstallations`, `ingestReceipts`, `ingestIdempotency`, `ingestClientBatches`, `recoveryWorkerState`, `consentStates`, `domainEvents`, `projectionCheckpoints`, `deadLetters`, `externalIdentifiers`, `dataAccessGrants`, `authzIndex`의 client write는 항상 거절한다.
 - `privatePeople`의 client direct read도 거절한다. 본인 정보는 purpose 검사를 수행하는 callable/Cloud Run API가 필요한 필드만 반환한다.
 - client가 직접 생성 가능한 draft가 있다면 `request.resource.data.diff(resource.data).affectedKeys()`로 허용 field whitelist를 적용한다.
 - 수리 완료, 점검 판정, 동의 revision 확정, alert 상태 전환은 backend command를 통해서만 수행한다.
@@ -419,6 +420,16 @@ receipt는 control plane 상태이며 GPS sample을 포함하지 않는다. Stag
 - `cleanup_pending`은 `BeginCleanupTransition` 또는 `BeginHeldCleanup`이 token을 증가시키고 forward lease를 fence-out한 뒤 늦은 Storage write의 quiet period를 기다리는 reserved-origin 상태다. 일반 finalizer와 accepted/rejected cleanup은 이 상태로 전환할 수 없다. `expired`는 reserved-origin partial artifact cleanup 완료 또는 version-aware empty 확인 뒤에만 사용한다.
 - accepted `stored|queued|projected` cleanup은 `deleting -> deleted`를 사용하며 동일 lineage replay는 모든 accepted lifecycle 상태에서 complete 의미다. rejected receipt는 cleanup target 진행과 무관하게 `rejected`와 replay-rejected 의미를 유지한다.
 - stored/rejected transition은 `next_integrity_check_at`을 설정한다. 별도 bounded integrity auditor가 이 cursor와 Storage Inventory로 stored-missing·rejected-artifact를 찾으며 reserved sweeper query가 이 역할을 대신하지 않는다.
+
+`/recoveryWorkerState/forward`:
+
+```text
+revision,
+next_recovery_at?, document_id?, scan_cutoff?,
+updated_at
+```
+
+이 문서는 tenant별 forward candidate scan의 advisory fairness checkpoint다. `next_recovery_at + document_id` cursor와 `scan_cutoff`는 함께 존재하거나 함께 비어야 하며 cursor 시각은 cutoff 뒤일 수 없다. Worker는 같은 revision을 읽은 CAS transaction으로 revision을 1 증가시키고, page 경계에서는 cursor와 고정 cutoff를 저장하며 epoch tail에서는 두 값을 함께 reset한다. Load/persist 장애나 CAS conflict는 duplicate scan을 만들 수 있지만 receipt ownership·lease·artifact 권한을 만들거나 박탈하지 않는다. Client read/write는 모두 거절한다. 현재 worker ID는 `forward` 하나이며 startup·scheduler 연결 전의 local component state다. `status`·`next_recovery_at`이 query에서 누락된 receipt를 찾는 무결성 audit cursor로 사용하지 않는다. 자세한 결정은 [ADR-0021](../decisions/ADR-0021-bounded-forward-recovery-worker.md)을 따른다.
 
 `/ingestReceipts/{batchId}/recoveryAttempts/{attemptId}`:
 

@@ -2,7 +2,7 @@
 
 ## 1. 현재 사용 상태
 
-이 문서는 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)의 운영 절차를 구현·검증하기 위한 사전 runbook이다. 2026-07-22 현재 single-receipt reconciler component는 구현됐지만 candidate sweeper, cleanup command, startup wiring과 staging IAM은 구현되지 않았으므로 production artifact를 조회·수정·삭제하는 실행 지침이 아니다.
+이 문서는 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)의 운영 절차를 구현·검증하기 위한 사전 runbook이다. 2026-07-22 현재 single-receipt reconciler와 bounded candidate worker component는 구현됐지만 cleanup command, scheduler/startup wiring, metrics exporter와 staging IAM은 구현되지 않았으므로 production artifact를 조회·수정·삭제하는 실행 지침이 아니다.
 
 - 허용: synthetic fixture, Firestore Emulator, pinned official Storage testbench의 read-only/classifier와 bounded single-receipt protocol 검증
 - 금지: 실제 bucket에서 path/latest/prefix 기준 삭제, receipt 수동 수정, 실제 사용자 좌표를 로그·문서에 복사
@@ -15,8 +15,26 @@
 - fence: lease takeover마다 증가하는 receipt의 단조 증가 token
 - recovery hold: 자동 완료·삭제가 안전하지 않아 사람 검토가 필요한 상태
 - stored-missing: stored receipt가 기록한 exact generation을 읽을 수 없는 무결성 상태
+- scan epoch: 시작 시 고정한 cutoff 이하만 순회하고 tail 소진 뒤 cursor와 cutoff를 함께 초기화하는 한 번의 bounded candidate scan
+- advisory checkpoint: 공정한 다음 scan 위치를 위한 cursor이며 receipt ownership이나 artifact 권한이 아닌 control hint
 
-## 3. 최초 대응 순서
+## 3. R7 candidate scan 절차
+
+1. Tenant별 `ingestReceipts`에서 `status=reserved`, `next_recovery_at <= scan_cutoff`만 조회한다.
+2. `next_recovery_at ASC, document ID ASC`로 정렬하고 마지막 반환 문서의 두 값을 cursor로 사용한다. 같은 시각의 문서도 document ID로 결정론적으로 전진한다.
+3. 기존 checkpoint cursor가 있으면 함께 저장된 `scan_cutoff`를 그대로 재사용한다. 실행 중 현재시각으로 cutoff를 움직이지 않는다.
+4. Candidate의 저장 `receipt_id`가 document ID와 다르거나 tenant/reservation key/state가 손상됐으면 그 advisory item만 invalid로 집계하고 document cursor는 전진시킨다.
+5. 유효 candidate도 fresh sweeper attempt ID로 `ClaimRecoveryLease`를 transaction 호출한다. `Acquired`와 exact owner/fence가 모두 유효할 때만 R6를 호출한다.
+6. Held·NotDue·DeadlineElapsed·NotEligible은 bounded skip한다. Claim error나 응답 불명확은 unknown으로 기록하고 즉시 retry·reclaim·R6 실행을 하지 않는다.
+7. Candidate page read만 bounded exponential full-jitter retry할 수 있다. Claim과 mutation은 동일 호출을 추정 replay하지 않는다.
+8. Page가 더 있으면 cursor+fixed cutoff를 advisory CAS checkpoint로 저장한다. 저장 오류나 CAS conflict는 이후 checkpoint write만 끄며 현재 receipt 처리와 claim 권한을 바꾸지 않는다.
+9. Tail 소진 시 cursor와 cutoff를 함께 reset한다. 다음 run은 새 cutoff로 head부터 새 epoch를 시작한다.
+10. Item 오류·panic은 다음 후보와 격리하되 panic breaker와 page/item/run budget이 열리면 마지막으로 완전히 검사한 cursor까지만 checkpoint한다.
+11. Parent cancel 뒤 새 claim은 금지한다. 이미 `Acquired`가 반환된 started attempt만 2분 상한의 detached context에서 R6 finalizer까지 drain한다.
+12. `status` 또는 `next_recovery_at`이 누락되거나 query 비호환 type인 문서는 이 query에 보이지 않는다. 별도 integrity audit가 없으면 scan complete를 전체 receipt 무결성 complete로 해석하지 않는다.
+13. Page query는 하나의 Firestore snapshot이 아니다. Page 사이 state/due 변경 또는 cutoff 이하 backfill/create가 있으면 중복 처리나 다음 epoch까지의 지연이 가능하므로, fresh claim과 reset 뒤 head wrap을 유지하고 scan complete를 snapshot complete로 기록하지 않는다.
+
+## 4. 최초 대응 순서
 
 1. 작업을 시작하기 전에 environment, project ID, bucket, commit, worker version이 staging/test인지 확인한다.
 2. receipt ID와 tenant ID만으로 control record를 조회하고 body·좌표·token·UID/App ID를 출력하지 않는다.
@@ -35,7 +53,7 @@
 15. Caller cancellation 뒤 detached tail에서는 outcome read, attempt failure와 current disposition만 허용한다. Artifact I/O, renewal, normal action은 계속하지 않는다.
 16. hold·data-loss 후보는 자동 retry/delete를 중지하고 사람 검토로 escalation한다.
 
-## 4. 분류별 운영 판단
+## 5. 분류별 운영 판단
 
 | 분류 | forward action | cleanup action | escalation |
 | --- | --- | --- | --- |
@@ -50,7 +68,7 @@
 | stored-missing, artifact expiry 후 | 승인된 lifecycle/deletion evidence 대조 | 정상 deletion workflow 또는 exact integrity cleanup | 증거 불일치 시 escalation |
 | consent invalid pending | 새 artifact·finalizer 0, consent-invalid hold | 철회만으로 자동삭제 금지; 명시적 요청/retention expiry만 cleanup | privacy owner 확인 |
 
-## 5. Hold에서 확인할 근거
+## 6. Hold에서 확인할 근거
 
 - receipt: state, revision, immutable input, reservation/artifact/purge timestamps, last fence
 - index: reservation/client-batch 두 문서가 같은 receipt·batch·body hash를 가리키는지
@@ -62,7 +80,7 @@
 
 문서·티켓·스크린샷에는 좌표, raw payload, ID token, App Check token, 사람 이름·전화번호·주소를 넣지 않는다.
 
-## 6. 절대 실행하지 않는 조치
+## 7. 절대 실행하지 않는 조치
 
 - manifest 없이 raw 내용을 추정하거나 raw 없이 manifest를 역생성
 - stored receipt를 발견한 최신 generation으로 다시 연결
@@ -76,7 +94,7 @@
 - current consent invalid pending receipt를 forward 완료
 - recovery hold를 이유로 raw artifact lifecycle을 자동 연장
 
-## 7. Expiry cleanup 재개 규칙
+## 8. Expiry cleanup 재개 규칙
 
 expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인하고 token을 증가시켜 `cleanup_pending`으로 전환한다. reserved-origin hold는 `BeginHeldCleanup`만 같은 상태로 보낼 수 있다. accepted receipt는 `BeginAcceptedDeletion`으로 `deleting -> deleted`를 사용해 replay-complete를 유지한다. rejected artifact는 receipt를 `rejected`로 유지하며 exact ownership과 별도 보안 승인 없이는 cleanup target을 만들지 않는다. 모든 cleanup entry는 origin status를 고정하고 최대 lease+Storage operation timeout보다 긴 quiet period 뒤 시작한다. cleanup target은 처음 발견한 exact lineage를 immutable하게 유지한다.
 
@@ -97,11 +115,13 @@ planned
 - artifact cleanup·감사가 끝날 때까지 `purge_eligible_at`은 null이다. 완료 transaction이 두 index와 receipt에 같은 eligibility를 설정하되 독립 TTL 삭제는 사용하지 않는다.
 - eligibility 뒤 purge job은 receipt 하위 attempt와 linked cleanup target·integrity finding을 bounded cursor로 먼저 삭제한다. 세 집합이 empty임을 증명한 뒤에만 마지막 transaction으로 두 index와 receipt를 함께 삭제한다. Firestore parent delete가 subcollection을 지운다고 가정하지 않는다.
 
-## 8. Local/CI 검증 체크리스트
+## 9. Local/CI 검증 체크리스트
 
 R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0018-generation-pinned-read-only-classifier.md)을 따른다. 아래 목록은 이후 reconciler·cleanup까지 포함한 전체 recovery checklist이며 R5 하나의 완료 조건으로 해석하지 않는다.
 
 2026-07-21 local R5 classifier gate는 [EVD-20260721-023](../evidence/2026-07.md#evd-20260721-023--generation-pinned-read-only-artifact-classifier), current forward authorization gate는 [EVD-20260721-024](../evidence/2026-07.md#evd-20260721-024--current-state-forward-recovery-authorization)에서 통과했다. 전자는 synthetic classifier matrix와 pinned official Storage testbench reader, 후자는 provider-neutral policy와 Firestore Emulator의 claim→authorization→consent withdrawal을 검증한다. 둘을 하나의 startup worker로 연결하거나 staging authorization·lifecycle과 아래 전체 recovery checklist를 완료한 증거는 아니다.
+
+2026-07-22 bounded candidate query·fixed-cutoff checkpoint·claim outer loop의 local/Emulator gate는 [EVD-20260722-029](../evidence/2026-07.md#evd-20260722-029--bounded-forward-recovery-worker와-cross-run-checkpoint)에 기록한다. 이는 executable startup·scheduler·production index/IAM을 연결한 운영 검증이 아니다.
 
 - [ ] fake clock으로 lease exact-expiry boundary 재현
 - [ ] 두 request/sweeper의 concurrent claim winner 1명
@@ -122,7 +142,7 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 - [ ] recovery ledger와 log privacy scan 통과
 - [ ] Firestore Emulator와 GitHub clean runner 통과
 
-## 9. Escalation과 문서 스트림
+## 10. Escalation과 문서 스트림
 
 - local synthetic 실패: EVD에 실패→수정→재검증을 기록하고 Incident는 열지 않는다.
 - staging integrity mismatch: 배포·cleanup을 중지하고 risk/evidence를 갱신한다.
