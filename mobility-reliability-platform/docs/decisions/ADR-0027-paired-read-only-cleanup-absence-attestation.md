@@ -115,9 +115,8 @@ Persistence는 먼저 paired verifier로 evidence를 확인하고 grant가 evide
 
 ### 6. 실행·운영 활성화는 계속 닫아 둔다
 
-이 R8e 증분은 raw 또는 manifest 한 단계의 read-only audit와 persistence component만 제공한다. 당시 후속 범위였던 progress-bearing expired cleanup takeover는 [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md)에서 local transaction component로 구현했지만 runtime에는 연결하지 않았다. 다음은 계속 미연결·미구현이다.
+이 R8e 증분은 raw 또는 manifest 한 단계의 read-only audit와 persistence component만 제공한다. 당시 후속 범위였던 progress-bearing expired cleanup takeover는 [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md)에서, durable artifact phase executor는 [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md)에서 local component로 구현했지만 runtime에는 연결하지 않았다. 다음은 계속 미연결·미구현이다.
 
-- Delete dispatch/outcome과 absence audit을 순서대로 호출하는 phase executor
 - Retry·hold disposition persistence
 - Attempt `completed`, receipt `expired`와 세 control document의 `purge_eligible_at`을 묶는 terminal finalizer
 - Commit response-loss `committed|not_committed|unverifiable` correlation
@@ -140,5 +139,6 @@ Persistence는 먼저 paired verifier로 evidence를 확인하고 grant가 evide
 - 운영 절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
 - 증거: [EVD-20260722-035](../evidence/2026-07.md#evd-20260722-035--서명된-read-only-cleanup-absence-audit와-firestore-persistence)
 - 사람 대상 리포트: [HR-20260722-26](../reports/human/HR-20260722-26-signed-cleanup-absence-audit.md)
+- 후속 증거: [EVD-20260722-037](../evidence/2026-07.md#evd-20260722-037--durable-artifact-phase-cleanup-execution)
 - 제품 업데이트: 해당 없음 — executable·scheduler·사용자·staging·production 경로 미연결
 - 인시던트: 해당 없음 — production·staging·field 영향 없음
