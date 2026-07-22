@@ -71,7 +71,9 @@ jobs:
           --config ../../firebase.json
           --project demo-mobility-reliability
           --only firestore
-          "cd ../../services/telemetry-gateway && go test -mod=readonly -count=1 -race -timeout 60s ./internal/firebaseadapter -run FirestoreAdmissionStoreEmulator -v"
+          "cd ../../services/telemetry-gateway &&
+          go test -mod=readonly -count=1 -race -timeout 60s ./internal/firebaseadapter -run FirestoreAdmissionStoreEmulator -v &&
+          go test -mod=readonly -count=1 -race -timeout 60s ./internal/firebaseadapter -run FirestoreEmulatorReceiptPurgeAttempt -v"
 
       - name: Test Cloud Storage artifact lineage
         working-directory: mobility-reliability-platform/services/telemetry-gateway

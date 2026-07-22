@@ -122,6 +122,9 @@ func seedExpiredReceiptPurgeEmulatorFixture(t *testing.T) *expiredReceiptPurgeEm
 	t.Helper()
 	client := newAdmissionEmulatorClient(t)
 	clearAdmissionIngestCollections(t, client)
+	t.Cleanup(func() {
+		clearAdmissionIngestCollections(t, client)
+	})
 	createdAt := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(time.Millisecond)
 	reservation := emulatorReservation(createdAt, emulatorFirstReceiptID)
 	receipt := admissionTestReceiptDTO(admissionTestReceipt(reservation, ingest.ReceiptReserved))

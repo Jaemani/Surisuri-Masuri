@@ -486,6 +486,25 @@ func validCompletedOutcomeAttempt(attempt CurrentForwardRecoveryOutcomeAttempt) 
 	}
 }
 
+// ValidateCompletedForwardRecoveryAttemptForPurge validates the full bounded
+// terminal attempt union without reconstructing historical receipt authority.
+// Receipt purge uses it only after the current receipt/job fence is validated.
+func ValidateCompletedForwardRecoveryAttemptForPurge(
+	attempt CurrentForwardRecoveryOutcomeAttempt,
+) error {
+	if !telemetry.IsUUID(attempt.AttemptID) || !telemetry.IsUUID(attempt.TenantID) ||
+		!telemetry.IsUUID(attempt.ReceiptID) ||
+		(attempt.OwnerKind != LeaseOwnerRequest && attempt.OwnerKind != LeaseOwnerSweeper) ||
+		attempt.FencingToken <= 0 || attempt.WorkerVersion != RecoveryWorkerVersion ||
+		attempt.Status != RecoveryAttemptCompleted || attempt.StartedAt.IsZero() ||
+		attempt.CompletedAt.IsZero() || !attempt.CompletedAt.After(attempt.StartedAt) ||
+		attempt.FailureCode != "" || !attempt.FailedAt.IsZero() ||
+		!validCompletedOutcomeAttempt(attempt) {
+		return ErrForwardRecoveryOutcomeUnavailable
+	}
+	return nil
+}
+
 func validCompletedAuthorizationDispositionOutcome(
 	attempt CurrentForwardRecoveryOutcomeAttempt,
 ) bool {

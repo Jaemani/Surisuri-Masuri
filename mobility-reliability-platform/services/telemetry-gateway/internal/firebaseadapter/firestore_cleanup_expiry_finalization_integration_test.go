@@ -27,7 +27,8 @@ func TestFirestoreAdmissionStoreEmulatorFinalizesCleanupAtomically(t *testing.T)
 		result.Receipt.PurgeEligibleAt == nil ||
 		result.Ledger.Phase != ingest.CleanupExecutionPhaseCompleted ||
 		result.Ledger.Revision != fixture.ready.Revision+1 ||
-		!result.Ledger.CompletedAt.Equal(fixture.completedAt) {
+		result.Ledger.CompletedAt.Before(fixture.completedAt) ||
+		!result.Ledger.CompletedAt.Equal(result.Receipt.UpdatedAt) {
 		t.Fatalf("finalization result = %#v", result)
 	}
 
@@ -290,8 +291,15 @@ func TestFirestoreAdmissionStoreEmulatorCleanupFinalizationRejectsStaleDispositi
 	if err != nil {
 		t.Fatalf("Authorize(stale disposition outcome) = %v", err)
 	}
+	deadline, err := ingest.CleanupExecutionDispositionOutcomeAuthorizationDeadline(
+		grant, staleOutcomeQuery,
+	)
+	if err != nil {
+		t.Fatalf("CleanupExecutionDispositionOutcomeAuthorizationDeadline() = %v", err)
+	}
 	staleOutcome, err := store.GetCleanupExecutionDispositionOutcome(
-		context.Background(), grant, staleOutcomeQuery, time.Now().UTC().Add(time.Second),
+		context.Background(), grant, staleOutcomeQuery,
+		deadline.Add(-ingest.CleanupExecutionDispositionOutcomeGrantTTL),
 	)
 	if err != nil ||
 		staleOutcome.CommitStatus != ingest.CleanupExecutionDispositionUnverifiable ||
@@ -368,8 +376,15 @@ func TestFirestoreAdmissionStoreEmulatorCleanupFinalizationOutcomeReadWritesZero
 	if err != nil {
 		t.Fatalf("Authorize() = %v", err)
 	}
+	deadline, err := ingest.CleanupExpiryFinalizationOutcomeAuthorizationDeadline(
+		grant, result.OutcomeQuery,
+	)
+	if err != nil {
+		t.Fatalf("CleanupExpiryFinalizationOutcomeAuthorizationDeadline() = %v", err)
+	}
 	outcome, err := fixture.store.GetCleanupExpiryFinalizationOutcome(
-		context.Background(), grant, result.OutcomeQuery, fixture.completedAt,
+		context.Background(), grant, result.OutcomeQuery,
+		deadline.Add(-ingest.CleanupExpiryFinalizationOutcomeGrantTTL),
 	)
 	if err != nil || outcome.CommitStatus != ingest.CleanupExpiryFinalizationCommitted ||
 		outcome.EvidenceHash != result.Ledger.EvidenceHash ||
