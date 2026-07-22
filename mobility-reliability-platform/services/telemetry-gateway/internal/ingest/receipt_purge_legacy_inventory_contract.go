@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"errors"
 
 	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/telemetry"
@@ -8,7 +9,12 @@ import (
 
 const MaxReceiptPurgeLegacyInventoryPageSize = 25
 
-var ErrInvalidReceiptPurgeLegacyInventory = errors.New("receipt purge legacy inventory is invalid")
+var (
+	ErrInvalidReceiptPurgeLegacyInventory     = errors.New("receipt purge legacy inventory is invalid")
+	ErrReceiptPurgeLegacyInventoryConflict    = errors.New("receipt purge legacy inventory conflicts with current state")
+	ErrReceiptPurgeLegacyInventoryUnavailable = errors.New("receipt purge legacy inventory is unavailable")
+	ErrReceiptPurgeLegacyFindingUnsupported   = errors.New("legacy integrity finding inventory is unsupported")
+)
 
 type ReceiptPurgeLegacyInventoryRequest struct {
 	TenantID string
@@ -61,6 +67,20 @@ const (
 	ReceiptPurgeLegacyFindingEmptyObserved ReceiptPurgeLegacyFindingProbeStatus = "empty_observed"
 	ReceiptPurgeLegacyFindingUnsupported   ReceiptPurgeLegacyFindingProbeStatus = "unsupported"
 )
+
+// ReceiptPurgeLegacyInventoryStore exposes an operator-driven, tenant-scoped
+// rollout gate. Exhaustion is only the result of one ordered observation; it
+// is not global orphan-zero or writer-exclusion evidence.
+type ReceiptPurgeLegacyInventoryStore interface {
+	ListReceiptPurgeLegacyTargetPage(
+		context.Context,
+		ReceiptPurgeLegacyInventoryRequest,
+	) (ReceiptPurgeLegacyInventoryPage, error)
+	BackfillReceiptPurgeLegacyTargetPage(
+		context.Context,
+		ReceiptPurgeLegacyInventoryPage,
+	) (ReceiptPurgeLegacyBackfillPlan, error)
+}
 
 func ValidateReceiptPurgeLegacyInventoryRequest(request ReceiptPurgeLegacyInventoryRequest) error {
 	if !telemetry.IsUUID(request.TenantID) || request.PageSize < 1 ||
@@ -124,16 +144,22 @@ func SameReceiptPurgeLegacyInventoryPage(
 	return true
 }
 
-func PlanReceiptPurgeLegacyBackfill(
-	page ReceiptPurgeLegacyInventoryPage,
-	observations []ReceiptPurgeLegacyTargetObservation,
-) (ReceiptPurgeLegacyBackfillPlan, error) {
+func ValidateReceiptPurgeLegacyInventoryPage(page ReceiptPurgeLegacyInventoryPage) error {
 	canonical, err := BuildReceiptPurgeLegacyInventoryPage(
 		page.Request,
 		append(append([]string(nil), page.DocumentIDs...), optionalLegacyLookahead(page)...),
 	)
-	if err != nil || !SameReceiptPurgeLegacyInventoryPage(page, canonical) ||
-		len(observations) != len(page.DocumentIDs) {
+	if err != nil || !SameReceiptPurgeLegacyInventoryPage(page, canonical) {
+		return ErrInvalidReceiptPurgeLegacyInventory
+	}
+	return nil
+}
+
+func PlanReceiptPurgeLegacyBackfill(
+	page ReceiptPurgeLegacyInventoryPage,
+	observations []ReceiptPurgeLegacyTargetObservation,
+) (ReceiptPurgeLegacyBackfillPlan, error) {
+	if ValidateReceiptPurgeLegacyInventoryPage(page) != nil || len(observations) != len(page.DocumentIDs) {
 		return ReceiptPurgeLegacyBackfillPlan{}, ErrInvalidReceiptPurgeLegacyInventory
 	}
 	plan := ReceiptPurgeLegacyBackfillPlan{
