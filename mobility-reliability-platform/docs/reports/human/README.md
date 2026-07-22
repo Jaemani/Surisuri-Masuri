@@ -91,3 +91,4 @@
 | [HR-20260722-18](./HR-20260722-18-authorization-disposition.md) | current authorization disposition boundary | `draft` |
 | [HR-20260722-19](./HR-20260722-19-bounded-forward-reconciler.md) | bounded single-receipt forward reconciler | `draft` |
 | [HR-20260722-20](./HR-20260722-20-bounded-forward-recovery-worker.md) | bounded forward recovery worker와 fixed-cutoff checkpoint | `draft` |
+| [HR-20260722-21](./HR-20260722-21-cleanup-transition-attempt-closure.md) | cleanup transition의 expired forward attempt 원자 종료 | `draft` |

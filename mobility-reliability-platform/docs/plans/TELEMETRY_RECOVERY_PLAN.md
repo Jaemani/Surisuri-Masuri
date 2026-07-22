@@ -292,7 +292,7 @@ expired lease를 takeover한 request와 sweeper/cleanup claim은 claim transacti
 
 forward sweeper와 별도 mode로 구현한다.
 
-1. `BeginCleanupTransition` transaction이 `reserved`, deadline 경과, active lease 없음과 3-way linkage를 확인하고 token·revision +1, `cleanup_pending`, `cleanup_mode=reservation_expiry`, `cleanup_origin_status=reserved`를 원자 기록한다. 일반 forward finalizer는 이 전환을 수행할 수 없다.
+1. `BeginCleanupTransition` transaction이 `reserved`, deadline 경과, active lease 없음과 3-way linkage를 확인한다. 만료 forward lease에 recovery attempt count가 있으면 exact nested attempt owner·token·version·started time을 함께 읽고, `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token·revision +1, `cleanup_pending`, `cleanup_mode=reservation_expiry`, `cleanup_origin_status=reserved`를 기록한다. Missing·malformed·completed prior attempt는 receipt write도 0으로 fail-closed한다. Cleanup effective time은 application·receipt·attempt snapshot 전체의 최솟값이며 전체 clock 폭이 허용 skew를 넘으면 거부한다. 일반 forward finalizer는 이 전환을 수행할 수 없다. 상세 결정과 local/Emulator 근거는 [ADR-0022](../decisions/ADR-0022-atomic-cleanup-transition-attempt-closure.md), [EVD-20260722-030](../evidence/2026-07.md#evd-20260722-030--cleanup-transition의-expired-forward-attempt-원자-종료)을 따른다.
 2. `cleanup_quiescence_until = max(last lease expiry, transition time) + late-write grace`를 고정한다. grace는 최대 lease+Storage operation timeout보다 길다.
 3. quiet period 뒤 owner kind `cleanup`으로 별도 lease를 claim한다.
 4. version-aware classifier로 artifact를 찾는다.

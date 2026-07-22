@@ -417,7 +417,7 @@ receipt는 control plane 상태이며 GPS sample을 포함하지 않는다. Stag
 - manifest v1의 기존 `expires_at` field는 `artifact_expires_at` 의미로만 읽고 reservation deadline이나 receipt purge에 사용하지 않는다.
 - `recovery_hold`는 reserved-origin의 손상·불가능한 artifact ordering을 위한 사람 검토 상태이며 일반 retry가 자동 해제하지 않는다. accepted/rejected receipt는 integrity finding 때문에 이 상태로 downgrade하지 않는다.
 - reserved-origin 만료 전 hold는 `now <= hold_review_due_at < artifact_expires_at`을 가져야 한다. 만료 뒤 처음 발견된 reserved finding은 `hold_review_due_at=now`로 기록하고 즉시 held cleanup 대상이 된다. 어느 hold도 artifact lifecycle을 자동 연장하지 않는다.
-- `cleanup_pending`은 `BeginCleanupTransition` 또는 `BeginHeldCleanup`이 token을 증가시키고 forward lease를 fence-out한 뒤 늦은 Storage write의 quiet period를 기다리는 reserved-origin 상태다. 일반 finalizer와 accepted/rejected cleanup은 이 상태로 전환할 수 없다. `expired`는 reserved-origin partial artifact cleanup 완료 또는 version-aware empty 확인 뒤에만 사용한다.
+- `cleanup_pending`은 `BeginCleanupTransition` 또는 `BeginHeldCleanup`이 token을 증가시키고 forward lease를 fence-out한 뒤 늦은 Storage write의 quiet period를 기다리는 reserved-origin 상태다. Deadline transition 시 recovery attempt count가 있는 만료 lease는 exact nested attempt를 같은 transaction에서 `failed/lease_expired`로 닫아야 하며, linkage를 검증할 수 없으면 receipt transition도 금지한다. 일반 finalizer와 accepted/rejected cleanup은 이 상태로 전환할 수 없다. `expired`는 reserved-origin partial artifact cleanup 완료 또는 version-aware empty 확인 뒤에만 사용한다.
 - accepted `stored|queued|projected` cleanup은 `deleting -> deleted`를 사용하며 동일 lineage replay는 모든 accepted lifecycle 상태에서 complete 의미다. rejected receipt는 cleanup target 진행과 무관하게 `rejected`와 replay-rejected 의미를 유지한다.
 - stored/rejected transition은 `next_integrity_check_at`을 설정한다. 별도 bounded integrity auditor가 이 cursor와 Storage Inventory로 stored-missing·rejected-artifact를 찾으며 reserved sweeper query가 이 역할을 대신하지 않는다.
 
@@ -480,7 +480,7 @@ created_at, updated_at, completed_at?, worker_version
 
 cleanup target은 delete 전에 transaction으로 생성하며 이후 mode, origin status, path나 generation을 새 latest 값으로 교체하지 않는다. raw exact generation을 먼저 삭제하고 manifest exact generation을 다음에 삭제한다. transient/permission/quota 오류를 NotFound로 바꾸지 않으며, target과 receipt lineage가 완전하지 않으면 delete를 실행하지 않는다. rejected origin은 exact ownership evidence와 별도 보안 승인 ID가 없으면 target 자체를 만들지 않는다.
 
-reserved-origin expiry cleanup은 receipt를 `cleanup_pending`으로 바꾸고 모든 forward lease를 fence-out한 뒤 `cleanup_quiescence_until`까지 기다린다. accepted retention cleanup은 receipt를 `deleting`으로 바꾸며, rejected cleanup은 receipt status를 유지한다. 모든 경로는 immutable `cleanup_origin_status`를 기록하고 quiet period를 최대 lease와 Storage operation timeout 합보다 길게 둔다. 삭제 뒤 version-aware live generation을 재검사하며 새 generation이 보이면 원 target을 바꾸지 않고 finding 또는 별도 linked target으로 분리한다.
+reserved-origin expiry cleanup은 exact prior forward attempt가 있으면 먼저 같은 transaction에서 terminal로 닫고 receipt를 `cleanup_pending`으로 바꾸며 모든 forward lease를 fence-out한 뒤 `cleanup_quiescence_until`까지 기다린다. Attempt closure와 receipt transition은 함께 commit 또는 rollback되어야 하고 recovery attempt count는 누적값으로 유지한다. accepted retention cleanup은 receipt를 `deleting`으로 바꾸며, rejected cleanup은 receipt status를 유지한다. 모든 경로는 immutable `cleanup_origin_status`를 기록하고 quiet period를 최대 lease와 Storage operation timeout 합보다 길게 둔다. 삭제 뒤 version-aware live generation을 재검사하며 새 generation이 보이면 원 target을 바꾸지 않고 finding 또는 별도 linked target으로 분리한다.
 
 `/ingestPurgeJobs/{receiptId}`:
 

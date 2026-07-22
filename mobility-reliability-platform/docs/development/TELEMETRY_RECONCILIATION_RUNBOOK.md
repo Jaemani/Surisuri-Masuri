@@ -96,7 +96,7 @@
 
 ## 8. Expiry cleanup 재개 규칙
 
-expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인하고 token을 증가시켜 `cleanup_pending`으로 전환한다. reserved-origin hold는 `BeginHeldCleanup`만 같은 상태로 보낼 수 있다. accepted receipt는 `BeginAcceptedDeletion`으로 `deleting -> deleted`를 사용해 replay-complete를 유지한다. rejected artifact는 receipt를 `rejected`로 유지하며 exact ownership과 별도 보안 승인 없이는 cleanup target을 만들지 않는다. 모든 cleanup entry는 origin status를 고정하고 최대 lease+Storage operation timeout보다 긴 quiet period 뒤 시작한다. cleanup target은 처음 발견한 exact lineage를 immutable하게 유지한다.
+expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인한다. 만료 lease에 recovery attempt count가 있으면 exact nested attempt의 owner·token·version·started time을 함께 검증하고 `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token을 증가시켜 `cleanup_pending`으로 전환한다. Attempt가 누락·변조·completed이면 receipt도 바꾸지 않고 조사 가능한 lease 증거를 보존한다. Application·receipt·attempt read clock 중 가장 이른 시각이 deadline/lease expiry 전이면 `not_ready`다. reserved-origin hold는 `BeginHeldCleanup`만 같은 상태로 보낼 수 있다. accepted receipt는 `BeginAcceptedDeletion`으로 `deleting -> deleted`를 사용해 replay-complete를 유지한다. rejected artifact는 receipt를 `rejected`로 유지하며 exact ownership과 별도 보안 승인 없이는 cleanup target을 만들지 않는다. 모든 cleanup entry는 origin status를 고정하고 최대 lease+Storage operation timeout보다 긴 quiet period 뒤 시작한다. cleanup target은 처음 발견한 exact lineage를 immutable하게 유지한다. 현재 구현 근거는 [ADR-0022](../decisions/ADR-0022-atomic-cleanup-transition-attempt-closure.md)와 [EVD-20260722-030](../evidence/2026-07.md#evd-20260722-030--cleanup-transition의-expired-forward-attempt-원자-종료)을 따른다.
 
 ```text
 planned
@@ -123,9 +123,12 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 
 2026-07-22 bounded candidate query·fixed-cutoff checkpoint·claim outer loop의 local/Emulator gate는 [EVD-20260722-029](../evidence/2026-07.md#evd-20260722-029--bounded-forward-recovery-worker와-cross-run-checkpoint)에 기록한다. 이는 executable startup·scheduler·production index/IAM을 연결한 운영 검증이 아니다.
 
+2026-07-22 cleanup transition의 expired forward attempt 원자 종료와 missing-attempt rollback은 [EVD-20260722-030](../evidence/2026-07.md#evd-20260722-030--cleanup-transition의-expired-forward-attempt-원자-종료)에서 local/Emulator로 검증했다. 이는 cleanup owner claim, target·delete·`expired` 완료 또는 purge 증거가 아니다.
+
 - [ ] fake clock으로 lease exact-expiry boundary 재현
 - [ ] 두 request/sweeper의 concurrent claim winner 1명
 - [ ] recovery claim 대 `BeginCleanupTransition` 경계 경쟁에서 cleanup/recovery 중 허용된 winner만 1명
+- [x] expired forward `started` attempt와 reserved cleanup transition이 같은 transaction에서 terminal+pending으로 commit되고 missing·malformed attempt는 write 0
 - [ ] takeover 뒤 stale renew/release/stored/rejected update 0
 - [ ] raw-only → same raw generation manifest → stored
 - [ ] no-artifact → Storage write 0

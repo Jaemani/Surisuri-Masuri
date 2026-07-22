@@ -16,6 +16,7 @@
 - reserved receipt의 최초 lease, active replay 차단, 만료 takeover와 단조 증가 fencing token
 - current fence를 요구하는 `MarkStored`·`MarkRejected`와 safe lease release
 - request lease 갱신, sweeper 전용 recovery claim, recovery attempt `started` 원장과 reserved-origin cleanup transition
+- deadline cleanup에서 exact expired forward attempt를 같은 transaction으로 `failed/lease_expired` 종료하고 missing·malformed linkage를 write-zero로 거부하는 원장 경계
 - replay authorization의 receipt read-time coherence와 deadline·clock skew·revision overflow fail-closed 검사
 - forward recovery와 accepted integrity audit를 분리하는 provider-neutral artifact classification 계약과 opaque read grant
 - duplicate key·unknown field·invalid UTF-8·64KiB 초과 입력을 거부하는 strict telemetry manifest decoder

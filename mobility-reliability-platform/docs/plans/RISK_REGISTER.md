@@ -3,7 +3,7 @@
 ## 1. 운영 방식
 
 - 검토 주기: 매월 15일·말일 정기리포트 전
-- 기준일: 2026-07-21
+- 기준일: 2026-07-22
 - 기록 책임: project owner; 자동 초안은 사람 검토 전 상태를 변경하지 않음
 - 다음 정기 검토: 2026-07-31 fixed report 준비 시
 - 상태: `watch`, `active`, `mitigated`, `accepted`, `closed`
@@ -29,6 +29,7 @@
 | RSK-11 | Firestore 비용이 sample 수에 비례 | high/medium | write count가 sample count와 선형 | Storage batch, small receipt/projection, listener 제한 | sample별 write 0을 staging usage test로 확인하지 못함 | active |
 | RSK-12 | Docker context와 CI source 불일치 | high/medium | host test 통과·image compile 누락 | directory allowlist, Docker build CI, image smoke | 이미지에 새 adapter 누락 | active |
 | RSK-28 | due query에서 손상 receipt가 보이지 않거나 mutable page가 후보를 지연함 | high/medium | `status`·`next_recovery_at` 누락/type drift, page 사이 due/state 변경·backfill, 같은 head 반복, checkpoint 정체 | ADR-0021 fixed-cutoff epoch, deterministic document cursor, malformed advisory item 격리, fresh claim, CAS checkpoint와 head wrap | 별도 bounded control-integrity audit와 production composite index `READY`·staging mutation/cardinality/비용 검증 전에는 scan complete를 snapshot·전체 무결성 complete로 해석하지 않음 | active |
+| RSK-29 | reserved expiry cleanup이 이전 forward attempt를 `started`로 고아화해 감사·purge 원장을 모순시킴 | high/low | `cleanup_pending` receipt의 prior attempt가 `started`, lease owner/token 증거 제거 | ADR-0022 exact prior attempt 검증과 attempt+receipt 동일 transaction closure, missing·malformed write-zero, multi-clock earliest guard | 기존 orphan bounded audit와 local/clean CI regression 없이 cleanup claim·purge로 진행 금지 | mitigated |
 | RSK-13 | WSL host tool 부재·네트워크 차이 | medium/high | Go/adb 부재, device가 localhost 실패 | fixed Docker, Windows ADB, host-gateway/Compose, WSL runbook | 검증 환경을 기록하지 않음 | active |
 | RSK-14 | 실제 수리 export 부재·품질 미확정 | high/high | source manifest 없음, ID/필드 혼용 | mapping 설계와 dry-run 분리, quarantine, reconciliation | 실제 ML 성능·이관 완료 주장 | active |
 | RSK-15 | 주행 라벨 모호성·표본 편향 | high/high | 낮은 agreement, 기종/사용자 편중 | label guide, uncertainty, group/time split, active review | label 품질 기준 미달 | watch |
