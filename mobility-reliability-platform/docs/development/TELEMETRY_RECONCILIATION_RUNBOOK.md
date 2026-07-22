@@ -165,7 +165,7 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 
 [ADR-0032](../decisions/ADR-0032-bounded-cleanup-terminal-orchestration.md)의 R8j local orchestrator는 `PhaseExecutor`가 만든 package-private sealed intent만 소비한다. Success와 failure terminal mutation 합계는 invocation당 최대 1회이며 public result, generic/internal error, conflicting `errors.Join`, outcome/audit persistence ambiguity와 unknown mutation status는 terminal 권한을 만들지 않는다. Durable phase 3/6 `unknown`은 저장된 class를 복원한다. Terminal commit 응답 유실은 valid pre-state query가 있을 때만 parent cancellation과 분리한 최대 5초 read-only correlation을 수행하고 mutation을 재호출하지 않는다. Direct·correlated result는 exact digest·revision·fence·cursor·purge·lease residue를 다시 검증하고 bounded `TerminalResult`만 반환한다. [EVD-20260723-040](../evidence/2026-07.md#evd-20260723-040--bounded-cleanup-terminal-orchestration)의 local unit/race와 terminal-store Firestore Emulator 경쟁 근거이며 `TerminalOrchestrator.Run` 전체 Firestore/GCS vertical slice, `cmd/server`·scheduler/startup/readiness와 staging/production에는 미연결이다.
 
-[ADR-0033](../decisions/ADR-0033-fenced-resumable-receipt-linkage-purge.md)의 R8k purge는 아직 `proposed`다. 구현 전 운영 규칙은 parent receipt·두 uniqueness index를 먼저 삭제하지 않는 것, purge fence 전에는 child delete를 시작하지 않는 것, query 결과만으로 delete하지 않고 exact child를 page transaction에서 다시 읽는 것, malformed child를 skip하지 않는 것이다. Top-level target/finding은 `receipt_id` query만 믿지 않고 receipt 하위 inverse `purgeLinks`와 같은 transaction으로 생성해야 한다. Registry rollout 전 legacy child·out-of-band writer inventory와 R8k-a/b/c EVD가 생기기 전에는 `purge_eligible_at`을 metadata purge 완료로 해석하지 않는다.
+[ADR-0033](../decisions/ADR-0033-fenced-resumable-receipt-linkage-purge.md)의 R8k는 계속 `proposed`지만 R8k-a local job admission/fence는 구현됐다. 운영 규칙은 parent receipt·두 uniqueness index를 먼저 삭제하지 않는 것, purge fence 전에는 child delete를 시작하지 않는 것, query 결과만으로 delete하지 않고 exact child를 page transaction에서 다시 읽는 것, malformed child를 skip하지 않는 것이다. Top-level target/finding은 `receipt_id` query만 믿지 않고 receipt 하위 inverse `purgeLinks`와 같은 transaction으로 생성해야 한다. [EVD-20260723-041](../evidence/2026-07.md#evd-20260723-041--fenced-receipt-purge-admission)은 local job+receipt fence와 existing attempt/target writer 차단만 증명한다. Registry rollout 전 legacy child·out-of-band writer inventory와 R8k-b/c EVD 전에는 `purge_eligible_at` 또는 job admission을 metadata purge 완료로 해석하지 않는다.
 
 - [x] fake clock으로 lease exact-expiry boundary 재현
 - [x] 두 request/sweeper/cleanup의 concurrent claim winner 1명
@@ -201,6 +201,10 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 - [x] success/disposition 상호 배타 routing과 invocation당 terminal mutation 최대 1회
 - [x] durable raw/manifest `unknown`의 stored class와 exact ledger binding 복원
 - [x] outcome·audit persistence ambiguity와 unknown mutation status에서 terminal intent·mutation 0
+- [x] deterministic purge job과 receipt fence의 create-once admission, two-index write 0과 concurrent created 1/replayed 1
+- [x] full/partial purge fence 뒤 existing recovery/cleanup attempt와 cleanup target create fail-closed
+- [ ] nested attempt `page_size+1` advisory query와 exact page delete+cursor/count/revision atomic commit
+- [ ] target·finding inverse-link registry/backfill과 final job+receipt+two-index linkage delete
 - [x] parent cancellation 뒤 최대 5초 detached read-only correlation과 mutation replay 0
 - [x] malformed direct/correlated terminal DTO와 full control-object 결과 surface 거부
 - [ ] concrete `TerminalOrchestrator.Run`의 Firestore/GCS end-to-end Emulator vertical slice
