@@ -52,6 +52,7 @@ type FirestoreAdmissionStore struct {
 	now                                 func() time.Time
 	cleanupAbsenceAuditEvidenceVerifier cleanupattest.Verifier
 	cleanupAbsenceAuditContext          func(context.Context, time.Time) (context.Context, context.CancelFunc)
+	cleanupArtifactExecutionContext     func(context.Context, time.Time) (context.Context, context.CancelFunc)
 }
 
 var _ ingest.AdmissionStore = (*FirestoreAdmissionStore)(nil)

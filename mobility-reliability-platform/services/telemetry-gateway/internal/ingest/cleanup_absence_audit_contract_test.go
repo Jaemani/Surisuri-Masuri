@@ -128,6 +128,38 @@ func TestCleanupAbsenceAuditRequestRejectsTamperAndWrongPhase(t *testing.T) {
 	}
 }
 
+func TestCleanupAbsenceAuditRequestRejectsUnknownDeleteOutcome(t *testing.T) {
+	now, plan := cleanupLedgerPlanFixture(t, ArtifactClassificationValidComplete)
+	ledger, err := NewCleanupExecutionLedger(plan)
+	if err != nil {
+		t.Fatalf("NewCleanupExecutionLedger() = %v", err)
+	}
+	ledger, err = AdvanceCleanupExecutionLedger(plan, ledger, CleanupExecutionTransition{
+		Phase: CleanupExecutionPhaseRawDispatchRecorded, ObservedAt: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("raw dispatch = %v", err)
+	}
+	ledger, err = AdvanceCleanupExecutionLedger(plan, ledger, CleanupExecutionTransition{
+		Phase:         CleanupExecutionPhaseRawOutcomeRecorded,
+		DeleteOutcome: CleanupDeleteUnknown, ObservedAt: now.Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("raw unknown outcome = %v", err)
+	}
+	if _, err := BuildCleanupAbsenceAuditRequest(
+		plan, ledger, CleanupAbsenceAuditRaw, now.Add(2*time.Second),
+	); !errors.Is(err, ErrCleanupExecutionConflict) {
+		t.Fatalf("unknown raw audit request error = %v", err)
+	}
+	if _, err := AdvanceCleanupExecutionLedger(plan, ledger, CleanupExecutionTransition{
+		Phase:        CleanupExecutionPhaseRawAbsenceConfirmed,
+		AuditOutcome: CleanupAuditConfirmedAbsent, ObservedAt: now.Add(3 * time.Second),
+	}); !errors.Is(err, ErrCleanupExecutionConflict) {
+		t.Fatalf("unknown raw audit transition error = %v", err)
+	}
+}
+
 func advanceCleanupLedgerForAuditTest(
 	t *testing.T,
 	plan CleanupExecutionLedgerPlan,

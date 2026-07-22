@@ -63,13 +63,15 @@ func BuildCleanupAbsenceAuditRequest(
 	}
 	switch artifact {
 	case CleanupAbsenceAuditRaw:
-		if ledger.Phase != CleanupExecutionPhaseRawOutcomeRecorded {
+		if ledger.Phase != CleanupExecutionPhaseRawOutcomeRecorded ||
+			ledger.Raw.DeleteOutcome == CleanupDeleteUnknown {
 			return CleanupAbsenceAuditRequest{}, ErrCleanupExecutionConflict
 		}
 		request.NextPhase = CleanupExecutionPhaseRawAbsenceConfirmed
 		request.ExpectedPath = plan.ExpectedRawPath
 	case CleanupAbsenceAuditManifest:
-		if ledger.Phase != CleanupExecutionPhaseManifestOutcomeRecorded {
+		if ledger.Phase != CleanupExecutionPhaseManifestOutcomeRecorded ||
+			ledger.Manifest.DeleteOutcome == CleanupDeleteUnknown {
 			return CleanupAbsenceAuditRequest{}, ErrCleanupExecutionConflict
 		}
 		request.NextPhase = CleanupExecutionPhaseManifestAbsenceConfirmed

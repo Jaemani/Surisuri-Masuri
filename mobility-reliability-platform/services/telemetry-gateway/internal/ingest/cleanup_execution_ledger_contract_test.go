@@ -278,7 +278,6 @@ func TestCleanupExecutionLedgerRejectsSkippedConflictingAndUnknownProgress(t *te
 	for _, step := range []CleanupExecutionTransition{
 		{Phase: CleanupExecutionPhaseRawDispatchRecorded, ObservedAt: now.Add(time.Second)},
 		{Phase: CleanupExecutionPhaseRawOutcomeRecorded, DeleteOutcome: CleanupDeleteUnknown, ObservedAt: now.Add(2 * time.Second)},
-		{Phase: CleanupExecutionPhaseRawAbsenceConfirmed, AuditOutcome: CleanupAuditConfirmedAbsent, ObservedAt: now.Add(3 * time.Second)},
 	} {
 		unknown, err = AdvanceCleanupExecutionLedger(plan, unknown, step)
 		if err != nil {
@@ -286,9 +285,10 @@ func TestCleanupExecutionLedgerRejectsSkippedConflictingAndUnknownProgress(t *te
 		}
 	}
 	if _, err := AdvanceCleanupExecutionLedger(plan, unknown, CleanupExecutionTransition{
-		Phase: CleanupExecutionPhaseManifestDispatchRecorded, ObservedAt: now.Add(4 * time.Second),
+		Phase:        CleanupExecutionPhaseRawAbsenceConfirmed,
+		AuditOutcome: CleanupAuditConfirmedAbsent, ObservedAt: now.Add(3 * time.Second),
 	}); !errors.Is(err, ErrCleanupExecutionConflict) {
-		t.Fatalf("unknown raw outcome advanced to manifest: %v", err)
+		t.Fatalf("unknown raw outcome advanced to audit: %v", err)
 	}
 }
 

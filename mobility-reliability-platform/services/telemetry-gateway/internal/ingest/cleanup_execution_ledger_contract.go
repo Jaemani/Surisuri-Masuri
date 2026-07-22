@@ -51,15 +51,16 @@ const (
 type CleanupExecutionErrorClass string
 
 const (
-	CleanupExecutionErrorProviderTimeout     CleanupExecutionErrorClass = "provider_timeout"
-	CleanupExecutionErrorProviderCancelled   CleanupExecutionErrorClass = "provider_cancelled"
-	CleanupExecutionErrorProviderUnavailable CleanupExecutionErrorClass = "provider_unavailable"
-	CleanupExecutionErrorQuotaLimited        CleanupExecutionErrorClass = "quota_limited"
-	CleanupExecutionErrorPermissionDenied    CleanupExecutionErrorClass = "permission_denied"
-	CleanupExecutionErrorPreconditionDrift   CleanupExecutionErrorClass = "precondition_drift"
-	CleanupExecutionErrorGenerationDrift     CleanupExecutionErrorClass = "generation_drift"
-	CleanupExecutionErrorLineageMismatch     CleanupExecutionErrorClass = "lineage_mismatch"
-	CleanupExecutionErrorInventoryIncomplete CleanupExecutionErrorClass = "inventory_incomplete"
+	CleanupExecutionErrorProviderTimeout      CleanupExecutionErrorClass = "provider_timeout"
+	CleanupExecutionErrorProviderCancelled    CleanupExecutionErrorClass = "provider_cancelled"
+	CleanupExecutionErrorProviderUnavailable  CleanupExecutionErrorClass = "provider_unavailable"
+	CleanupExecutionErrorResponseUnverifiable CleanupExecutionErrorClass = "response_unverifiable"
+	CleanupExecutionErrorQuotaLimited         CleanupExecutionErrorClass = "quota_limited"
+	CleanupExecutionErrorPermissionDenied     CleanupExecutionErrorClass = "permission_denied"
+	CleanupExecutionErrorPreconditionDrift    CleanupExecutionErrorClass = "precondition_drift"
+	CleanupExecutionErrorGenerationDrift      CleanupExecutionErrorClass = "generation_drift"
+	CleanupExecutionErrorLineageMismatch      CleanupExecutionErrorClass = "lineage_mismatch"
+	CleanupExecutionErrorInventoryIncomplete  CleanupExecutionErrorClass = "inventory_incomplete"
 )
 
 type CleanupExecutionLedgerPlan struct {
@@ -335,7 +336,8 @@ func AdvanceCleanupExecutionLedger(
 		next.Raw.DeleteOutcome = transition.DeleteOutcome
 		next.Raw.OutcomeRecordedAt = observedAt
 	case CleanupExecutionPhaseRawAbsenceConfirmed:
-		if transition.DeleteOutcome != "" || transition.AuditOutcome != CleanupAuditConfirmedAbsent {
+		if transition.DeleteOutcome != "" || transition.AuditOutcome != CleanupAuditConfirmedAbsent ||
+			next.Raw.DeleteOutcome == CleanupDeleteUnknown {
 			return CleanupExecutionLedger{}, ErrCleanupExecutionConflict
 		}
 		next.Raw.AuditOutcome = transition.AuditOutcome
@@ -354,7 +356,8 @@ func AdvanceCleanupExecutionLedger(
 		next.Manifest.DeleteOutcome = transition.DeleteOutcome
 		next.Manifest.OutcomeRecordedAt = observedAt
 	case CleanupExecutionPhaseManifestAbsenceConfirmed:
-		if transition.DeleteOutcome != "" || transition.AuditOutcome != CleanupAuditConfirmedAbsent {
+		if transition.DeleteOutcome != "" || transition.AuditOutcome != CleanupAuditConfirmedAbsent ||
+			next.Manifest.DeleteOutcome == CleanupDeleteUnknown {
 			return CleanupExecutionLedger{}, ErrCleanupExecutionConflict
 		}
 		next.Manifest.AuditOutcome = transition.AuditOutcome
@@ -483,6 +486,7 @@ func validateCleanupExecutionPhaseShape(ledger CleanupExecutionLedger, observedA
 		}
 	case CleanupExecutionPhaseRawAbsenceConfirmed:
 		if !emptyTerminal || !auditedCleanupArtifactProgress(ledger.Raw, observedAt) ||
+			ledger.Raw.DeleteOutcome == CleanupDeleteUnknown ||
 			!emptyCleanupArtifactProgress(ledger.Manifest) {
 			return ErrInvalidCleanupExecutionLedger
 		}
@@ -504,6 +508,7 @@ func validateCleanupExecutionPhaseShape(ledger CleanupExecutionLedger, observedA
 		if !emptyTerminal || !auditedCleanupArtifactProgress(ledger.Raw, observedAt) ||
 			ledger.Raw.DeleteOutcome == CleanupDeleteUnknown ||
 			!auditedCleanupArtifactProgress(ledger.Manifest, observedAt) ||
+			ledger.Manifest.DeleteOutcome == CleanupDeleteUnknown ||
 			ledger.Manifest.DispatchedAt.Before(ledger.Raw.AuditedAt) {
 			return ErrInvalidCleanupExecutionLedger
 		}
