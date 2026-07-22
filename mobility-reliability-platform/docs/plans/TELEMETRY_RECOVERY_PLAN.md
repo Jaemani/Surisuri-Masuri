@@ -323,6 +323,8 @@ Local R8c executor와 official testbench synthetic generation delete는 구현·
 
 2026-07-22 현재 1~9단계의 reserved-origin success path와 11단계의 purge eligibility 설정까지 local component로 구현·검증했다. R8c는 current Firestore target/fence를 다시 승인하고 exact conditional delete, raw-first·missing-counterpart audit와 fail-closed error taxonomy를 제공하며 근거는 [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit)에 기록한다. R8d foundation은 authoritative state를 다시 읽어 planned ledger와 dispatch/outcome phase를 저장하고 exact replay를 write 0으로 만든다. R8e는 paired signed evidence로 raw·manifest absence phase를 저장한다. R8f는 old progress를 보존하며 새 fence의 pristine attempt로 인계하지만 prior target·outcome·absence를 권한으로 상속하지 않는다. R8g는 dispatch-before-mutation, single-artifact grant, durable outcome과 raw-first signed audit를 합성하며 replay dispatch와 `unknown`에서 안전 정지한다. R8h만 exact terminal evidence를 attempt `completed/outcome=expired`, receipt `expired`와 같은 purge eligibility로 원자 확정하고 response loss를 read-only로 상관한다. Retry·hold, held/accepted/rejected cleanup, nested purge job과 scheduler/startup은 미구현이다.
 
+다음 R8i 계약은 [ADR-0031](../decisions/ADR-0031-phase-preserving-cleanup-retry-hold-disposition.md)에 proposed 상태로 고정한다. `unknown` error class를 durable outcome에 보존하고, retry·hold attempt는 실제 마지막 phase/revision을 유지한 채 terminal로 닫으며 receipt에는 terminal attempt reference와 cleanup 전용 cursor를 기록한다. `next_cleanup_at`은 old fence expiry보다 이를 수 없고 hold는 review due가 지나도 자동 claim하지 않는다. Attempt+receipt만 원자 update하고 immutable target·두 index는 write 0이며 response loss는 read-only correlation으로 분리한다. 이 문서는 구현 증거가 생기기 전 R8i를 완료 상태로 해석하지 않는다.
+
 ### R9. Staging과 운영 gate
 
 - 별도 staging Firebase/GCP project
