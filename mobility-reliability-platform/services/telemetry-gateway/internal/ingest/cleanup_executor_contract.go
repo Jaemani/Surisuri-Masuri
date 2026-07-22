@@ -12,11 +12,12 @@ import (
 const cleanupExecutionPlanBindingVersion = "cleanup-execution-plan@1"
 
 var (
-	ErrCleanupExecutionUnauthorized       = errors.New("cleanup execution is unauthorized")
-	ErrCleanupExecutionUnavailable        = errors.New("cleanup execution is unavailable")
-	ErrCleanupExecutionGenerationDrift    = errors.New("cleanup execution generation drift")
-	ErrCleanupExecutionLineageMismatch    = errors.New("cleanup execution lineage mismatch")
-	ErrInvalidCleanupExecutionObservation = errors.New("cleanup execution observation is invalid")
+	ErrCleanupExecutionUnauthorized        = errors.New("cleanup execution is unauthorized")
+	ErrCleanupExecutionUnavailable         = errors.New("cleanup execution is unavailable")
+	ErrCleanupExecutionInventoryIncomplete = errors.New("cleanup execution inventory is incomplete")
+	ErrCleanupExecutionGenerationDrift     = errors.New("cleanup execution generation drift")
+	ErrCleanupExecutionLineageMismatch     = errors.New("cleanup execution lineage mismatch")
+	ErrInvalidCleanupExecutionObservation  = errors.New("cleanup execution observation is invalid")
 )
 
 type CleanupExecutionQuery struct {

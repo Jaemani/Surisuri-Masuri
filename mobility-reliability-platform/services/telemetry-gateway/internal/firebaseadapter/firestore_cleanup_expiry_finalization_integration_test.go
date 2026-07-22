@@ -157,6 +157,152 @@ func TestFirestoreAdmissionStoreEmulatorConcurrentCleanupFinalizersHaveOneWinner
 	}
 }
 
+func TestFirestoreAdmissionStoreEmulatorCleanupFinalizationRejectsStaleDispositionWithoutPartialLineage(t *testing.T) {
+	fixture := seedReadyCleanupExpiryFinalizationEmulatorFixture(t)
+	staleLedger := fixture.ready
+	staleLedger.Phase = ingest.CleanupExecutionPhaseManifestOutcomeRecorded
+	staleLedger.Revision = 6
+	staleLedger.Manifest.AuditOutcome = ""
+	staleLedger.Manifest.AuditedAt = time.Time{}
+	staleCommand, err := ingest.BuildCleanupExecutionDispositionCommand(
+		fixture.plan, staleLedger, ingest.CleanupExecutionErrorProviderUnavailable,
+	)
+	if err != nil {
+		t.Fatalf("BuildCleanupExecutionDispositionCommand() = %v", err)
+	}
+	staleOutcomeQuery, err := ingest.CleanupExecutionDispositionOutcomeQueryForLedger(
+		fixture.plan, staleLedger, staleCommand.ErrorClass,
+	)
+	if err != nil {
+		t.Fatalf("CleanupExecutionDispositionOutcomeQueryForLedger() = %v", err)
+	}
+
+	before := readCleanupExpiryEmulatorDocuments(t, fixture.client, fixture.paths())
+	preflightBarrier := newReceiptReadBarrier(fixture.receiptPath)
+	mutationBarrier := newReceiptReadBarrier(fixture.receiptPath)
+	store, err := newCleanupFinalizationContendedEmulatorStore(
+		fixture.client, fixture.completedAt, preflightBarrier, mutationBarrier,
+	)
+	if err != nil {
+		t.Fatalf("newCleanupFinalizationContendedEmulatorStore() = %v", err)
+	}
+
+	type finalizationCall struct {
+		result ingest.CleanupExpiryFinalizationResult
+		err    error
+	}
+	type dispositionCall struct {
+		result ingest.CleanupExecutionDispositionResult
+		err    error
+	}
+	finalizationResult := make(chan finalizationCall, 1)
+	dispositionResult := make(chan dispositionCall, 1)
+	go func() {
+		result, callErr := store.FinalizeExpiredCleanup(context.Background(), fixture.query)
+		finalizationResult <- finalizationCall{result: result, err: callErr}
+	}()
+	go func() {
+		result, callErr := store.DisposeCleanupExecution(context.Background(), staleCommand)
+		dispositionResult <- dispositionCall{result: result, err: callErr}
+	}()
+
+	finalization := <-finalizationResult
+	disposition := <-dispositionResult
+	if finalization.err != nil {
+		t.Fatalf("FinalizeExpiredCleanup() = %v", finalization.err)
+	}
+	if !errors.Is(disposition.err, ingest.ErrCleanupExecutionDispositionConflict) {
+		t.Fatalf("DisposeCleanupExecution(stale) error = %v", disposition.err)
+	}
+	if disposition.result.Receipt.ReceiptID != "" ||
+		disposition.result.Ledger.Phase != "" ||
+		ingest.ValidateCleanupExecutionDispositionOutcomeQuery(disposition.result.OutcomeQuery) == nil {
+		t.Fatalf("stale disposition exposed a terminal result = %#v", disposition.result)
+	}
+	if finalization.result.Receipt.State != ingest.ReceiptExpired ||
+		finalization.result.Receipt.Revision != fixture.receipt.Revision+1 ||
+		finalization.result.Ledger.Phase != ingest.CleanupExecutionPhaseCompleted ||
+		finalization.result.Ledger.Revision != fixture.ready.Revision+1 ||
+		finalization.result.Ledger.Disposition != ingest.CleanupExecutionDispositionComplete {
+		t.Fatalf("winning finalization result = %#v", finalization.result)
+	}
+
+	after := readCleanupExpiryEmulatorDocuments(t, fixture.client, fixture.paths())
+	if !sameCleanupExpiryEmulatorDocument(before[fixture.targetPath], after[fixture.targetPath]) {
+		t.Fatal("terminal race mutated immutable cleanup target")
+	}
+	commitTime := after[fixture.attemptPath].updateTime
+	for _, path := range []string{
+		fixture.attemptPath,
+		fixture.receiptPath,
+		fixture.idempotencyPath,
+		fixture.clientBatchPath,
+	} {
+		if !after[path].updateTime.After(before[path].updateTime) {
+			t.Fatalf("terminal race did not update finalization document %q", path)
+		}
+		if !after[path].updateTime.Equal(commitTime) {
+			t.Fatalf("terminal race left a partial commit at %q: got=%v want=%v", path, after[path].updateTime, commitTime)
+		}
+	}
+
+	receipt := readAdmissionEmulatorReceipt(
+		t, fixture.client, fixture.receipt.TenantID, fixture.receipt.ReceiptID,
+	)
+	attempt := readAdmissionEmulatorAttempt(
+		t, fixture.client, fixture.receipt.TenantID, fixture.receipt.ReceiptID,
+		fixture.query.AttemptID,
+	)
+	idempotency := readCleanupExpiryEmulatorIndex(t, fixture.client, fixture.idempotencyPath)
+	clientBatch := readCleanupExpiryEmulatorIndex(t, fixture.client, fixture.clientBatchPath)
+	if receipt.State != ingest.ReceiptExpired || receipt.Revision != fixture.receipt.Revision+1 ||
+		receipt.PurgeEligibleAt == nil || receipt.CleanupDispositionAttemptID != "" ||
+		receipt.CleanupControlDisposition != "" || receipt.LastCleanupErrorClass != "" ||
+		!receipt.NextCleanupAt.IsZero() || !receipt.CleanupHoldReviewDueAt.IsZero() {
+		t.Fatalf("terminal race receipt has partial disposition state = %#v", receipt)
+	}
+	if attempt.Status != ingest.RecoveryAttemptCompleted ||
+		attempt.Outcome != ingest.RecoveryAttemptOutcomeExpired ||
+		attempt.CleanupPhase != ingest.CleanupExecutionPhaseCompleted ||
+		attempt.CleanupExecutionRevision != fixture.ready.Revision+1 ||
+		attempt.CleanupDisposition != ingest.CleanupExecutionDispositionComplete ||
+		attempt.CleanupErrorClass != "" ||
+		attempt.CleanupEvidenceHash != finalization.result.Ledger.EvidenceHash ||
+		!attempt.CompletedAt.Equal(finalization.result.Ledger.CompletedAt) {
+		t.Fatalf("terminal race attempt has partial disposition state = %#v", attempt)
+	}
+	if idempotency.PurgeEligibleAt == nil || clientBatch.PurgeEligibleAt == nil ||
+		!idempotency.PurgeEligibleAt.Equal(*receipt.PurgeEligibleAt) ||
+		!clientBatch.PurgeEligibleAt.Equal(*receipt.PurgeEligibleAt) {
+		t.Fatalf(
+			"terminal race index lineage mismatch: receipt=%v idempotency=%v client_batch=%v",
+			receipt.PurgeEligibleAt, idempotency.PurgeEligibleAt, clientBatch.PurgeEligibleAt,
+		)
+	}
+
+	authorizer, err := ingest.NewSystemCleanupExecutionDispositionOutcomeAuthorizer(
+		store, func() time.Time { return fixture.completedAt },
+	)
+	if err != nil {
+		t.Fatalf("NewSystemCleanupExecutionDispositionOutcomeAuthorizer() = %v", err)
+	}
+	grant, err := authorizer.Authorize(context.Background(), staleOutcomeQuery)
+	if err != nil {
+		t.Fatalf("Authorize(stale disposition outcome) = %v", err)
+	}
+	staleOutcome, err := store.GetCleanupExecutionDispositionOutcome(
+		context.Background(), grant, staleOutcomeQuery, time.Now().UTC().Add(time.Second),
+	)
+	if err != nil ||
+		staleOutcome.CommitStatus != ingest.CleanupExecutionDispositionUnverifiable ||
+		staleOutcome.Disposition != "" || staleOutcome.ErrorClass != "" ||
+		staleOutcome.EvidenceHash != "" || !staleOutcome.CompletedAt.IsZero() {
+		t.Fatalf("stale disposition correlation = %#v, %v", staleOutcome, err)
+	}
+	readOnlyAfter := readCleanupExpiryEmulatorDocuments(t, fixture.client, fixture.paths())
+	assertCleanupExpiryEmulatorDocumentsUnchanged(t, after, readOnlyAfter)
+}
+
 func TestFirestoreAdmissionStoreEmulatorRejectsInvalidCleanupFinalizationWithoutWrite(t *testing.T) {
 	tests := []struct {
 		name   string

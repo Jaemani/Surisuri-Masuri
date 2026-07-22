@@ -88,8 +88,8 @@ type ExecutionStatus string
 
 const (
 	ExecutionReadyForFinalization ExecutionStatus = "ready_for_finalization"
+	ExecutionReadyForDisposition  ExecutionStatus = "ready_for_disposition"
 	ExecutionDispatchPending      ExecutionStatus = "dispatch_pending"
-	ExecutionUnknownOutcome       ExecutionStatus = "unknown_outcome"
 )
 
 type ExecutionResult struct {
@@ -100,6 +100,7 @@ type ExecutionResult struct {
 	ErrorClass     ingest.CleanupExecutionErrorClass
 	LedgerRevision int64
 	Steps          int
+	terminalIntent cleanupTerminalIntent
 }
 
 type PhaseExecutor struct {
@@ -155,9 +156,12 @@ func (e *PhaseExecutor) Execute(
 	if err := ctx.Err(); err != nil {
 		return ExecutionResult{}, err
 	}
-	ledger, _, err := e.control.InitializeCleanupExecutionLedger(ctx, query)
+	ledger, status, err := e.control.InitializeCleanupExecutionLedger(ctx, query)
 	if err != nil {
 		return ExecutionResult{}, err
+	}
+	if !cleanupExecutionMutationStatusValid(status) {
+		return ExecutionResult{}, ErrInvalidPhaseExecution
 	}
 	result := executionResultFromLedger(ledger)
 	for step := 0; step < e.maxSteps; step++ {
@@ -173,13 +177,13 @@ func (e *PhaseExecutor) Execute(
 			return result, ErrCleanupDispatchPending
 		case ingest.CleanupExecutionPhaseRawOutcomeRecorded:
 			if ledger.Raw.DeleteOutcome == ingest.CleanupDeleteUnknown {
-				result.Status = ExecutionUnknownOutcome
-				result.Artifact = ingest.CleanupArtifactExecutionRaw
-				result.DeleteOutcome = ledger.Raw.DeleteOutcome
-				return result, ErrCleanupOutcomeUnknown
+				return executionDispositionResult(
+					query, ledger, result, ledger.ErrorClass,
+					cleanupTerminalIntentDurableUnknown, ErrCleanupOutcomeUnknown,
+				)
 			}
 			ledger, result, err = e.auditArtifact(
-				ctx, query, ingest.CleanupAbsenceAuditRaw, result,
+				ctx, query, ledger, ingest.CleanupAbsenceAuditRaw, result,
 			)
 		case ingest.CleanupExecutionPhaseRawAbsenceConfirmed:
 			ledger, result, err = e.executeArtifact(
@@ -191,18 +195,23 @@ func (e *PhaseExecutor) Execute(
 			return result, ErrCleanupDispatchPending
 		case ingest.CleanupExecutionPhaseManifestOutcomeRecorded:
 			if ledger.Manifest.DeleteOutcome == ingest.CleanupDeleteUnknown {
-				result.Status = ExecutionUnknownOutcome
-				result.Artifact = ingest.CleanupArtifactExecutionManifest
-				result.DeleteOutcome = ledger.Manifest.DeleteOutcome
-				return result, ErrCleanupOutcomeUnknown
+				return executionDispositionResult(
+					query, ledger, result, ledger.ErrorClass,
+					cleanupTerminalIntentDurableUnknown, ErrCleanupOutcomeUnknown,
+				)
 			}
 			ledger, result, err = e.auditArtifact(
-				ctx, query, ingest.CleanupAbsenceAuditManifest, result,
+				ctx, query, ledger, ingest.CleanupAbsenceAuditManifest, result,
 			)
 		case ingest.CleanupExecutionPhaseManifestAbsenceConfirmed:
+			intent, intentErr := newCleanupFinalizationIntent(query, ledger)
+			if intentErr != nil {
+				return result, intentErr
+			}
 			result.Status = ExecutionReadyForFinalization
 			result.Phase = ledger.Phase
 			result.LedgerRevision = ledger.Revision
+			result.terminalIntent = intent
 			return result, nil
 		default:
 			return result, ErrInvalidPhaseExecution
@@ -228,6 +237,9 @@ func (e *PhaseExecutor) executeArtifact(
 	if err != nil {
 		return ledger, result, err
 	}
+	if !cleanupExecutionMutationStatusValid(status) {
+		return ledger, result, ErrInvalidPhaseExecution
+	}
 	result.Phase = ledger.Phase
 	result.LedgerRevision = ledger.Revision
 	result.Artifact = artifact
@@ -237,6 +249,12 @@ func (e *PhaseExecutor) executeArtifact(
 	}
 	providerResult, providerErr := e.artifacts.ExecuteCleanupArtifact(ctx, grant, request)
 	if providerResult == (ingest.CleanupArtifactExecutionResult{}) {
+		if errorClass, count := cleanupExecutionErrorClassForProviderFailure(providerErr); count == 1 {
+			return executionDispositionLedgerResult(
+				query, ledger, result, errorClass,
+				cleanupTerminalIntentBoundedFailure, providerErr,
+			)
+		}
 		return ledger, result, providerErr
 	}
 	result.DeleteOutcome = providerResult.DeleteOutcome
@@ -244,18 +262,24 @@ func (e *PhaseExecutor) executeArtifact(
 	persistContext, cancel := context.WithTimeout(
 		context.WithoutCancel(ctx), e.outcomePersistenceTimeout,
 	)
-	persisted, _, persistErr := e.control.RecordCleanupArtifactExecutionOutcome(
+	persisted, persistStatus, persistErr := e.control.RecordCleanupArtifactExecutionOutcome(
 		persistContext, grant, request, providerResult,
 	)
 	cancel()
 	if persistErr != nil {
 		return ledger, result, errors.Join(providerErr, persistErr)
 	}
+	if !cleanupExecutionMutationStatusValid(persistStatus) {
+		return ledger, result, ErrInvalidPhaseExecution
+	}
 	result.Phase = persisted.Phase
 	result.LedgerRevision = persisted.Revision
 	if providerResult.DeleteOutcome == ingest.CleanupDeleteUnknown {
-		result.Status = ExecutionUnknownOutcome
-		return persisted, result, errors.Join(providerErr, ErrCleanupOutcomeUnknown)
+		diagnostic := errors.Join(providerErr, ErrCleanupOutcomeUnknown)
+		return executionDispositionLedgerResult(
+			query, persisted, result, providerResult.ErrorClass,
+			cleanupTerminalIntentDurableUnknown, diagnostic,
+		)
 	}
 	if providerErr != nil {
 		return persisted, result, providerErr
@@ -266,26 +290,90 @@ func (e *PhaseExecutor) executeArtifact(
 func (e *PhaseExecutor) auditArtifact(
 	ctx context.Context,
 	query ingest.CleanupExecutionQuery,
+	ledger ingest.CleanupExecutionLedger,
 	artifact ingest.CleanupAbsenceAuditArtifact,
 	result ExecutionResult,
 ) (ingest.CleanupExecutionLedger, ExecutionResult, error) {
 	request, grant, err := e.control.AuthorizeCleanupAbsenceAudit(ctx, query, artifact)
 	if err != nil {
-		return ingest.CleanupExecutionLedger{}, result, err
+		return ledger, result, err
 	}
 	evidence, err := e.auditor.AuditCleanupAbsence(ctx, grant, request)
 	if err != nil {
-		return ingest.CleanupExecutionLedger{}, result, err
+		if errorClass, count := cleanupExecutionErrorClassForProviderFailure(err); count == 1 {
+			return executionDispositionLedgerResult(
+				query, ledger, result, errorClass,
+				cleanupTerminalIntentBoundedFailure, err,
+			)
+		}
+		return ledger, result, err
 	}
-	ledger, _, err := e.control.RecordCleanupAbsenceAudit(ctx, grant, request, evidence)
+	persisted, persistStatus, err := e.control.RecordCleanupAbsenceAudit(ctx, grant, request, evidence)
 	if err != nil {
-		return ingest.CleanupExecutionLedger{}, result, err
+		return ledger, result, err
 	}
-	result.Phase = ledger.Phase
-	result.LedgerRevision = ledger.Revision
-	return ledger, result, nil
+	if !cleanupExecutionMutationStatusValid(persistStatus) {
+		return ledger, result, ErrInvalidPhaseExecution
+	}
+	result.Phase = persisted.Phase
+	result.LedgerRevision = persisted.Revision
+	return persisted, result, nil
+}
+
+func cleanupExecutionMutationStatusValid(status ingest.CleanupExecutionMutationStatus) bool {
+	return status == ingest.CleanupExecutionMutationApplied ||
+		status == ingest.CleanupExecutionMutationReplayed
 }
 
 func executionResultFromLedger(ledger ingest.CleanupExecutionLedger) ExecutionResult {
-	return ExecutionResult{Phase: ledger.Phase, LedgerRevision: ledger.Revision}
+	result := ExecutionResult{
+		Phase: ledger.Phase, LedgerRevision: ledger.Revision, ErrorClass: ledger.ErrorClass,
+	}
+	switch ledger.Phase {
+	case ingest.CleanupExecutionPhaseRawOutcomeRecorded:
+		if ledger.Raw.DeleteOutcome == ingest.CleanupDeleteUnknown {
+			result.Artifact = ingest.CleanupArtifactExecutionRaw
+			result.DeleteOutcome = ledger.Raw.DeleteOutcome
+		}
+	case ingest.CleanupExecutionPhaseManifestOutcomeRecorded:
+		if ledger.Manifest.DeleteOutcome == ingest.CleanupDeleteUnknown {
+			result.Artifact = ingest.CleanupArtifactExecutionManifest
+			result.DeleteOutcome = ledger.Manifest.DeleteOutcome
+		}
+	}
+	return result
+}
+
+func executionDispositionResult(
+	query ingest.CleanupExecutionQuery,
+	ledger ingest.CleanupExecutionLedger,
+	result ExecutionResult,
+	errorClass ingest.CleanupExecutionErrorClass,
+	source cleanupTerminalIntentSource,
+	diagnostic error,
+) (ExecutionResult, error) {
+	_, result, err := executionDispositionLedgerResult(
+		query, ledger, result, errorClass, source, diagnostic,
+	)
+	return result, err
+}
+
+func executionDispositionLedgerResult(
+	query ingest.CleanupExecutionQuery,
+	ledger ingest.CleanupExecutionLedger,
+	result ExecutionResult,
+	errorClass ingest.CleanupExecutionErrorClass,
+	source cleanupTerminalIntentSource,
+	diagnostic error,
+) (ingest.CleanupExecutionLedger, ExecutionResult, error) {
+	intent, err := newCleanupDispositionIntent(query, ledger, errorClass, source, diagnostic)
+	if err != nil {
+		return ledger, result, errors.Join(diagnostic, err)
+	}
+	result.Status = ExecutionReadyForDisposition
+	result.Phase = ledger.Phase
+	result.LedgerRevision = ledger.Revision
+	result.ErrorClass = errorClass
+	result.terminalIntent = intent
+	return ledger, result, diagnostic
 }

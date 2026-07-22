@@ -177,10 +177,56 @@ func (e *CleanupSingleArtifactExecutor) readArtifactInventory(
 		return ingest.GenerationInventory{},
 			normalizeCleanupExecutionProviderError(boundary.ctx, providerErr)
 	}
-	if validateCompleteCleanupInventory(inventory, request.ExpectedPath) != nil {
-		return ingest.GenerationInventory{}, ingest.ErrCleanupExecutionUnavailable
+	if err := cleanupInventoryCompletenessError(inventory, request.ExpectedPath); err != nil {
+		return ingest.GenerationInventory{}, err
 	}
 	return inventory, nil
+}
+
+// cleanupInventoryCompletenessError distinguishes a bounded, structurally
+// sound incomplete inventory from an untrustworthy provider response. The
+// distinction is safe only after every returned candidate and generation
+// identity has been validated.
+func cleanupInventoryCompletenessError(
+	inventory ingest.GenerationInventory,
+	path string,
+) error {
+	if inventory.Coverage != ingest.ArtifactInventoryCoverageComplete &&
+		inventory.Coverage != ingest.ArtifactInventoryCoverageIncomplete {
+		return ingest.ErrCleanupExecutionUnavailable
+	}
+
+	sets := []struct {
+		value       ingest.ArtifactGenerationSet
+		softDeleted bool
+	}{
+		{value: inventory.NonSoftDeleted, softDeleted: false},
+		{value: inventory.SoftDeleted, softDeleted: true},
+	}
+	seen := make(map[int64]struct{},
+		len(inventory.NonSoftDeleted.Candidates)+len(inventory.SoftDeleted.Candidates))
+	for _, set := range sets {
+		if len(set.value.Candidates) > cleanupExecutionInventoryLimit ||
+			(!set.value.Performed && (set.value.Truncated || len(set.value.Candidates) != 0)) {
+			return ingest.ErrCleanupExecutionUnavailable
+		}
+		for _, candidate := range set.value.Candidates {
+			if !validCleanupInventorySnapshot(candidate, path, set.softDeleted) {
+				return ingest.ErrCleanupExecutionUnavailable
+			}
+			if _, duplicate := seen[candidate.Generation]; duplicate {
+				return ingest.ErrCleanupExecutionUnavailable
+			}
+			seen[candidate.Generation] = struct{}{}
+		}
+	}
+
+	if inventory.Coverage == ingest.ArtifactInventoryCoverageIncomplete ||
+		!inventory.NonSoftDeleted.Performed || !inventory.SoftDeleted.Performed ||
+		inventory.NonSoftDeleted.Truncated || inventory.SoftDeleted.Truncated {
+		return ingest.ErrCleanupExecutionInventoryIncomplete
+	}
+	return nil
 }
 
 func (e *CleanupSingleArtifactExecutor) knownReadOnlyResult(

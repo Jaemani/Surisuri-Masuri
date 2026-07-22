@@ -98,8 +98,8 @@ func (a *CleanupAbsenceAuditor) AuditCleanupAbsence(
 		return cleanupattest.Evidence{},
 			normalizeCleanupExecutionProviderError(boundary.ctx, providerErr)
 	}
-	if validateCompleteCleanupInventory(inventory, request.ExpectedPath) != nil {
-		return cleanupattest.Evidence{}, ingest.ErrCleanupExecutionUnavailable
+	if err := cleanupInventoryCompletenessError(inventory, request.ExpectedPath); err != nil {
+		return cleanupattest.Evidence{}, err
 	}
 	if len(inventory.NonSoftDeleted.Candidates) != 0 || len(inventory.SoftDeleted.Candidates) != 0 {
 		return cleanupattest.Evidence{}, ingest.ErrCleanupExecutionGenerationDrift

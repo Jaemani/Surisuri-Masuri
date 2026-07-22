@@ -50,6 +50,14 @@ func TestCleanupAbsenceAuditorRejectsPresenceIncompleteAndProviderErrors(t *test
 	}
 	incomplete := emptyCleanupInventory()
 	incomplete.Coverage = ingest.ArtifactInventoryCoverageIncomplete
+	truncated := emptyCleanupInventory()
+	truncated.SoftDeleted.Truncated = true
+	missingPass := emptyCleanupInventory()
+	missingPass.SoftDeleted.Performed = false
+	malformed := liveCleanupInventory(live)
+	malformed.NonSoftDeleted.Candidates[0].Path = request.ExpectedPath + ".sibling"
+	duplicate := liveCleanupInventory(live)
+	duplicate.SoftDeleted.Candidates = []ingest.ArtifactSnapshot{cleanupSnapshot(live, true)}
 	for _, test := range []struct {
 		name      string
 		inventory ingest.GenerationInventory
@@ -58,7 +66,11 @@ func TestCleanupAbsenceAuditorRejectsPresenceIncompleteAndProviderErrors(t *test
 	}{
 		{name: "live generation", inventory: liveCleanupInventory(live), want: ingest.ErrCleanupExecutionGenerationDrift},
 		{name: "soft-deleted generation", inventory: softDeletedCleanupInventory(live), want: ingest.ErrCleanupExecutionGenerationDrift},
-		{name: "incomplete", inventory: incomplete, want: ingest.ErrCleanupExecutionUnavailable},
+		{name: "incomplete", inventory: incomplete, want: ingest.ErrCleanupExecutionInventoryIncomplete},
+		{name: "truncated", inventory: truncated, want: ingest.ErrCleanupExecutionInventoryIncomplete},
+		{name: "missing pass", inventory: missingPass, want: ingest.ErrCleanupExecutionInventoryIncomplete},
+		{name: "malformed candidate", inventory: malformed, want: ingest.ErrCleanupExecutionUnavailable},
+		{name: "duplicate generation", inventory: duplicate, want: ingest.ErrCleanupExecutionUnavailable},
 		{name: "permission", provider: ingest.ErrArtifactPermissionDenied, want: ingest.ErrArtifactPermissionDenied},
 		{name: "timeout", provider: ingest.ErrArtifactProviderTimeout, want: ingest.ErrArtifactProviderTimeout},
 	} {

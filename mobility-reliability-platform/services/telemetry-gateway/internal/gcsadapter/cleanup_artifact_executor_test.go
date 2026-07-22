@@ -205,6 +205,58 @@ func TestCleanupSingleArtifactExecutorNonTargetedSkipsProvider(t *testing.T) {
 	backend.assertDone(t)
 }
 
+func TestCleanupSingleArtifactExecutorClassifiesInventoryCompletenessExactly(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	plan := cleanupExecutorPlanFixture(t, ingest.ArtifactClassificationValidRawOnly, now)
+	request := cleanupSingleArtifactRequest(plan, ingest.CleanupArtifactExecutionRaw)
+
+	incomplete := liveCleanupInventory(*request.Lineage)
+	incomplete.Coverage = ingest.ArtifactInventoryCoverageIncomplete
+	regularTruncated := liveCleanupInventory(*request.Lineage)
+	regularTruncated.NonSoftDeleted.Truncated = true
+	missingRegularPass := emptyCleanupInventory()
+	missingRegularPass.NonSoftDeleted.Performed = false
+	missingSoftDeletedPass := emptyCleanupInventory()
+	missingSoftDeletedPass.SoftDeleted.Performed = false
+	unknownCoverage := emptyCleanupInventory()
+	unknownCoverage.Coverage = ingest.ArtifactInventoryCoverageUnknown
+	malformedIdentity := liveCleanupInventory(*request.Lineage)
+	malformedIdentity.NonSoftDeleted.Candidates[0].Path = request.ExpectedPath + ".sibling"
+	duplicateGeneration := liveCleanupInventory(*request.Lineage)
+	duplicate := cleanupSnapshot(*request.Lineage, true)
+	duplicateGeneration.SoftDeleted.Candidates = []ingest.ArtifactSnapshot{duplicate}
+	inconsistentMissingPass := liveCleanupInventory(*request.Lineage)
+	inconsistentMissingPass.NonSoftDeleted.Performed = false
+
+	for _, test := range []struct {
+		name      string
+		inventory ingest.GenerationInventory
+		want      error
+	}{
+		{name: "explicit incomplete coverage", inventory: incomplete, want: ingest.ErrCleanupExecutionInventoryIncomplete},
+		{name: "truncated pass", inventory: regularTruncated, want: ingest.ErrCleanupExecutionInventoryIncomplete},
+		{name: "missing regular pass", inventory: missingRegularPass, want: ingest.ErrCleanupExecutionInventoryIncomplete},
+		{name: "missing soft-deleted pass", inventory: missingSoftDeletedPass, want: ingest.ErrCleanupExecutionInventoryIncomplete},
+		{name: "unknown coverage", inventory: unknownCoverage, want: ingest.ErrCleanupExecutionUnavailable},
+		{name: "malformed candidate identity", inventory: malformedIdentity, want: ingest.ErrCleanupExecutionUnavailable},
+		{name: "duplicate generation", inventory: duplicateGeneration, want: ingest.ErrCleanupExecutionUnavailable},
+		{name: "candidate from missing pass", inventory: inconsistentMissingPass, want: ingest.ErrCleanupExecutionUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := &scriptedCleanupExecutionBackend{t: t, calls: []cleanupExecutionCall{
+				inventoryCall(request.ExpectedPath, test.inventory),
+			}}
+			result, err := cleanupSingleArtifactTestInstance(backend, now).ExecuteCleanupArtifact(
+				context.Background(), firebaseadapter.CleanupArtifactExecutionAuthorizationGrant{}, request,
+			)
+			if !errors.Is(err, test.want) || result != (ingest.CleanupArtifactExecutionResult{}) {
+				t.Fatalf("inventory result = %#v, %v; want %v", result, err, test.want)
+			}
+			backend.assertDone(t)
+		})
+	}
+}
+
 func TestCleanupSingleArtifactExecutorDoesNotFabricateKnownOutcomeForHardFailure(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	plan := cleanupExecutorPlanFixture(t, ingest.ArtifactClassificationValidRawOnly, now)
