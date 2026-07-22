@@ -250,6 +250,17 @@ func expiredPriorCleanupAttemptClosure(
 	}
 	switch attemptResult.Attempt.Status {
 	case ingest.RecoveryAttemptStarted:
+		if hasCleanupExecutionLedgerResidue(attemptResult.Attempt) {
+			return expiredProgressingCleanupAttemptClosure(
+				ctx,
+				transaction,
+				receipt,
+				attemptPath,
+				attemptResult,
+				applicationTime,
+				receiptReadTime,
+			)
+		}
 		if validateStartedRecoveryAttemptForOwner(
 			attemptResult.Attempt,
 			receipt,
@@ -283,4 +294,81 @@ func expiredPriorCleanupAttemptClosure(
 	default:
 		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
 	}
+}
+
+func expiredProgressingCleanupAttemptClosure(
+	ctx context.Context,
+	transaction admissionTransaction,
+	receipt firestoreIngestReceipt,
+	attemptPath string,
+	attemptResult recoveryAttemptRead,
+	applicationTime time.Time,
+	receiptReadTime time.Time,
+) (string, []firestore.Update, time.Time, error) {
+	reader, ok := transaction.(cleanupTargetTransaction)
+	if !ok || validateCleanupExecutionAttemptIdentity(
+		attemptResult.Attempt, receipt, attemptResult.Attempt.AttemptID,
+	) != nil {
+		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	targetResult, exists, err := reader.ReadCleanupTarget(
+		ctx,
+		cleanupTargetDocumentPath(receipt.TenantID, attemptResult.Attempt.AttemptID),
+	)
+	if err != nil {
+		return "", nil, time.Time{}, err
+	}
+	if !exists {
+		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	effectiveAt, err := coherentCleanupTransitionTime(
+		applicationTime,
+		receiptReadTime,
+		attemptResult.ReadTime,
+		targetResult.ReadTime,
+	)
+	if err != nil {
+		return "", nil, time.Time{}, err
+	}
+	if effectiveAt.Before(receipt.LeaseExpiresAt) {
+		return "", nil, effectiveAt, nil
+	}
+	readTime, err := coherentCleanupTargetReadTime(
+		receiptReadTime,
+		attemptResult.ReadTime,
+		targetResult.ReadTime,
+	)
+	if err != nil {
+		return "", nil, time.Time{}, err
+	}
+	target, err := targetResult.Target.toDomain()
+	if err != nil {
+		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	query := ingest.CleanupExecutionQuery{
+		TenantID: receipt.TenantID, ReservationKey: receipt.ReservationKey,
+		AttemptID: attemptResult.Attempt.AttemptID,
+	}
+	plan, err := ingest.BuildExpiredCleanupExecutionLedgerPlan(
+		query,
+		ingest.CurrentCleanupExecutionSnapshot{
+			Receipt: receipt.toDomain(), Attempt: currentCleanupAttempt(attemptResult.Attempt),
+			Target: target, ReadTime: readTime,
+		},
+		applicationTime,
+	)
+	if err != nil {
+		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	ledger, present, err := decodeHistoricalCleanupExecutionLedger(plan, attemptResult.Attempt)
+	if err != nil || !present || ledger.Phase == ingest.CleanupExecutionPhaseCompleted ||
+		ledger.Disposition != "" || ledger.ErrorClass != "" || ledger.EvidenceHash != "" ||
+		!ledger.CompletedAt.IsZero() {
+		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	return attemptPath, []firestore.Update{
+		{Path: "status", Value: string(ingest.RecoveryAttemptFailed)},
+		{Path: "failure_code", Value: string(ingest.RecoveryAttemptFailureLeaseExpired)},
+		{Path: "failed_at", Value: effectiveAt.UTC()},
+	}, effectiveAt, nil
 }

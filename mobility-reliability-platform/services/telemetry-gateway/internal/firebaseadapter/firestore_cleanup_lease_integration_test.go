@@ -287,6 +287,224 @@ func TestFirestoreAdmissionStoreEmulatorDuplicateCleanupAttemptRollsBackTakeover
 	}
 }
 
+func TestFirestoreAdmissionStoreEmulatorPreservesProgressDuringCleanupTakeover(t *testing.T) {
+	client := newAdmissionEmulatorClient(t)
+	clearAdmissionIngestCollections(t, client)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	persisted, prior, targetPath := seedExpiredProgressCleanupLease(t, client, now, false)
+	controlBefore := readProgressTakeoverImmutableControls(t, client, persisted, targetPath)
+	store, err := NewFirestoreAdmissionStore(
+		client, emulatorTransactionTimout, func() time.Time { return now },
+	)
+	if err != nil {
+		t.Fatalf("NewFirestoreAdmissionStore() error = %v", err)
+	}
+	proposal := ingest.CleanupAttemptProposal{
+		ID: emulatorThirdReceiptID, WorkerVersion: ingest.CleanupWorkerVersion,
+	}
+
+	grant, status, err := store.ClaimCleanupLease(
+		context.Background(),
+		persisted.TenantID,
+		persisted.ReservationKey,
+		ingest.LeaseOwner{ID: proposal.ID, Kind: ingest.LeaseOwnerCleanup},
+		proposal,
+		now,
+		ingest.DefaultRequestLeaseDuration,
+	)
+	if err != nil || status != ingest.LeaseStatusAcquired ||
+		ingest.ValidateCleanupLeaseGrant(grant) != nil {
+		t.Fatalf("ClaimCleanupLease() = %#v, %q, %v", grant, status, err)
+	}
+	closed := readAdmissionEmulatorAttempt(
+		t, client, persisted.TenantID, persisted.ReceiptID, prior.AttemptID,
+	)
+	if closed.Status != ingest.RecoveryAttemptFailed ||
+		closed.FailureCode != ingest.RecoveryAttemptFailureLeaseExpired ||
+		!closed.FailedAt.Equal(now) ||
+		closed.DecisionDomain != prior.DecisionDomain ||
+		closed.CleanupTargetHash != prior.CleanupTargetHash ||
+		closed.CleanupPlanHash != prior.CleanupPlanHash ||
+		closed.CleanupReceiptRevision != prior.CleanupReceiptRevision ||
+		closed.CleanupExecutionRevision != prior.CleanupExecutionRevision ||
+		closed.CleanupPhase != prior.CleanupPhase ||
+		closed.CleanupRawDeleteOutcome != prior.CleanupRawDeleteOutcome ||
+		closed.CleanupRawAuditOutcome != prior.CleanupRawAuditOutcome ||
+		!closed.CleanupRawAuditedAt.Equal(prior.CleanupRawAuditedAt) {
+		t.Fatalf("closed progress cleanup attempt = %#v, prior=%#v", closed, prior)
+	}
+	current := readAdmissionEmulatorAttempt(
+		t, client, persisted.TenantID, persisted.ReceiptID, proposal.ID,
+	)
+	if current.Status != ingest.RecoveryAttemptStarted ||
+		current.FencingToken != persisted.FencingToken+1 ||
+		hasCleanupExecutionLedgerResidue(current) {
+		t.Fatalf("new cleanup attempt inherited prior progress = %#v", current)
+	}
+	assertProgressTakeoverImmutableControls(t, client, controlBefore)
+}
+
+func TestFirestoreAdmissionStoreEmulatorProgressTakeoverRollsBackOnDuplicateAttempt(t *testing.T) {
+	client := newAdmissionEmulatorClient(t)
+	clearAdmissionIngestCollections(t, client)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	persisted, prior, targetPath := seedExpiredProgressCleanupLease(t, client, now, true)
+	controlBefore := readProgressTakeoverImmutableControls(t, client, persisted, targetPath)
+	store, err := NewFirestoreAdmissionStore(
+		client, emulatorTransactionTimout, func() time.Time { return now },
+	)
+	if err != nil {
+		t.Fatalf("NewFirestoreAdmissionStore() error = %v", err)
+	}
+	proposal := ingest.CleanupAttemptProposal{
+		ID: emulatorThirdReceiptID, WorkerVersion: ingest.CleanupWorkerVersion,
+	}
+
+	grant, status, err := store.ClaimCleanupLease(
+		context.Background(),
+		persisted.TenantID,
+		persisted.ReservationKey,
+		ingest.LeaseOwner{ID: proposal.ID, Kind: ingest.LeaseOwnerCleanup},
+		proposal,
+		now,
+		ingest.DefaultRequestLeaseDuration,
+	)
+	if !errors.Is(err, ingest.ErrAdmissionUnavailable) || status != "" ||
+		grant != (ingest.CleanupLeaseGrant{}) {
+		t.Fatalf("ClaimCleanupLease() = %#v, %q, %v, want unavailable", grant, status, err)
+	}
+	unchanged := readAdmissionEmulatorAttempt(
+		t, client, persisted.TenantID, persisted.ReceiptID, prior.AttemptID,
+	)
+	if unchanged.Status != ingest.RecoveryAttemptStarted ||
+		unchanged.CleanupExecutionRevision != prior.CleanupExecutionRevision ||
+		unchanged.CleanupPhase != prior.CleanupPhase ||
+		unchanged.FailureCode != "" || !unchanged.FailedAt.IsZero() {
+		t.Fatalf("prior progress changed after rollback = %#v", unchanged)
+	}
+	storedReceipt := readAdmissionEmulatorReceipt(t, client, persisted.TenantID, persisted.ReceiptID)
+	if storedReceipt.FencingToken != persisted.FencingToken ||
+		storedReceipt.Revision != persisted.Revision ||
+		storedReceipt.RecoveryAttemptCount != persisted.RecoveryAttemptCount ||
+		storedReceipt.LeaseOwnerID != persisted.LeaseOwnerID {
+		t.Fatalf("receipt changed after progress rollback = %#v", storedReceipt)
+	}
+	assertProgressTakeoverImmutableControls(t, client, controlBefore)
+}
+
+type progressTakeoverControl struct {
+	path       string
+	updateTime time.Time
+}
+
+func seedExpiredProgressCleanupLease(
+	t *testing.T,
+	client *firestore.Client,
+	now time.Time,
+	duplicateIncoming bool,
+) (firestoreIngestReceipt, firestoreRecoveryAttempt, string) {
+	t.Helper()
+	receipt, prior := seedExpiredCleanupLease(t, client, now, duplicateIncoming)
+	command := cleanupTargetCommandFixture(t, receipt, ingest.ArtifactClassificationValidComplete)
+	targetHash, err := ingest.CleanupTargetHash(command)
+	if err != nil {
+		t.Fatalf("CleanupTargetHash() = %v", err)
+	}
+	target := ingest.CleanupTarget{Command: command, TargetHash: targetHash}
+	plan, err := ingest.BuildExpiredCleanupExecutionLedgerPlan(
+		ingest.CleanupExecutionQuery{
+			TenantID: receipt.TenantID, ReservationKey: receipt.ReservationKey,
+			AttemptID: prior.AttemptID,
+		},
+		ingest.CurrentCleanupExecutionSnapshot{
+			Receipt: receipt.toDomain(), Attempt: currentCleanupAttempt(prior),
+			Target: target, ReadTime: now,
+		},
+		now,
+	)
+	if err != nil {
+		t.Fatalf("BuildExpiredCleanupExecutionLedgerPlan() = %v", err)
+	}
+	ledger, err := ingest.NewCleanupExecutionLedger(plan)
+	if err != nil {
+		t.Fatalf("NewCleanupExecutionLedger() = %v", err)
+	}
+	for _, step := range []ingest.CleanupExecutionTransition{
+		{
+			Phase:      ingest.CleanupExecutionPhaseRawDispatchRecorded,
+			ObservedAt: command.CreatedAt.Add(time.Second),
+		},
+		{
+			Phase:         ingest.CleanupExecutionPhaseRawOutcomeRecorded,
+			DeleteOutcome: ingest.CleanupDeleteObserved,
+			ObservedAt:    command.CreatedAt.Add(2 * time.Second),
+		},
+		{
+			Phase:        ingest.CleanupExecutionPhaseRawAbsenceConfirmed,
+			AuditOutcome: ingest.CleanupAuditConfirmedAbsent,
+			ObservedAt:   command.CreatedAt.Add(3 * time.Second),
+		},
+	} {
+		ledger, err = ingest.AdvanceCleanupExecutionLedger(plan, ledger, step)
+		if err != nil {
+			t.Fatalf("AdvanceCleanupExecutionLedger(%q) = %v", step.Phase, err)
+		}
+	}
+	prior = attemptWithCleanupExecutionLedger(prior, ledger)
+	targetPath := cleanupTargetDocumentPath(receipt.TenantID, prior.AttemptID)
+	batch := client.Batch()
+	batch.Set(client.Doc(recoveryAttemptDocumentPath(
+		receipt.TenantID, receipt.ReceiptID, prior.AttemptID,
+	)), prior)
+	batch.Set(client.Doc(targetPath), newFirestoreCleanupTarget(command, targetHash))
+	if _, err := batch.Commit(context.Background()); err != nil {
+		t.Fatalf("seed expired cleanup progress: %v", err)
+	}
+	return receipt, prior, targetPath
+}
+
+func readProgressTakeoverImmutableControls(
+	t *testing.T,
+	client *firestore.Client,
+	receipt firestoreIngestReceipt,
+	targetPath string,
+) []progressTakeoverControl {
+	t.Helper()
+	paths := []string{
+		idempotencyDocumentPath(receipt.TenantID, receipt.ReservationKey),
+		clientBatchDocumentPath(receipt.TenantID, receipt.ClientBatchKey),
+		targetPath,
+	}
+	controls := make([]progressTakeoverControl, 0, len(paths))
+	for _, path := range paths {
+		document, err := client.Doc(path).Get(context.Background())
+		if err != nil {
+			t.Fatalf("read progress takeover control %q: %v", path, err)
+		}
+		controls = append(controls, progressTakeoverControl{
+			path: path, updateTime: document.UpdateTime.UTC(),
+		})
+	}
+	return controls
+}
+
+func assertProgressTakeoverImmutableControls(
+	t *testing.T,
+	client *firestore.Client,
+	controls []progressTakeoverControl,
+) {
+	t.Helper()
+	for _, expected := range controls {
+		document, err := client.Doc(expected.path).Get(context.Background())
+		if err != nil {
+			t.Fatalf("read progress takeover control %q: %v", expected.path, err)
+		}
+		if !document.UpdateTime.UTC().Equal(expected.updateTime) {
+			t.Fatalf("progress takeover changed immutable control %q", expected.path)
+		}
+	}
+}
+
 func seedCleanupPendingReservation(
 	t *testing.T,
 	client *firestore.Client,

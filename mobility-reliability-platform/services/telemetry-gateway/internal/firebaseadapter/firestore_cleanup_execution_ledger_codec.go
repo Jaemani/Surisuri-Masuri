@@ -69,6 +69,47 @@ func decodeCleanupExecutionLedger(
 	return ledger, true, nil
 }
 
+// decodeHistoricalCleanupExecutionLedger validates progress at its last
+// persisted phase time. A post-expiry takeover time is deliberately not used:
+// historical progress had to be valid before the old fence expired.
+func decodeHistoricalCleanupExecutionLedger(
+	plan ingest.CleanupExecutionLedgerPlan,
+	attempt firestoreRecoveryAttempt,
+) (ingest.CleanupExecutionLedger, bool, error) {
+	observedAt := cleanupExecutionAttemptPersistedAt(plan, attempt)
+	if observedAt.IsZero() {
+		return ingest.CleanupExecutionLedger{}, hasCleanupExecutionLedgerResidue(attempt),
+			ingest.ErrInvalidCleanupExecutionLedger
+	}
+	return decodeCleanupExecutionLedger(plan, attempt, observedAt)
+}
+
+func cleanupExecutionAttemptPersistedAt(
+	plan ingest.CleanupExecutionLedgerPlan,
+	attempt firestoreRecoveryAttempt,
+) time.Time {
+	switch attempt.CleanupPhase {
+	case ingest.CleanupExecutionPhasePlanned:
+		return plan.Target.Command.CreatedAt.UTC()
+	case ingest.CleanupExecutionPhaseRawDispatchRecorded:
+		return attempt.CleanupRawDispatchAt.UTC()
+	case ingest.CleanupExecutionPhaseRawOutcomeRecorded:
+		return attempt.CleanupRawOutcomeRecordedAt.UTC()
+	case ingest.CleanupExecutionPhaseRawAbsenceConfirmed:
+		return attempt.CleanupRawAuditedAt.UTC()
+	case ingest.CleanupExecutionPhaseManifestDispatchRecorded:
+		return attempt.CleanupManifestDispatchAt.UTC()
+	case ingest.CleanupExecutionPhaseManifestOutcomeRecorded:
+		return attempt.CleanupManifestOutcomeRecordedAt.UTC()
+	case ingest.CleanupExecutionPhaseManifestAbsenceConfirmed:
+		return attempt.CleanupManifestAuditedAt.UTC()
+	case ingest.CleanupExecutionPhaseCompleted:
+		return attempt.CompletedAt.UTC()
+	default:
+		return time.Time{}
+	}
+}
+
 // cleanupExecutionLedgerUpdates encodes a complete, already validated ledger.
 // Optional future-phase fields are omitted; monotonic callers must validate the
 // persisted prior revision before applying these updates.

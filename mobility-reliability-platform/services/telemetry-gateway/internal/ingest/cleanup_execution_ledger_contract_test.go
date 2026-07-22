@@ -106,6 +106,81 @@ func TestCleanupExecutionLedgerPlanRejectsReadAtExactFenceExpiry(t *testing.T) {
 	}
 }
 
+func TestExpiredCleanupExecutionLedgerPlanRebuildsHistoricalBinding(t *testing.T) {
+	_, snapshot := cleanupExecutionFixture(t, ArtifactClassificationValidComplete)
+	query := cleanupExecutionQueryFixture(snapshot)
+	expiresAt := snapshot.Receipt.LeaseExpiresAt
+	snapshot.ReadTime = expiresAt
+
+	plan, err := BuildExpiredCleanupExecutionLedgerPlan(query, snapshot, expiresAt)
+	if err != nil || ValidateCleanupExecutionLedgerPlan(plan) != nil {
+		t.Fatalf("BuildExpiredCleanupExecutionLedgerPlan() = %#v, %v", plan, err)
+	}
+	if plan.Target.TargetHash != snapshot.Target.TargetHash ||
+		plan.Target.Command.ReceiptRevision != snapshot.Receipt.Revision ||
+		plan.Target.Command.FencingToken != snapshot.Receipt.FencingToken {
+		t.Fatalf("rebuilt expired plan = %#v", plan)
+	}
+}
+
+func TestExpiredCleanupExecutionLedgerPlanRejectsLiveAndDriftedState(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*CurrentCleanupExecutionSnapshot)
+		at     func(CurrentCleanupExecutionSnapshot) time.Time
+	}{
+		{
+			name: "live lease",
+			at: func(value CurrentCleanupExecutionSnapshot) time.Time {
+				return value.Receipt.LeaseExpiresAt.Add(-time.Nanosecond)
+			},
+		},
+		{
+			name: "receipt revision drift",
+			mutate: func(value *CurrentCleanupExecutionSnapshot) {
+				value.Receipt.Revision++
+			},
+		},
+		{
+			name: "fence drift",
+			mutate: func(value *CurrentCleanupExecutionSnapshot) {
+				value.Receipt.FencingToken++
+			},
+		},
+		{
+			name: "completed attempt",
+			mutate: func(value *CurrentCleanupExecutionSnapshot) {
+				value.Attempt.Status = RecoveryAttemptCompleted
+			},
+		},
+		{
+			name: "target hash drift",
+			mutate: func(value *CurrentCleanupExecutionSnapshot) {
+				value.Target.TargetHash = differentCleanupExecutionDigest(value.Target.TargetHash)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, snapshot := cleanupExecutionFixture(t, ArtifactClassificationValidComplete)
+			query := cleanupExecutionQueryFixture(snapshot)
+			if test.mutate != nil {
+				test.mutate(&snapshot)
+			}
+			checkedAt := snapshot.Receipt.LeaseExpiresAt
+			if test.at != nil {
+				checkedAt = test.at(snapshot)
+			}
+			snapshot.ReadTime = checkedAt
+			if _, err := BuildExpiredCleanupExecutionLedgerPlan(
+				query, snapshot, checkedAt,
+			); !errors.Is(err, ErrInvalidCleanupExecutionLedger) {
+				t.Fatalf("BuildExpiredCleanupExecutionLedgerPlan() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestCleanupExecutionLedgerAdvancesRawBeforeManifestAndCompletes(t *testing.T) {
 	now, plan := cleanupLedgerPlanFixture(t, ArtifactClassificationValidComplete)
 	ledger, err := NewCleanupExecutionLedger(plan)

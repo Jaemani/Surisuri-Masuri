@@ -433,7 +433,39 @@ func evaluateCurrentCleanup(
 	lease CleanupLeaseGrant,
 	checkedAt time.Time,
 ) error {
-	if ValidateCleanupLeaseGrant(lease) != nil || snapshot.ReadTime.IsZero() || checkedAt.IsZero() ||
+	if validateCurrentCleanupBinding(snapshot, tenantID, reservationKey, lease) != nil ||
+		checkedAt.IsZero() || checkedAt.Before(lease.QuiescenceUntil) ||
+		!checkedAt.Before(lease.Lease.Fence.ExpiresAt) {
+		return ErrCleanupArtifactUnauthorized
+	}
+	return nil
+}
+
+// evaluateExpiredCurrentCleanup validates the same immutable receipt, attempt
+// and fence binding as live authorization without treating an expired lease as
+// current authority. It is only for historical takeover validation.
+func evaluateExpiredCurrentCleanup(
+	snapshot CurrentCleanupSnapshot,
+	tenantID string,
+	reservationKey string,
+	lease CleanupLeaseGrant,
+	checkedAt time.Time,
+) error {
+	if validateCurrentCleanupBinding(snapshot, tenantID, reservationKey, lease) != nil ||
+		checkedAt.IsZero() || checkedAt.Before(lease.Lease.Fence.ExpiresAt) ||
+		checkedAt.Before(snapshot.Receipt.UpdatedAt) {
+		return ErrCleanupArtifactUnauthorized
+	}
+	return nil
+}
+
+func validateCurrentCleanupBinding(
+	snapshot CurrentCleanupSnapshot,
+	tenantID string,
+	reservationKey string,
+	lease CleanupLeaseGrant,
+) error {
+	if ValidateCleanupLeaseGrant(lease) != nil || snapshot.ReadTime.IsZero() ||
 		snapshot.Receipt.TenantID != tenantID || snapshot.Receipt.ReservationKey != reservationKey ||
 		snapshot.Receipt.State != ReceiptCleanupPending ||
 		snapshot.Receipt.Revision != lease.ReceiptRevision ||
@@ -448,7 +480,6 @@ func evaluateCurrentCleanup(
 		!snapshot.Receipt.LeaseAcquiredAt.Equal(lease.Lease.AcquiredAt) ||
 		!snapshot.Receipt.LeaseHeartbeatAt.Equal(lease.Lease.HeartbeatAt) ||
 		!snapshot.Receipt.LeaseExpiresAt.Equal(lease.Lease.Fence.ExpiresAt) ||
-		checkedAt.Before(lease.QuiescenceUntil) || !checkedAt.Before(lease.Lease.Fence.ExpiresAt) ||
 		validateCurrentCleanupAttempt(snapshot.Attempt, snapshot.Receipt, lease) != nil {
 		return ErrCleanupArtifactUnauthorized
 	}

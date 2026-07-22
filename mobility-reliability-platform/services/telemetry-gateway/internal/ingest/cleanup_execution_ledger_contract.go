@@ -115,6 +115,52 @@ func BuildCleanupExecutionLedgerPlan(
 	if err != nil {
 		return CleanupExecutionLedgerPlan{}, ErrInvalidCleanupExecutionLedger
 	}
+	target, err := cleanupExecutionTargetForPlan(query, snapshot, checkedAt)
+	if err != nil {
+		return CleanupExecutionLedgerPlan{}, ErrInvalidCleanupExecutionLedger
+	}
+	lease := cleanupExecutionTargetLease(target)
+	if evaluateCurrentCleanup(CurrentCleanupSnapshot{
+		Receipt: snapshot.Receipt, Attempt: snapshot.Attempt, ReadTime: snapshot.ReadTime,
+	}, query.TenantID, query.ReservationKey, lease, checkedAt) != nil {
+		return CleanupExecutionLedgerPlan{}, ErrInvalidCleanupExecutionLedger
+	}
+	return buildCleanupExecutionLedgerPlanFromTarget(query, snapshot.Receipt, target)
+}
+
+// BuildExpiredCleanupExecutionLedgerPlan reconstructs the immutable plan for
+// an exact expired, still-current started cleanup attempt. It validates
+// historical binding only and must never be used to authorize provider I/O.
+func BuildExpiredCleanupExecutionLedgerPlan(
+	query CleanupExecutionQuery,
+	snapshot CurrentCleanupExecutionSnapshot,
+	checkedAt time.Time,
+) (CleanupExecutionLedgerPlan, error) {
+	if ValidateCleanupExecutionQuery(query) != nil || snapshot.ReadTime.IsZero() || checkedAt.IsZero() {
+		return CleanupExecutionLedgerPlan{}, ErrInvalidCleanupExecutionLedger
+	}
+	checkedAt, err := forwardRecoveryAuthorizationTime(checkedAt.UTC(), snapshot.ReadTime.UTC())
+	if err != nil {
+		return CleanupExecutionLedgerPlan{}, ErrInvalidCleanupExecutionLedger
+	}
+	target, err := cleanupExecutionTargetForPlan(query, snapshot, checkedAt)
+	if err != nil {
+		return CleanupExecutionLedgerPlan{}, ErrInvalidCleanupExecutionLedger
+	}
+	lease := cleanupExecutionTargetLease(target)
+	if evaluateExpiredCurrentCleanup(CurrentCleanupSnapshot{
+		Receipt: snapshot.Receipt, Attempt: snapshot.Attempt, ReadTime: snapshot.ReadTime,
+	}, query.TenantID, query.ReservationKey, lease, checkedAt) != nil {
+		return CleanupExecutionLedgerPlan{}, ErrInvalidCleanupExecutionLedger
+	}
+	return buildCleanupExecutionLedgerPlanFromTarget(query, snapshot.Receipt, target)
+}
+
+func cleanupExecutionTargetForPlan(
+	query CleanupExecutionQuery,
+	snapshot CurrentCleanupExecutionSnapshot,
+	checkedAt time.Time,
+) (CleanupTarget, error) {
 	target, err := CloneCleanupTarget(snapshot.Target)
 	if err != nil ||
 		target.Command.Status != CleanupTargetStatusPlanned ||
@@ -126,10 +172,14 @@ func BuildCleanupExecutionLedgerPlan(
 		target.Command.CleanupID != query.AttemptID ||
 		target.Command.ReceiptID != snapshot.Receipt.ReceiptID ||
 		target.Command.CreatedAt.After(checkedAt) {
-		return CleanupExecutionLedgerPlan{}, ErrInvalidCleanupExecutionLedger
+		return CleanupTarget{}, ErrInvalidCleanupExecutionLedger
 	}
+	return target, nil
+}
+
+func cleanupExecutionTargetLease(target CleanupTarget) CleanupLeaseGrant {
 	command := target.Command
-	lease := CleanupLeaseGrant{
+	return CleanupLeaseGrant{
 		Lease: LeaseGrant{
 			Fence: LeaseFence{
 				OwnerID: command.AttemptID, Token: command.FencingToken,
@@ -142,12 +192,15 @@ func BuildCleanupExecutionLedgerPlan(
 		OriginStatus: command.OriginStatus, PolicyVersion: command.CleanupPolicyVersion,
 		TransitionedAt: command.CleanupTransitionedAt, QuiescenceUntil: command.CleanupQuiescenceUntil,
 	}
-	if evaluateCurrentCleanup(CurrentCleanupSnapshot{
-		Receipt: snapshot.Receipt, Attempt: snapshot.Attempt, ReadTime: snapshot.ReadTime,
-	}, query.TenantID, query.ReservationKey, lease, checkedAt) != nil {
-		return CleanupExecutionLedgerPlan{}, ErrInvalidCleanupExecutionLedger
-	}
-	request, err := cleanupClassificationRequest(snapshot.Receipt)
+}
+
+func buildCleanupExecutionLedgerPlanFromTarget(
+	query CleanupExecutionQuery,
+	receipt Receipt,
+	target CleanupTarget,
+) (CleanupExecutionLedgerPlan, error) {
+	command := target.Command
+	request, err := cleanupClassificationRequest(receipt)
 	if err != nil || request.Purpose != ArtifactReadCleanupDryRun ||
 		request.TenantID != command.TenantID || request.ReceiptID != command.ReceiptID ||
 		request.ReservationKey != command.ReservationKey ||
