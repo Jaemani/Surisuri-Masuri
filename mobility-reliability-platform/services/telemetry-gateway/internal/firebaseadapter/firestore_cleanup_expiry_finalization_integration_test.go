@@ -240,6 +240,7 @@ type cleanupExpiryFinalizationEmulatorFixture struct {
 	store           *FirestoreAdmissionStore
 	receipt         firestoreIngestReceipt
 	query           ingest.CleanupExecutionQuery
+	plan            ingest.CleanupExecutionLedgerPlan
 	ready           ingest.CleanupExecutionLedger
 	completedAt     time.Time
 	idempotencyPath string
@@ -317,7 +318,7 @@ func seedReadyCleanupExpiryFinalizationEmulatorFixture(
 	completedAt := base.Add(700 * time.Millisecond)
 	store.now = func() time.Time { return completedAt }
 	return &cleanupExpiryFinalizationEmulatorFixture{
-		client: client, store: store, receipt: receipt, query: query, ready: ready,
+		client: client, store: store, receipt: receipt, query: query, plan: plan, ready: ready,
 		completedAt:     completedAt,
 		idempotencyPath: idempotencyDocumentPath(receipt.TenantID, receipt.ReservationKey),
 		clientBatchPath: clientBatchDocumentPath(receipt.TenantID, receipt.ClientBatchKey),

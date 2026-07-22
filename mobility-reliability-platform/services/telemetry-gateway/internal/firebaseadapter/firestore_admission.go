@@ -54,6 +54,7 @@ type FirestoreAdmissionStore struct {
 	cleanupAbsenceAuditContext          func(context.Context, time.Time) (context.Context, context.CancelFunc)
 	cleanupArtifactExecutionContext     func(context.Context, time.Time) (context.Context, context.CancelFunc)
 	cleanupExpiryFinalizationContext    func(context.Context, time.Time) (context.Context, context.CancelFunc)
+	cleanupExecutionDispositionContext  func(context.Context, time.Time) (context.Context, context.CancelFunc)
 }
 
 var _ ingest.AdmissionStore = (*FirestoreAdmissionStore)(nil)
@@ -1193,60 +1194,65 @@ func newFirestoreIngestIndex(reservation ingest.Reservation) firestoreIngestInde
 }
 
 type firestoreIngestReceipt struct {
-	ReservationKey          string                  `firestore:"reservation_key"`
-	ClientBatchKey          string                  `firestore:"client_batch_key"`
-	ReceiptID               string                  `firestore:"receipt_id"`
-	TenantID                string                  `firestore:"tenant_id"`
-	BatchID                 string                  `firestore:"batch_id"`
-	DeviceID                string                  `firestore:"device_id"`
-	TripID                  string                  `firestore:"trip_id"`
-	InstallationID          string                  `firestore:"installation_id"`
-	ConsentRevisionID       string                  `firestore:"consent_revision_id"`
-	ClientBatchID           string                  `firestore:"client_batch_id"`
-	PayloadSchemaVersion    string                  `firestore:"payload_schema_version"`
-	BodyHash                string                  `firestore:"body_hash"`
-	ObjectPath              string                  `firestore:"object_path,omitempty"`
-	ObjectSHA256            string                  `firestore:"object_sha256,omitempty"`
-	ObjectCRC32C            int64                   `firestore:"object_crc32c,omitempty"`
-	ObjectSize              int64                   `firestore:"object_size,omitempty"`
-	ObjectGeneration        int64                   `firestore:"object_generation,omitempty"`
-	ObjectMetageneration    int64                   `firestore:"object_metageneration,omitempty"`
-	ManifestPath            string                  `firestore:"manifest_path,omitempty"`
-	ManifestSHA256          string                  `firestore:"manifest_sha256,omitempty"`
-	ManifestCRC32C          int64                   `firestore:"manifest_crc32c,omitempty"`
-	ManifestSize            int64                   `firestore:"manifest_size,omitempty"`
-	ManifestGeneration      int64                   `firestore:"manifest_generation,omitempty"`
-	ManifestMetageneration  int64                   `firestore:"manifest_metageneration,omitempty"`
-	ExpectedSampleCount     int                     `firestore:"expected_sample_count"`
-	SampleCount             int                     `firestore:"sample_count"`
-	FirstCapturedAt         time.Time               `firestore:"first_captured_at"`
-	LastCapturedAt          time.Time               `firestore:"last_captured_at"`
-	ValidatorVersion        string                  `firestore:"validator_version"`
-	State                   ingest.ReceiptState     `firestore:"status"`
-	RejectionCode           string                  `firestore:"rejection_code,omitempty"`
-	FencingToken            int64                   `firestore:"fencing_token"`
-	LeaseOwnerID            string                  `firestore:"lease_owner_id,omitempty"`
-	LeaseOwnerKind          ingest.LeaseOwnerKind   `firestore:"lease_owner_kind,omitempty"`
-	LeaseAcquiredAt         time.Time               `firestore:"lease_acquired_at,omitempty"`
-	LeaseHeartbeatAt        time.Time               `firestore:"lease_heartbeat_at,omitempty"`
-	LeaseExpiresAt          time.Time               `firestore:"lease_expires_at,omitempty"`
-	RecoveryAttemptCount    int64                   `firestore:"recovery_attempt_count"`
-	NextRecoveryAt          time.Time               `firestore:"next_recovery_at,omitempty"`
-	LastRecoveryCode        string                  `firestore:"last_recovery_code,omitempty"`
-	RecoveryHoldCode        ingest.RecoveryHoldCode `firestore:"hold_reason,omitempty"`
-	RecoveryHoldReviewDueAt time.Time               `firestore:"hold_review_due_at,omitempty"`
-	CleanupTransitionedAt   time.Time               `firestore:"cleanup_transitioned_at,omitempty"`
-	CleanupQuiescenceUntil  time.Time               `firestore:"cleanup_quiescence_until,omitempty"`
-	CleanupMode             ingest.CleanupMode      `firestore:"cleanup_mode,omitempty"`
-	CleanupOriginStatus     ingest.ReceiptState     `firestore:"cleanup_origin_status,omitempty"`
-	CleanupPolicyVersion    string                  `firestore:"cleanup_policy_version,omitempty"`
-	Revision                int64                   `firestore:"revision"`
-	CreatedAt               time.Time               `firestore:"created_at"`
-	UpdatedAt               time.Time               `firestore:"updated_at"`
-	ReservationDeadline     time.Time               `firestore:"reservation_deadline"`
-	ArtifactExpiresAt       time.Time               `firestore:"artifact_expires_at"`
-	ReceiptRetentionFloor   time.Time               `firestore:"receipt_retention_floor"`
-	PurgeEligibleAt         *time.Time              `firestore:"purge_eligible_at,omitempty"`
+	ReservationKey              string                             `firestore:"reservation_key"`
+	ClientBatchKey              string                             `firestore:"client_batch_key"`
+	ReceiptID                   string                             `firestore:"receipt_id"`
+	TenantID                    string                             `firestore:"tenant_id"`
+	BatchID                     string                             `firestore:"batch_id"`
+	DeviceID                    string                             `firestore:"device_id"`
+	TripID                      string                             `firestore:"trip_id"`
+	InstallationID              string                             `firestore:"installation_id"`
+	ConsentRevisionID           string                             `firestore:"consent_revision_id"`
+	ClientBatchID               string                             `firestore:"client_batch_id"`
+	PayloadSchemaVersion        string                             `firestore:"payload_schema_version"`
+	BodyHash                    string                             `firestore:"body_hash"`
+	ObjectPath                  string                             `firestore:"object_path,omitempty"`
+	ObjectSHA256                string                             `firestore:"object_sha256,omitempty"`
+	ObjectCRC32C                int64                              `firestore:"object_crc32c,omitempty"`
+	ObjectSize                  int64                              `firestore:"object_size,omitempty"`
+	ObjectGeneration            int64                              `firestore:"object_generation,omitempty"`
+	ObjectMetageneration        int64                              `firestore:"object_metageneration,omitempty"`
+	ManifestPath                string                             `firestore:"manifest_path,omitempty"`
+	ManifestSHA256              string                             `firestore:"manifest_sha256,omitempty"`
+	ManifestCRC32C              int64                              `firestore:"manifest_crc32c,omitempty"`
+	ManifestSize                int64                              `firestore:"manifest_size,omitempty"`
+	ManifestGeneration          int64                              `firestore:"manifest_generation,omitempty"`
+	ManifestMetageneration      int64                              `firestore:"manifest_metageneration,omitempty"`
+	ExpectedSampleCount         int                                `firestore:"expected_sample_count"`
+	SampleCount                 int                                `firestore:"sample_count"`
+	FirstCapturedAt             time.Time                          `firestore:"first_captured_at"`
+	LastCapturedAt              time.Time                          `firestore:"last_captured_at"`
+	ValidatorVersion            string                             `firestore:"validator_version"`
+	State                       ingest.ReceiptState                `firestore:"status"`
+	RejectionCode               string                             `firestore:"rejection_code,omitempty"`
+	FencingToken                int64                              `firestore:"fencing_token"`
+	LeaseOwnerID                string                             `firestore:"lease_owner_id,omitempty"`
+	LeaseOwnerKind              ingest.LeaseOwnerKind              `firestore:"lease_owner_kind,omitempty"`
+	LeaseAcquiredAt             time.Time                          `firestore:"lease_acquired_at,omitempty"`
+	LeaseHeartbeatAt            time.Time                          `firestore:"lease_heartbeat_at,omitempty"`
+	LeaseExpiresAt              time.Time                          `firestore:"lease_expires_at,omitempty"`
+	RecoveryAttemptCount        int64                              `firestore:"recovery_attempt_count"`
+	NextRecoveryAt              time.Time                          `firestore:"next_recovery_at,omitempty"`
+	LastRecoveryCode            string                             `firestore:"last_recovery_code,omitempty"`
+	RecoveryHoldCode            ingest.RecoveryHoldCode            `firestore:"hold_reason,omitempty"`
+	RecoveryHoldReviewDueAt     time.Time                          `firestore:"hold_review_due_at,omitempty"`
+	CleanupTransitionedAt       time.Time                          `firestore:"cleanup_transitioned_at,omitempty"`
+	CleanupQuiescenceUntil      time.Time                          `firestore:"cleanup_quiescence_until,omitempty"`
+	CleanupMode                 ingest.CleanupMode                 `firestore:"cleanup_mode,omitempty"`
+	CleanupOriginStatus         ingest.ReceiptState                `firestore:"cleanup_origin_status,omitempty"`
+	CleanupPolicyVersion        string                             `firestore:"cleanup_policy_version,omitempty"`
+	CleanupDispositionAttemptID string                             `firestore:"cleanup_disposition_attempt_id,omitempty"`
+	CleanupControlDisposition   ingest.CleanupExecutionDisposition `firestore:"cleanup_control_disposition,omitempty"`
+	LastCleanupErrorClass       ingest.CleanupExecutionErrorClass  `firestore:"last_cleanup_error_class,omitempty"`
+	NextCleanupAt               time.Time                          `firestore:"next_cleanup_at,omitempty"`
+	CleanupHoldReviewDueAt      time.Time                          `firestore:"cleanup_hold_review_due_at,omitempty"`
+	Revision                    int64                              `firestore:"revision"`
+	CreatedAt                   time.Time                          `firestore:"created_at"`
+	UpdatedAt                   time.Time                          `firestore:"updated_at"`
+	ReservationDeadline         time.Time                          `firestore:"reservation_deadline"`
+	ArtifactExpiresAt           time.Time                          `firestore:"artifact_expires_at"`
+	ReceiptRetentionFloor       time.Time                          `firestore:"receipt_retention_floor"`
+	PurgeEligibleAt             *time.Time                         `firestore:"purge_eligible_at,omitempty"`
 }
 
 type firestoreRecoveryAttempt struct {
@@ -1369,60 +1375,65 @@ func newFirestoreIngestReceipt(
 
 func (receipt firestoreIngestReceipt) toDomain() ingest.Receipt {
 	return ingest.Receipt{
-		ReservationKey:          receipt.ReservationKey,
-		ClientBatchKey:          receipt.ClientBatchKey,
-		ReceiptID:               receipt.ReceiptID,
-		TenantID:                receipt.TenantID,
-		BatchID:                 receipt.BatchID,
-		DeviceID:                receipt.DeviceID,
-		TripID:                  receipt.TripID,
-		InstallationID:          receipt.InstallationID,
-		ConsentRevisionID:       receipt.ConsentRevisionID,
-		ClientBatchID:           receipt.ClientBatchID,
-		PayloadSchemaVersion:    receipt.PayloadSchemaVersion,
-		BodyHash:                receipt.BodyHash,
-		ObjectPath:              receipt.ObjectPath,
-		ObjectSHA256:            receipt.ObjectSHA256,
-		ObjectCRC32C:            uint32(receipt.ObjectCRC32C),
-		ObjectSize:              receipt.ObjectSize,
-		ObjectGeneration:        receipt.ObjectGeneration,
-		ObjectMetageneration:    receipt.ObjectMetageneration,
-		ManifestPath:            receipt.ManifestPath,
-		ManifestSHA256:          receipt.ManifestSHA256,
-		ManifestCRC32C:          uint32(receipt.ManifestCRC32C),
-		ManifestSize:            receipt.ManifestSize,
-		ManifestGeneration:      receipt.ManifestGeneration,
-		ManifestMetageneration:  receipt.ManifestMetageneration,
-		ExpectedSampleCount:     receipt.ExpectedSampleCount,
-		SampleCount:             receipt.SampleCount,
-		FirstCapturedAt:         receipt.FirstCapturedAt,
-		LastCapturedAt:          receipt.LastCapturedAt,
-		ValidatorVersion:        receipt.ValidatorVersion,
-		State:                   receipt.State,
-		RejectionCode:           receipt.RejectionCode,
-		FencingToken:            receipt.FencingToken,
-		LeaseOwnerID:            receipt.LeaseOwnerID,
-		LeaseOwnerKind:          receipt.LeaseOwnerKind,
-		LeaseAcquiredAt:         receipt.LeaseAcquiredAt,
-		LeaseHeartbeatAt:        receipt.LeaseHeartbeatAt,
-		LeaseExpiresAt:          receipt.LeaseExpiresAt,
-		RecoveryAttemptCount:    receipt.RecoveryAttemptCount,
-		NextRecoveryAt:          receipt.NextRecoveryAt,
-		LastRecoveryCode:        receipt.LastRecoveryCode,
-		RecoveryHoldCode:        receipt.RecoveryHoldCode,
-		RecoveryHoldReviewDueAt: receipt.RecoveryHoldReviewDueAt,
-		CleanupTransitionedAt:   receipt.CleanupTransitionedAt,
-		CleanupQuiescenceUntil:  receipt.CleanupQuiescenceUntil,
-		CleanupMode:             receipt.CleanupMode,
-		CleanupOriginStatus:     receipt.CleanupOriginStatus,
-		CleanupPolicyVersion:    receipt.CleanupPolicyVersion,
-		Revision:                receipt.Revision,
-		CreatedAt:               receipt.CreatedAt,
-		UpdatedAt:               receipt.UpdatedAt,
-		ReservationDeadline:     receipt.ReservationDeadline,
-		ArtifactExpiresAt:       receipt.ArtifactExpiresAt,
-		ReceiptRetentionFloor:   receipt.ReceiptRetentionFloor,
-		PurgeEligibleAt:         cloneOptionalTime(receipt.PurgeEligibleAt),
+		ReservationKey:              receipt.ReservationKey,
+		ClientBatchKey:              receipt.ClientBatchKey,
+		ReceiptID:                   receipt.ReceiptID,
+		TenantID:                    receipt.TenantID,
+		BatchID:                     receipt.BatchID,
+		DeviceID:                    receipt.DeviceID,
+		TripID:                      receipt.TripID,
+		InstallationID:              receipt.InstallationID,
+		ConsentRevisionID:           receipt.ConsentRevisionID,
+		ClientBatchID:               receipt.ClientBatchID,
+		PayloadSchemaVersion:        receipt.PayloadSchemaVersion,
+		BodyHash:                    receipt.BodyHash,
+		ObjectPath:                  receipt.ObjectPath,
+		ObjectSHA256:                receipt.ObjectSHA256,
+		ObjectCRC32C:                uint32(receipt.ObjectCRC32C),
+		ObjectSize:                  receipt.ObjectSize,
+		ObjectGeneration:            receipt.ObjectGeneration,
+		ObjectMetageneration:        receipt.ObjectMetageneration,
+		ManifestPath:                receipt.ManifestPath,
+		ManifestSHA256:              receipt.ManifestSHA256,
+		ManifestCRC32C:              uint32(receipt.ManifestCRC32C),
+		ManifestSize:                receipt.ManifestSize,
+		ManifestGeneration:          receipt.ManifestGeneration,
+		ManifestMetageneration:      receipt.ManifestMetageneration,
+		ExpectedSampleCount:         receipt.ExpectedSampleCount,
+		SampleCount:                 receipt.SampleCount,
+		FirstCapturedAt:             receipt.FirstCapturedAt,
+		LastCapturedAt:              receipt.LastCapturedAt,
+		ValidatorVersion:            receipt.ValidatorVersion,
+		State:                       receipt.State,
+		RejectionCode:               receipt.RejectionCode,
+		FencingToken:                receipt.FencingToken,
+		LeaseOwnerID:                receipt.LeaseOwnerID,
+		LeaseOwnerKind:              receipt.LeaseOwnerKind,
+		LeaseAcquiredAt:             receipt.LeaseAcquiredAt,
+		LeaseHeartbeatAt:            receipt.LeaseHeartbeatAt,
+		LeaseExpiresAt:              receipt.LeaseExpiresAt,
+		RecoveryAttemptCount:        receipt.RecoveryAttemptCount,
+		NextRecoveryAt:              receipt.NextRecoveryAt,
+		LastRecoveryCode:            receipt.LastRecoveryCode,
+		RecoveryHoldCode:            receipt.RecoveryHoldCode,
+		RecoveryHoldReviewDueAt:     receipt.RecoveryHoldReviewDueAt,
+		CleanupTransitionedAt:       receipt.CleanupTransitionedAt,
+		CleanupQuiescenceUntil:      receipt.CleanupQuiescenceUntil,
+		CleanupMode:                 receipt.CleanupMode,
+		CleanupOriginStatus:         receipt.CleanupOriginStatus,
+		CleanupPolicyVersion:        receipt.CleanupPolicyVersion,
+		CleanupDispositionAttemptID: receipt.CleanupDispositionAttemptID,
+		CleanupControlDisposition:   receipt.CleanupControlDisposition,
+		LastCleanupErrorClass:       receipt.LastCleanupErrorClass,
+		NextCleanupAt:               receipt.NextCleanupAt,
+		CleanupHoldReviewDueAt:      receipt.CleanupHoldReviewDueAt,
+		Revision:                    receipt.Revision,
+		CreatedAt:                   receipt.CreatedAt,
+		UpdatedAt:                   receipt.UpdatedAt,
+		ReservationDeadline:         receipt.ReservationDeadline,
+		ArtifactExpiresAt:           receipt.ArtifactExpiresAt,
+		ReceiptRetentionFloor:       receipt.ReceiptRetentionFloor,
+		PurgeEligibleAt:             cloneOptionalTime(receipt.PurgeEligibleAt),
 	}
 }
 
@@ -1776,6 +1787,7 @@ func validateReceiptState(receipt firestoreIngestReceipt) error {
 		if receipt.RejectionCode != "" || validateNoReceiptLease(receipt) != nil ||
 			hasStoredArtifactData(receipt) || receipt.SampleCount != 0 ||
 			validateNoRecoveryHold(receipt) != nil || validateCleanupTransition(receipt) != nil ||
+			validateNoCleanupControlCursor(receipt) != nil ||
 			receipt.UpdatedAt.Before(receipt.CleanupQuiescenceUntil) {
 			return ingest.ErrAdmissionUnavailable
 		}
@@ -1819,15 +1831,24 @@ func validateCleanupTransition(receipt firestoreIngestReceipt) error {
 
 func validateCleanupPendingLease(receipt firestoreIngestReceipt) error {
 	if !receiptHasLeaseFields(receipt) {
-		if validateNoReceiptLease(receipt) != nil || !receipt.UpdatedAt.Equal(receipt.CleanupTransitionedAt) {
+		if validateNoReceiptLease(receipt) != nil || !receipt.NextRecoveryAt.IsZero() ||
+			receipt.LastRecoveryCode != "" || receipt.PurgeEligibleAt != nil {
 			return ingest.ErrAdmissionUnavailable
 		}
-		return nil
+		if !cleanupControlCursorPresent(receipt) {
+			if validateNoCleanupControlCursor(receipt) != nil ||
+				!receipt.UpdatedAt.Equal(receipt.CleanupTransitionedAt) {
+				return ingest.ErrAdmissionUnavailable
+			}
+			return nil
+		}
+		return validateCleanupControlCursor(receipt)
 	}
 	grant := receipt.leaseGrant()
 	if ingest.ValidateLeaseGrant(grant) != nil || grant.OwnerKind != ingest.LeaseOwnerCleanup ||
 		receipt.RecoveryAttemptCount <= 0 || !receipt.NextRecoveryAt.IsZero() ||
-		receipt.LastRecoveryCode != "" ||
+		receipt.LastRecoveryCode != "" || receipt.PurgeEligibleAt != nil ||
+		validateNoCleanupControlCursor(receipt) != nil ||
 		receipt.LeaseAcquiredAt.Before(receipt.CleanupQuiescenceUntil) ||
 		!receipt.UpdatedAt.Equal(receipt.LeaseHeartbeatAt) {
 		return ingest.ErrAdmissionUnavailable
@@ -1835,9 +1856,52 @@ func validateCleanupPendingLease(receipt firestoreIngestReceipt) error {
 	return nil
 }
 
+func validateCleanupControlCursor(receipt firestoreIngestReceipt) error {
+	if !telemetry.IsUUID(receipt.CleanupDispositionAttemptID) ||
+		receipt.CleanupDispositionAttemptID == "" ||
+		receipt.UpdatedAt.IsZero() ||
+		!receipt.UpdatedAt.After(receipt.CleanupTransitionedAt) {
+		return ingest.ErrAdmissionUnavailable
+	}
+	policy, err := ingest.CleanupExecutionFailurePolicyFor(receipt.LastCleanupErrorClass)
+	if err != nil || policy.Disposition != receipt.CleanupControlDisposition {
+		return ingest.ErrAdmissionUnavailable
+	}
+	switch receipt.CleanupControlDisposition {
+	case ingest.CleanupExecutionDispositionRetry:
+		minimum := receipt.UpdatedAt.Add(policy.Delay)
+		if receipt.NextCleanupAt.IsZero() || receipt.NextCleanupAt.Before(minimum) ||
+			!receipt.CleanupHoldReviewDueAt.IsZero() {
+			return ingest.ErrAdmissionUnavailable
+		}
+	case ingest.CleanupExecutionDispositionHold:
+		if !receipt.NextCleanupAt.IsZero() ||
+			!receipt.CleanupHoldReviewDueAt.Equal(receipt.UpdatedAt.Add(policy.Delay)) {
+			return ingest.ErrAdmissionUnavailable
+		}
+	default:
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func validateNoCleanupControlCursor(receipt firestoreIngestReceipt) error {
+	if cleanupControlCursorPresent(receipt) {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func cleanupControlCursorPresent(receipt firestoreIngestReceipt) bool {
+	return receipt.CleanupDispositionAttemptID != "" || receipt.CleanupControlDisposition != "" ||
+		receipt.LastCleanupErrorClass != "" || !receipt.NextCleanupAt.IsZero() ||
+		!receipt.CleanupHoldReviewDueAt.IsZero()
+}
+
 func validateNoCleanupTransition(receipt firestoreIngestReceipt) error {
 	if !receipt.CleanupTransitionedAt.IsZero() || !receipt.CleanupQuiescenceUntil.IsZero() ||
-		receipt.CleanupMode != "" || receipt.CleanupOriginStatus != "" || receipt.CleanupPolicyVersion != "" {
+		receipt.CleanupMode != "" || receipt.CleanupOriginStatus != "" || receipt.CleanupPolicyVersion != "" ||
+		validateNoCleanupControlCursor(receipt) != nil {
 		return ingest.ErrAdmissionUnavailable
 	}
 	return nil

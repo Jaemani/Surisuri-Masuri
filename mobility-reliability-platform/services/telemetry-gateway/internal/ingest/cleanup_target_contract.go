@@ -480,6 +480,11 @@ func validateCurrentCleanupBinding(
 		!snapshot.Receipt.LeaseAcquiredAt.Equal(lease.Lease.AcquiredAt) ||
 		!snapshot.Receipt.LeaseHeartbeatAt.Equal(lease.Lease.HeartbeatAt) ||
 		!snapshot.Receipt.LeaseExpiresAt.Equal(lease.Lease.Fence.ExpiresAt) ||
+		snapshot.Receipt.CleanupDispositionAttemptID != "" ||
+		snapshot.Receipt.CleanupControlDisposition != "" ||
+		snapshot.Receipt.LastCleanupErrorClass != "" ||
+		!snapshot.Receipt.NextCleanupAt.IsZero() ||
+		!snapshot.Receipt.CleanupHoldReviewDueAt.IsZero() ||
 		validateCurrentCleanupAttempt(snapshot.Attempt, snapshot.Receipt, lease) != nil {
 		return ErrCleanupArtifactUnauthorized
 	}

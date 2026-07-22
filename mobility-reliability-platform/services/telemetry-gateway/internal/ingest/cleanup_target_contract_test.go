@@ -373,6 +373,36 @@ func TestCurrentCleanupTargetRejectsRevisionFenceAndAttemptDrift(t *testing.T) {
 				current.Attempt.AttemptID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 			},
 		},
+		{
+			name: "cleanup disposition attempt cursor",
+			mutate: func(current *CurrentCleanupSnapshot) {
+				current.Receipt.CleanupDispositionAttemptID = current.Attempt.AttemptID
+			},
+		},
+		{
+			name: "cleanup disposition cursor",
+			mutate: func(current *CurrentCleanupSnapshot) {
+				current.Receipt.CleanupControlDisposition = CleanupExecutionDispositionRetry
+			},
+		},
+		{
+			name: "cleanup error class cursor",
+			mutate: func(current *CurrentCleanupSnapshot) {
+				current.Receipt.LastCleanupErrorClass = CleanupExecutionErrorProviderTimeout
+			},
+		},
+		{
+			name: "next cleanup cursor",
+			mutate: func(current *CurrentCleanupSnapshot) {
+				current.Receipt.NextCleanupAt = observedAt.Add(time.Minute)
+			},
+		},
+		{
+			name: "hold review cursor",
+			mutate: func(current *CurrentCleanupSnapshot) {
+				current.Receipt.CleanupHoldReviewDueAt = observedAt.Add(time.Hour)
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

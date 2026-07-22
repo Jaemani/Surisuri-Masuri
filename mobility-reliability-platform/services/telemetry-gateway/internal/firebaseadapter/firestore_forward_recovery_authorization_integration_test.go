@@ -58,7 +58,9 @@ func TestFirestoreAdmissionStoreEmulatorForwardRecoveryCurrentConsentGate(t *tes
 		!request.ForwardFence.ExpiresAt.Equal(lease.Fence.ExpiresAt) {
 		t.Fatalf("authoritative request = %#v, lease = %#v", request, lease)
 	}
-	if err := ingest.ValidateArtifactReadAuthorization(grant, request, time.Now().UTC()); err != nil {
+	if err := ingest.ValidateArtifactReadAuthorization(
+		grant, request, time.Now().UTC().Add(time.Second),
+	); err != nil {
 		t.Fatalf("ValidateArtifactReadAuthorization() = %v", err)
 	}
 

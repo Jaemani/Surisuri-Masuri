@@ -103,6 +103,11 @@ func cleanupExecutionAttemptPersistedAt(
 	plan ingest.CleanupExecutionLedgerPlan,
 	attempt firestoreRecoveryAttempt,
 ) time.Time {
+	if (attempt.CleanupDisposition == ingest.CleanupExecutionDispositionRetry ||
+		attempt.CleanupDisposition == ingest.CleanupExecutionDispositionHold) &&
+		!attempt.CompletedAt.IsZero() {
+		return attempt.CompletedAt.UTC()
+	}
 	switch attempt.CleanupPhase {
 	case ingest.CleanupExecutionPhasePlanned:
 		return plan.Target.Command.CreatedAt.UTC()

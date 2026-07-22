@@ -1013,6 +1013,35 @@ func TestValidateReservedOriginCleanupReceiptState(t *testing.T) {
 	if err := validateReceiptState(pending); err != nil {
 		t.Fatalf("valid cleanup_pending rejected: %v", err)
 	}
+	retry := pending
+	retry.UpdatedAt = transitionAt.Add(time.Minute)
+	retry.CleanupDispositionAttemptID = admissionLeaseOwnerID
+	retry.CleanupControlDisposition = ingest.CleanupExecutionDispositionRetry
+	retry.LastCleanupErrorClass = ingest.CleanupExecutionErrorProviderTimeout
+	retry.NextCleanupAt = retry.UpdatedAt.Add(ingest.CleanupRetryBackoffTransient)
+	if err := validateReceiptState(retry); err != nil {
+		t.Fatalf("valid cleanup retry cursor rejected: %v", err)
+	}
+	hold := pending
+	hold.UpdatedAt = transitionAt.Add(time.Minute)
+	hold.CleanupDispositionAttemptID = admissionLeaseOwnerID
+	hold.CleanupControlDisposition = ingest.CleanupExecutionDispositionHold
+	hold.LastCleanupErrorClass = ingest.CleanupExecutionErrorPermissionDenied
+	hold.CleanupHoldReviewDueAt = hold.UpdatedAt.Add(ingest.CleanupHoldReviewWindow)
+	if err := validateReceiptState(hold); err != nil {
+		t.Fatalf("valid cleanup hold cursor rejected: %v", err)
+	}
+	invalidCursors := []firestoreIngestReceipt{retry, retry, retry, hold, hold}
+	invalidCursors[0].CleanupDispositionAttemptID = "not-a-uuid"
+	invalidCursors[1].LastCleanupErrorClass = ingest.CleanupExecutionErrorPermissionDenied
+	invalidCursors[2].NextCleanupAt = retry.UpdatedAt.Add(ingest.CleanupRetryBackoffTransient - time.Nanosecond)
+	invalidCursors[3].NextCleanupAt = hold.UpdatedAt.Add(time.Hour)
+	invalidCursors[4].CleanupHoldReviewDueAt = hold.CleanupHoldReviewDueAt.Add(time.Nanosecond)
+	for index, invalid := range invalidCursors {
+		if err := validateReceiptState(invalid); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+			t.Fatalf("invalid cleanup cursor %d accepted: %#v", index, invalid)
+		}
+	}
 	missingTransition := pending
 	missingTransition.CleanupTransitionedAt = time.Time{}
 	if err := validateReceiptState(missingTransition); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
