@@ -2,7 +2,7 @@
 
 ## 1. 현재 사용 상태
 
-이 문서는 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)의 운영 절차를 구현·검증하기 위한 사전 runbook이다. 2026-07-22 현재 single-receipt reconciler와 bounded candidate worker component는 구현됐지만 cleanup command, scheduler/startup wiring, metrics exporter와 staging IAM은 구현되지 않았으므로 production artifact를 조회·수정·삭제하는 실행 지침이 아니다.
+이 문서는 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)의 운영 절차를 구현·검증하기 위한 사전 runbook이다. 2026-07-22 현재 single-receipt reconciler, bounded candidate worker와 cleanup dry-run read/target component는 구현됐지만 cleanup executor/delete/completion, scheduler/startup wiring, metrics exporter와 staging IAM은 구현되지 않았으므로 production artifact를 조회·수정·삭제하는 실행 지침이 아니다.
 
 - 허용: synthetic fixture, Firestore Emulator, pinned official Storage testbench의 read-only/classifier와 bounded single-receipt protocol 검증
 - 금지: 실제 bucket에서 path/latest/prefix 기준 삭제, receipt 수동 수정, 실제 사용자 좌표를 로그·문서에 복사
@@ -57,13 +57,14 @@
 
 | 분류 | forward action | cleanup action | escalation |
 | --- | --- | --- | --- |
-| no artifact | client replay 대기, bounded backoff | version-aware empty 확인 뒤 expired 후보 | 반복 age 증가 |
-| valid raw-only | payload/receipt 재검증, manifest 생성, fenced finalizer | 새 manifest 금지, raw exact target만 계획 | deadline 근접 |
-| valid complete | cross-lineage 후 fenced finalizer | raw→manifest exact target 계획 | finalizer 반복 실패 |
-| manifest-only | write 0, hold | verified manifest exact target만 별도 승인 | 즉시 integrity review |
-| raw content conflict | exact bytes 자체 digest·decompressed body hash·strict lineage 위반 증거 후 fenced reject; recompression mismatch 단독 reject 금지 | 소유 불명 object 자동삭제 금지 | security/integrity review |
-| metadata conflict | reject 금지, hold | delete 금지 | provider/IAM review |
-| generation drift | 재조회로 latest 선택 금지, hold | delete 금지 | versioning/lifecycle review |
+| no artifact | client replay 대기, bounded backoff | `verified_empty/planned` dry-run target; `expired` 권한 아님 | 반복 age 증가 |
+| valid raw-only | payload/receipt 재검증, manifest 생성, fenced finalizer | 새 manifest 금지, raw exact `delete_candidate/planned`; 실행 승인 아님 | deadline 근접 |
+| valid complete | cross-lineage 후 fenced finalizer | raw·manifest exact `delete_candidate/planned`; 실행 승인 아님 | finalizer 반복 실패 |
+| manifest-only | write 0, hold | exact manifest `delete_candidate/planned`; 삭제 capability 아님 | 즉시 integrity review |
+| raw content conflict | exact bytes 자체 digest·decompressed body hash·strict lineage 위반 증거 후 fenced reject; recompression mismatch 단독 reject 금지 | `hold/hold`, 소유 불명 object 자동삭제 금지 | security/integrity review |
+| metadata conflict | reject 금지, hold | `hold/hold`, delete 금지 | provider/IAM review |
+| generation drift | 재조회로 latest 선택 금지, hold | `hold/hold`, delete 금지 | versioning/lifecycle review |
+| provider unavailable | bounded release/retry | immutable target 미생성, takeover/retry | 반복 시 provider review |
 | stored-missing, artifact expiry 전 | downstream 차단, finding | 자동삭제 금지 | high severity integrity alert |
 | stored-missing, artifact expiry 후 | 승인된 lifecycle/deletion evidence 대조 | 정상 deletion workflow 또는 exact integrity cleanup | 증거 불일치 시 escalation |
 | consent invalid pending | 새 artifact·finalizer 0, consent-invalid hold | 철회만으로 자동삭제 금지; 명시적 요청/retention expiry만 cleanup | privacy owner 확인 |
@@ -96,7 +97,9 @@
 
 ## 8. Expiry cleanup 재개 규칙
 
-expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인한다. 만료 lease에 recovery attempt count가 있으면 exact nested attempt의 owner·token·version·started time을 함께 검증하고 `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token을 증가시켜 `cleanup_pending`으로 전환한다. Attempt가 누락·변조·completed이면 receipt도 바꾸지 않고 조사 가능한 lease 증거를 보존한다. Application·receipt·attempt read clock 중 가장 이른 시각이 deadline/lease expiry 전이면 `not_ready`다. reserved-origin hold는 `BeginHeldCleanup`만 같은 상태로 보낼 수 있다. accepted receipt는 `BeginAcceptedDeletion`으로 `deleting -> deleted`를 사용해 replay-complete를 유지한다. rejected artifact는 receipt를 `rejected`로 유지하며 exact ownership과 별도 보안 승인 없이는 cleanup target을 만들지 않는다. 모든 cleanup entry는 origin status를 고정하고 최대 lease+Storage operation timeout보다 긴 quiet period 뒤 시작한다. cleanup target은 처음 발견한 exact lineage를 immutable하게 유지한다. 현재 구현 근거는 [ADR-0022](../decisions/ADR-0022-atomic-cleanup-transition-attempt-closure.md)와 [EVD-20260722-030](../evidence/2026-07.md#evd-20260722-030--cleanup-transition의-expired-forward-attempt-원자-종료)을 따른다.
+expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인한다. 만료 lease에 recovery attempt count가 있으면 exact nested attempt의 owner·token·version·started time을 함께 검증하고 `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token을 증가시켜 `cleanup_pending`으로 전환한다. Attempt가 누락·변조·completed이면 receipt도 바꾸지 않고 조사 가능한 lease 증거를 보존한다. Application·receipt·attempt read clock 중 가장 이른 시각이 deadline/lease expiry 전이면 `not_ready`다. 현재 구현은 `reservation_expiry + reserved` origin의 transition, cleanup claim과 `absent -> planned|hold` dry-run target create까지다. [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md), [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target)을 따른다.
+
+아래 state machine과 delete/crash 재개 절차는 **R8c+ future executor 계약이며 현재 실행 금지**다. Reserved-origin hold, accepted deletion과 rejected side cleanup도 아직 구현되지 않았다.
 
 ```text
 planned
@@ -127,6 +130,8 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 
 같은 날 [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md)에 따라 transition time·quiescence·mode·origin·policy를 immutable하게 기록하고, `11분 > 최대 lease 5분 + StoreBatch 전체 5분` 뒤 cleanup-only owner가 claim하도록 구현했다. First claim과 expired takeover는 exact `started` attempt를 transaction으로 만들고 forward mutation port를 거부한다. Local/Emulator/pinned testbench 근거는 [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim)이다. 이 claim은 target·artifact read/delete·`expired`·purge 권한이 아니며 runtime에 연결하지 않는다.
 
+이어 [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md)의 cleanup 전용 read capability, full classification evidence seal과 immutable dry-run target을 구현했다. Concurrent same command는 target 1개와 created/replayed 각 1개로 수렴하고 conflicting target은 receipt·attempt를 포함해 write 0이다. [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target)의 local/Emulator 근거이며 actual delete와 completion 권한은 없다.
+
 - [x] fake clock으로 lease exact-expiry boundary 재현
 - [x] 두 request/sweeper/cleanup의 concurrent claim winner 1명
 - [ ] recovery claim 대 `BeginCleanupTransition` 경계 경쟁에서 cleanup/recovery 중 허용된 winner만 1명
@@ -138,7 +143,8 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 - [ ] forward/pre-expiry manifest-only·stored-missing → create/delete/finalize 0
 - [ ] consent invalid pending → forward write 0
 - [ ] timeout/403/429 → missing 분류 0
-- [ ] cleanup dry-run target의 path·generation·hash 고정
+- [x] cleanup dry-run target의 path·generation·hash, classification·inventory와 receipt revision/fence 고정
+- [x] shape-valid classification result tamper 거부, concurrent create/replay target 1개, conflicting target write 0과 receipt·attempt 불변
 - [ ] 복수 manifest generation은 bytes 동일 여부와 관계없이 자동 선택 0
 - [ ] post-expiry hold가 즉시 integrity cleanup 또는 incident escalation으로 연결
 - [ ] accepted deletion 중 replay-complete, rejected side cleanup 중 replay-rejected 유지

@@ -93,3 +93,4 @@
 | [HR-20260722-20](./HR-20260722-20-bounded-forward-recovery-worker.md) | bounded forward recovery worker와 fixed-cutoff checkpoint | `draft` |
 | [HR-20260722-21](./HR-20260722-21-cleanup-transition-attempt-closure.md) | cleanup transition의 expired forward attempt 원자 종료 | `draft` |
 | [HR-20260722-22](./HR-20260722-22-fenced-cleanup-lease-claim.md) | immutable quiescence와 fenced cleanup lease claim | `draft` |
+| [HR-20260722-23](./HR-20260722-23-immutable-cleanup-dry-run-target.md) | sealed classification과 immutable cleanup dry-run target | `draft` |

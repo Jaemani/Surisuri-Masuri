@@ -113,7 +113,7 @@ Application·receipt·attempt clock의 전체 폭이 5초를 넘으면 거부한
 
 ### 5. 이 claim은 artifact read/delete 권한이 아니다
 
-`CleanupLeaseGrant`는 control-plane 처리 소유권만 증명한다. 다음 항목은 아직 권한이 없다.
+`CleanupLeaseGrant`는 control-plane 처리 소유권만 증명한다. 이후 단계의 구현 여부와 무관하게 이 grant 자체에는 다음 권한이 없다.
 
 - Artifact inventory/classification
 - Immutable cleanup target 생성
@@ -122,7 +122,7 @@ Application·receipt·attempt clock의 전체 폭이 5초를 넘으면 거부한
 - Purge eligibility와 nested purge
 - Scheduler, startup, readiness 또는 production deployment
 
-R8b는 first-pass read-only classification을 immutable dry-run target으로 고정하는 별도 capability를 정의한다. Actual delete는 staging lifecycle/IAM과 exact-generation semantics 검증 전까지 금지한다.
+후속 [ADR-0024](./ADR-0024-immutable-cleanup-dry-run-target.md)는 first-pass read-only classification과 immutable dry-run target create를 각각 별도 capability로 구현했다. Cleanup lease가 그 권한으로 승격된 것은 아니다. Actual delete는 staging lifecycle/IAM과 exact-generation semantics 검증 전까지 금지한다.
 
 ## 결과와 위험
 
@@ -136,7 +136,9 @@ R8b는 first-pass read-only classification을 immutable dry-run target으로 고
 ## 연결 문서
 
 - 선행 결정: [ADR-0017](./ADR-0017-fenced-ingest-recovery.md), [ADR-0022](./ADR-0022-atomic-cleanup-transition-attempt-closure.md)
+- 후속 결정: [ADR-0024](./ADR-0024-immutable-cleanup-dry-run-target.md)
 - 증거: [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim)
+- 후속 증거: [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target)
 - 사람 대상 리포트: [HR-20260722-22](../reports/human/HR-20260722-22-fenced-cleanup-lease-claim.md)
 - 제품 업데이트: 해당 없음 — executable·사용자·운영 경로 미연결
 - 인시던트: 해당 없음 — production·staging·field 영향 없음
