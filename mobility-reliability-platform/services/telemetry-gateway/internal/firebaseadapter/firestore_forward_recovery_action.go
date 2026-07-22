@@ -299,6 +299,7 @@ func validateStartedRecoveryAttemptForOwner(
 		attempt.RawGeneration != 0 || attempt.RawMetageneration != 0 ||
 		attempt.ManifestSHA256 != "" || attempt.ManifestCRC32C != 0 || attempt.ManifestSize != 0 ||
 		attempt.ManifestGeneration != 0 || attempt.ManifestMetageneration != 0 ||
+		hasCleanupExecutionLedgerResidue(attempt) ||
 		!attempt.HoldReviewDueAt.IsZero() || !attempt.CompletedAt.IsZero() ||
 		attempt.FailureCode != "" || !attempt.FailedAt.IsZero() {
 		return ingest.ErrInvalidForwardRecoveryActionAuthorization

@@ -125,7 +125,9 @@ func (s *FirestoreAdmissionStore) GetForwardRecoveryActionOutcome(
 func currentForwardRecoveryOutcomeAttempt(
 	attempt firestoreRecoveryAttempt,
 ) (ingest.CurrentForwardRecoveryOutcomeAttempt, error) {
-	if !validFirestoreCRC32C(attempt.RawCRC32C) || !validFirestoreCRC32C(attempt.ManifestCRC32C) {
+	if !validFirestoreCRC32C(attempt.RawCRC32C) ||
+		!validFirestoreCRC32C(attempt.ManifestCRC32C) ||
+		hasCleanupExecutionLedgerResidue(attempt) {
 		return ingest.CurrentForwardRecoveryOutcomeAttempt{}, ingest.ErrForwardRecoveryOutcomeUnavailable
 	}
 	return ingest.CurrentForwardRecoveryOutcomeAttempt{
