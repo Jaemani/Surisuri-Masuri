@@ -95,3 +95,4 @@
 | [HR-20260722-22](./HR-20260722-22-fenced-cleanup-lease-claim.md) | immutable quiescence와 fenced cleanup lease claim | `draft` |
 | [HR-20260722-23](./HR-20260722-23-immutable-cleanup-dry-run-target.md) | sealed classification과 immutable cleanup dry-run target | `draft` |
 | [HR-20260722-24](./HR-20260722-24-generation-pinned-cleanup-delete.md) | generation-pinned cleanup delete와 complete-empty audit | `draft` |
+| [HR-20260722-25](./HR-20260722-25-cleanup-execution-ledger.md) | fenced cleanup execution ledger와 Firestore progress persistence | `draft` |

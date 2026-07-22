@@ -68,20 +68,24 @@ R8d의 목적은 provider I/O intent와 bounded outcome을 exact cleanup attempt
 /ingestReceipts/{receiptId}/recoveryAttempts/{attemptId}
 
 decision_domain=expiry_cleanup?
+cleanup_schema_version=telemetry-cleanup-execution.v1?
 cleanup_target_hash?
 cleanup_plan_hash?
+cleanup_receipt_revision?
 cleanup_execution_revision?
 cleanup_phase?
 
 cleanup_raw_targeted?
 cleanup_raw_dispatch_at?
 cleanup_raw_delete_outcome?
+cleanup_raw_outcome_recorded_at?
 cleanup_raw_audit_outcome?
 cleanup_raw_audited_at?
 
 cleanup_manifest_targeted?
 cleanup_manifest_dispatch_at?
 cleanup_manifest_delete_outcome?
+cleanup_manifest_outcome_recorded_at?
 cleanup_manifest_audit_outcome?
 cleanup_manifest_audited_at?
 
@@ -241,6 +245,6 @@ R8d local implementation은 scheduler, startup, readiness와 runtime route에 �
 - 선행 결정: [ADR-0023](./ADR-0023-fenced-cleanup-lease-claim.md), [ADR-0024](./ADR-0024-immutable-cleanup-dry-run-target.md), [ADR-0025](./ADR-0025-generation-pinned-cleanup-delete-and-audit.md)
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
-- 증거: 구현 전 — 검증된 code·test evidence 없음
+- 증거: [EVD-20260722-034](../evidence/2026-07.md#evd-20260722-034--fenced-cleanup-execution-ledger와-firestore-progress-persistence) — pure ledger와 fresh non-audit Firestore progress persistence의 local/Emulator 근거. Absence audit·takeover·terminal finalizer·correlation은 미구현
 - 제품 업데이트: 해당 없음 — executable·사용자·운영 경로 미연결
 - 인시던트: 해당 없음 — production·staging·field 영향 없음

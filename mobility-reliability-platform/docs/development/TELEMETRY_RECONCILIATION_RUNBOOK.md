@@ -2,7 +2,7 @@
 
 ## 1. 현재 사용 상태
 
-이 문서는 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)의 운영 절차를 구현·검증하기 위한 사전 runbook이다. 2026-07-22 현재 single-receipt reconciler, bounded candidate worker와 cleanup dry-run read/target component는 구현됐지만 cleanup executor/delete/completion, scheduler/startup wiring, metrics exporter와 staging IAM은 구현되지 않았으므로 production artifact를 조회·수정·삭제하는 실행 지침이 아니다.
+이 문서는 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)의 운영 절차를 구현·검증하기 위한 사전 runbook이다. 2026-07-22 현재 single-receipt reconciler, bounded candidate worker, cleanup dry-run target, local generation-pinned delete/audit와 partial progress persistence component는 구현됐다. Absence audit·completion, scheduler/startup wiring, metrics exporter와 staging IAM은 구현되지 않았으므로 production artifact를 조회·수정·삭제하는 실행 지침이 아니다.
 
 - 허용: synthetic fixture, Firestore Emulator, pinned official Storage testbench의 read-only/classifier와 bounded single-receipt protocol 검증
 - 금지: 실제 bucket에서 path/latest/prefix 기준 삭제, receipt 수동 수정, 실제 사용자 좌표를 로그·문서에 복사
@@ -97,9 +97,9 @@
 
 ## 8. Expiry cleanup 재개 규칙
 
-expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인한다. 만료 lease에 recovery attempt count가 있으면 exact nested attempt의 owner·token·version·started time을 함께 검증하고 `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token을 증가시켜 `cleanup_pending`으로 전환한다. Attempt가 누락·변조·completed이면 receipt도 바꾸지 않고 조사 가능한 lease 증거를 보존한다. Application·receipt·attempt read clock 중 가장 이른 시각이 deadline/lease expiry 전이면 `not_ready`다. 현재 구현은 `reservation_expiry + reserved` origin의 transition, cleanup claim, `absent -> planned|hold` dry-run target과 generation-pinned local delete/complete-empty audit까지다. [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md), [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target), [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md), [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit), [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)을 따른다. ADR-0026은 현재 accepted design이며 실행 원장·terminal code evidence는 아직 없다.
+expiry cleanup은 일반 finalizer가 시작하지 않는다. `BeginCleanupTransition`이 `reserved + deadline 경과 + active lease 없음 + 3-way linkage 정상`을 transaction에서 확인한다. 만료 lease에 recovery attempt count가 있으면 exact nested attempt의 owner·token·version·started time을 함께 검증하고 `started`를 같은 transaction에서 `failed/lease_expired`로 닫은 뒤 token을 증가시켜 `cleanup_pending`으로 전환한다. Attempt가 누락·변조·completed이면 receipt도 바꾸지 않고 조사 가능한 lease 증거를 보존한다. Application·receipt·attempt read clock 중 가장 이른 시각이 deadline/lease expiry 전이면 `not_ready`다. 현재 구현은 `reservation_expiry + reserved` origin의 transition, cleanup claim, `absent -> planned|hold` dry-run target, generation-pinned local delete/complete-empty audit와 cleanup attempt progress persistence foundation까지다. [ADR-0023](../decisions/ADR-0023-fenced-cleanup-lease-claim.md), [EVD-20260722-031](../evidence/2026-07.md#evd-20260722-031--immutable-quiescence와-fenced-cleanup-lease-claim), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target), [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md), [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit), [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md), [EVD-20260722-034](../evidence/2026-07.md#evd-20260722-034--fenced-cleanup-execution-ledger와-firestore-progress-persistence)을 따른다. 별도 absence-audit capability와 terminal code evidence는 아직 없다.
 
-R8c delete/audit component는 local·synthetic 범위에서 구현됐지만 **현재 runtime 실행 금지**다. Delete 전송과 complete-empty audit를 분리하고 raw audit 전 manifest delete를 금지한다. 아래 상태는 immutable target이 아니라 exact cleanup attempt의 future execution ledger다. Durable state machine과 crash outcome ledger, reserved-origin hold, accepted deletion과 rejected side cleanup은 아직 구현되지 않았다.
+R8c delete/audit component와 R8d ledger persistence foundation은 local·synthetic 범위에서 구현됐지만 **현재 runtime 실행 금지**다. Delete 전송과 complete-empty audit를 분리하고 raw audit 전 manifest delete를 금지한다. 아래 상태는 immutable target이 아니라 exact cleanup attempt의 execution ledger다. 현재 Firestore store는 `planned`, dispatch와 delete outcome을 보존하지만 별도 read-only capability 없이는 absence-confirmed phase를 저장하지 않는다. Phase executor, progress-bearing takeover, terminal finalizer, reserved-origin hold, accepted deletion과 rejected side cleanup은 아직 구현되지 않았다.
 
 ```text
 planned
@@ -111,6 +111,8 @@ planned
   -> manifest_absence_confirmed
   -> completed
 ```
+
+아래 항목은 구현 후 적용할 재개 규칙이다. 현재 구현 근거는 phase/revision 검증, target create-only 보존, dispatch/delete outcome persistence와 exact replay write-zero까지다. Crash audit-first orchestration, progress-aware takeover, absence-audit 승인과 finalization은 아직 실행 가능한 절차가 아니다.
 
 - raw dispatch 뒤 crash: mutation을 바로 반복하지 않고 expected raw path의 complete inventory audit부터 수행한다.
 - manifest dispatch 뒤 crash: 같은 target과 durable phase를 확인하고 expected manifest path의 audit부터 수행한다.
@@ -145,6 +147,8 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 
 이어 [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md)의 concrete Firestore delete grant, exact generation+metageneration GCS delete와 complete regular/soft-deleted empty audit도 local component로 구현했다. Raw unknown/error 뒤 manifest mutation 0, raw-only/manifest-only counterpart audit, soft-deleted/late generation과 incomplete inventory fail-closed, inspect/delete 404 분리를 [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit)에서 local/Emulator/pinned testbench/clean CI로 확인했다. Success observation은 shape-only이며 completion 권한이 아니다.
 
+이어 [ADR-0026](../decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)의 pure ledger와 Firestore progress persistence foundation을 구현했다. Plan·target·fence·receipt revision과 phase revision을 묶고, planned initialize와 dispatch/delete outcome을 exact cleanup attempt에 저장하며 semantic replay는 write 0이다. Generic progress API는 별도 read-only evidence 없이 absence-confirmed phase를 저장하지 않는다. [EVD-20260722-034](../evidence/2026-07.md#evd-20260722-034--fenced-cleanup-execution-ledger와-firestore-progress-persistence)의 local/Emulator 범위이며 phase executor·terminal finalizer·runtime 권한은 아니다.
+
 - [x] fake clock으로 lease exact-expiry boundary 재현
 - [x] 두 request/sweeper/cleanup의 concurrent claim winner 1명
 - [ ] recovery claim 대 `BeginCleanupTransition` 경계 경쟁에서 cleanup/recovery 중 허용된 winner만 1명
@@ -162,6 +166,12 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 - [x] raw exact generation+metageneration delete 뒤 complete empty audit 전 manifest mutation 0
 - [x] raw timeout/cancel/unavailable 재감사 뒤 manifest delete 0, permission/quota/412 bounded fail-closed
 - [x] inspect/delete 404와 complete-empty를 분리하고 soft-deleted·late counterpart generation을 완료로 해석하지 않음
+- [x] cleanup ledger plan/target/fence와 phase revision 계약
+- [x] Firestore ledger initialize·dispatch/delete outcome progress·exact replay write-zero
+- [ ] read-only absence-audit capability와 audited phase persistence
+- [ ] progress-aware expired cleanup takeover
+- [ ] atomic completed/expired/purge-eligibility finalization
+- [ ] `committed|not_committed|unverifiable` response-loss correlation
 - [ ] 복수 manifest generation은 bytes 동일 여부와 관계없이 자동 선택 0
 - [ ] post-expiry hold가 즉시 integrity cleanup 또는 incident escalation으로 연결
 - [ ] accepted deletion 중 replay-complete, rejected side cleanup 중 replay-rejected 유지
