@@ -53,7 +53,7 @@
 
 ### Telemetry Gateway
 
-다음 목록은 target architecture다. Lease·fencing, single-receipt reconciler, bounded candidate/checkpoint와 expiry cleanup의 claim·read-only classification·dry-run target component는 local code로 구현됐지만 `cmd/server`·scheduler에 연결되지 않았다. Actual cleanup executor는 여전히 target 책임이다. Recovery 결정은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md), [ADR-0020](../decisions/ADR-0020-two-pass-forward-reconciliation.md), [ADR-0021](../decisions/ADR-0021-bounded-forward-recovery-worker.md), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md)을 따른다.
+다음 목록은 target architecture다. Lease·fencing, single-receipt reconciler, bounded candidate/checkpoint와 expiry cleanup의 claim·read-only classification·dry-run target·generation-pinned delete/audit component는 local code로 구현됐지만 `cmd/server`·scheduler에 연결되지 않았다. Cleanup outcome ledger와 terminal completion은 여전히 target 책임이다. Recovery 결정은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md), [ADR-0020](../decisions/ADR-0020-two-pass-forward-reconciliation.md), [ADR-0021](../decisions/ADR-0021-bounded-forward-recovery-worker.md), [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md)을 따른다.
 
 - 비즈니스 CRUD를 모두 담당하는 범용 백엔드가 아니다.
 - 모바일 텔레메트리의 인증, 계약 검증, 멱등성, receipt만 책임진다.
@@ -80,13 +80,13 @@
 
 ### Async Workers
 
-receipt reconciler의 bounded candidate/checkpoint component와 expiry cleanup dry-run target은 현재 배포 worker가 아니다.
+receipt reconciler의 bounded candidate/checkpoint component와 expiry cleanup delete/audit component는 현재 배포 worker가 아니다.
 
 - Cloud Tasks/Pub/Sub의 at-least-once 전달을 전제로 projection, importer, feature, fact, report job을 처리한다.
 - receipt reconciler는 stale `reserved` 후보를 bounded query로 찾되 Firestore transaction claim을 유일한 소유권 판정으로 사용한다.
 - Tenant별 scan은 시작 cutoff를 epoch 동안 고정하고 `(next_recovery_at, document ID)` cursor를 advisory CAS checkpoint에 저장한다. Checkpoint 장애·충돌은 중복 scan만 허용하며 receipt 처리 권한을 바꾸지 않는다.
 - forward reconciler는 current consent를 다시 확인하고 valid raw-only/raw+manifest만 generation-pinned 방식으로 완료한다. raw 없음, manifest-only, stored-missing을 추정 복구하지 않는다.
-- expiry cleanup은 forward recovery와 분리한다. 현재 local component는 immutable dry-run target에 exact generation을 create-once로 고정하는 데까지만 구현됐다. Future executor는 current fence와 provider generation을 다시 확인한 뒤 raw→manifest 순서로만 처리한다.
+- expiry cleanup은 forward recovery와 분리한다. 현재 local component는 immutable dry-run target을 current receipt/fence와 다시 결합해 exact generation+metageneration만 조건부 삭제하고, regular/soft-deleted inventory가 모두 complete empty인지를 raw→manifest 순서로 감사한다. Success observation은 non-authoritative shape이며 timeout·permission·quota·drift, soft-deleted/late generation은 completion으로 승격하지 않는다. Outcome ledger·receipt `expired`·purge와 runtime wiring은 별도 경계다.
 - worker는 idempotency와 bounded advisory checkpoint를 가지며 replay 중 FCM·외부 호출을 실행하지 않는다. DLQ와 runtime replay mode는 scheduler 단계에서 별도 확정한다.
 - worker/runtime version, service account, trigger, retry, rollback을 독립 배포 단위로 기록한다.
 

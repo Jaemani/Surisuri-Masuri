@@ -299,7 +299,7 @@ forward sweeper와 별도 mode로 구현한다.
 5. 삭제 전 immutable dry-run target document에 exact path·generation·hash, bounded inventory와 decision을 create-once로 기록한다. 동일 target replay는 write 0이며 conflict는 fail-closed한다. 이 target은 delete 또는 `expired` 권한이 아니다. 상세 결정과 local/Emulator 근거는 [ADR-0024](../decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [EVD-20260722-032](../evidence/2026-07.md#evd-20260722-032--sealed-classification과-immutable-cleanup-dry-run-target)을 따른다.
 6. [ADR-0025](../decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md)에 따라 persisted target과 current cleanup fence를 다시 승인하고 raw exact generation+metageneration을 먼저 조건부 삭제한다. Delete 2xx와 direct 404는 부재 증거가 아니다.
 7. Raw path의 regular-version·soft-deleted inventory가 complete empty일 때만 manifest exact generation+metageneration을 조건부 삭제한다. Raw 결과가 drift·unknown·present·soft-deleted·audit unavailable이면 manifest delete는 0이다.
-8. Manifest를 포함한 모든 expected path의 complete empty inventory를 별도로 확인한다. Delete 전송 outcome과 post-delete audit outcome을 분리해 보존하며 soft-deleted 또는 late generation이 있으면 완료하지 않는다.
+8. Manifest를 포함한 모든 expected path의 complete empty inventory를 별도로 확인한다. R8c는 delete 전송 outcome과 post-delete audit을 분리한 non-authoritative in-process success observation까지만 만들며 soft-deleted 또는 late generation이 있으면 반환하지 않는다. Durable outcome 보존과 `hold|retry` disposition은 R8d fresh fenced ledger에서 구현한다.
 9. linked late generation이 없고 target·receipt linkage가 완전할 때만 receipt를 `expired`로 전환한다. 발견되면 hold 또는 별도 linked target으로 분리한다.
 10. reserved-origin `recovery_hold`는 retention expiry가 오면 `BeginHeldCleanup` transaction으로 `cleanup_pending`에 진입하고 `cleanup_origin_status=recovery_hold`를 고정한다. accepted `stored|queued|projected` finding은 승인된 lifecycle/deletion evidence를 대조한 뒤 `BeginAcceptedDeletion`으로 `deleting -> deleted`를 사용하며 replay-complete를 보존한다. rejected artifact는 receipt를 `rejected`로 유지하고 exact ownership과 명시적 보안 승인이 있을 때만 side cleanup target을 만든다.
 11. terminal cleanup·감사 완료 뒤에만 두 index와 receipt의 `purge_eligible_at`을 같은 transaction에서 설정한다. linkage 문서는 독립 TTL로 삭제하지 않는다.
@@ -307,9 +307,9 @@ forward sweeper와 별도 mode로 구현한다.
 13. 세 집합을 재조회해 empty를 증명하고 삭제 수·cursor·receipt revision을 purge job에 기록한다. 그 뒤 마지막 transaction만 job 완료 증거와 3-way linkage를 재검증하고 두 uniqueness index와 receipt를 함께 삭제한다. attempt 수가 transaction limit을 넘어도 한 번에 cascade 삭제하지 않는다.
 14. purge job에는 위치·UID·object path 없이 hash·count·완료시각만 남기고 자체 retention 뒤 제거한다.
 
-이번 구현에서 actual delete까지 진행할지는 staging retention/IAM 결정 뒤 확정한다. 그 전에는 dry-run target 생성과 read-only 검증까지만 허용한다.
+Local R8c executor와 official testbench synthetic generation delete는 구현·검증했지만 executable에는 연결하지 않는다. 실제 staging/production artifact delete는 staging versioning·soft-delete·lifecycle·retention·IAM과 복구 절차를 승인·검증한 뒤에만 별도 활성화한다.
 
-2026-07-22 현재 1~5단계의 reserved-origin transition, exact forward-attempt closure, cleanup-only claim/takeover, cleanup-specific read authorization·sealed classification과 immutable dry-run target까지 local component로 구현·검증했다. 6~8단계의 exact conditional delete·post-delete audit 계약은 ADR-0025에 고정했지만 구현 증거는 아직 없다. Claim 자체는 artifact read/target/delete 권한이 아니고 dry-run target이나 delete result도 `expired` 권한이 아니다. 9~14단계의 cleanup completion, held/accepted/rejected cleanup, purge와 scheduler/startup은 미구현이다.
+2026-07-22 현재 1~7단계와 8단계의 complete-empty success observation까지 local component로 구현·검증했다. R8c는 current Firestore target/fence를 다시 승인하고 exact conditional delete, raw-first·missing-counterpart audit와 fail-closed error taxonomy를 제공하며 근거는 [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit)에 기록한다. Claim, dry-run target과 success observation 어느 것도 `expired` 권한이 아니다. 8단계의 durable outcome ledger와 9~14단계의 cleanup completion, held/accepted/rejected cleanup, purge와 scheduler/startup은 미구현이다.
 
 ### R9. Staging과 운영 gate
 

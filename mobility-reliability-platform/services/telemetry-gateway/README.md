@@ -46,11 +46,15 @@
 - cleanup first claim·expired takeover transaction adapter와 concurrent winner·rollback 회귀 검증
 - exact cleanup receipt·started attempt·fence를 다시 확인하는 cleanup read authorizer, request와 mutable classification output 전체의 evidence seal
 - attempt ID path에 exact generation/hash·bounded inventory를 create-once로 고정하는 cleanup dry-run target transaction, concurrent created/replayed 수렴·conflict write-zero와 client Rules deny
+- concrete Firestore current target snapshot만 발급하는 30초 이하 cleanup delete grant와 zero/forged/stale fence 거부
+- raw-first exact generation+metageneration conditional delete, regular/soft-deleted complete-empty audit와 raw-only/manifest-only counterpart path 확인
+- delete·inspect 404 분리, timeout/cancel/unavailable 재감사 후 manifest mutation 0, permission/quota/412·soft-deleted/late generation fail-closed
+- completion capability가 아닌 plan/target hash-bound non-authoritative success observation
 
 아직 구현하지 않은 production 운영 경계:
 
 - scheduler·startup composition과 실제 metrics exporter를 포함한 bounded sweeper runtime
-- generation-pinned GCS delete, target execution state, cleanup renewal·release·attempt completion, receipt `expired`, nested ledger purge와 accepted deletion auditor
+- Firestore execution/outcome ledger, target execution state, cleanup renewal·release·attempt completion, receipt `expired`, nested ledger purge와 accepted deletion auditor
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 
 verifier, authorization/admission transaction, artifact store, artifact inventory reader와 recovery control plane이 아직 `cmd/server`에 주입되지 않아 현재 executable은 `/healthz`만 `200`으로 응답하고 `/readyz`와 ingest는 `503 adapters_unconfigured`로 닫힙니다. Firestore transaction과 bounded candidate/checkpoint component는 local Emulator에서, Storage generation/replay는 official testbench에서 검증했지만 ADC/IAM·staging lifecycle·production composite index 증거는 아닙니다. Candidate와 advisory checkpoint는 artifact 권한이 아니며 fresh transaction claim의 검증된 `Acquired`만 single-receipt reconciler 진입을 허용합니다. `status`·`next_recovery_at` 누락 receipt는 due query에 보이지 않아 별도 control-integrity audit가 필요합니다. Scheduler/startup과 metrics exporter를 연결하기 전에는 worker를 활성화하지 않습니다. production factory guard도 server startup path가 연결되기 전에는 활성 runtime guard가 아닙니다. 인증 우회 local mode는 제공하지 않습니다. Firestore에는 GPS sample을 개별 document로 쓰지 않습니다.
@@ -73,7 +77,7 @@ rtk docker build \
 
 Firestore transaction의 실제 commit/retry와 concurrent same-batch 직렬화는 Firebase Emulator에서 별도 integration test로 검증합니다. host Go가 없는 WSL용 전체 명령은 [WSL Runbook](../../docs/development/WSL_RUNBOOK.md)에 있습니다. 일반 `go test`는 emulator 환경변수가 없으면 해당 integration case만 skip합니다.
 
-Cloud Storage의 `DoesNotExist`, generation-pinned compressed-byte replay는 pinned official Storage testbench에서 별도 integration test로 검증합니다. 일반 `go test`에서는 `STORAGE_EMULATOR_HOST`가 없으면 해당 case만 skip합니다.
+Cloud Storage의 `DoesNotExist`, generation-pinned compressed-byte replay와 exact generation+metageneration cleanup delete backend는 pinned official Storage testbench에서 별도 integration test로 검증합니다. Testbench delete는 synthetic object에만 적용하며 versioning·soft-delete inventory 의미와 full executor는 staging 증거가 아닙니다. 일반 `go test`에서는 `STORAGE_EMULATOR_HOST`가 없으면 해당 case만 skip합니다.
 
 Docker build context는 프로젝트 root이며 `.dockerignore` allowlist가 gateway `cmd`·`internal` source, Go module 파일과 synthetic contract JSON fixture만 전달합니다. 패키지 단위 allowlist이므로 새 Go 파일이 host CI에는 보이지만 image에서 조용히 누락되는 구조를 피합니다.
 
