@@ -426,13 +426,17 @@ receipt는 control plane 상태이며 GPS sample을 포함하지 않는다. Stag
 attempt_id, tenant_id, receipt_id,
 owner_kind(request|sweeper|cleanup), fencing_token, worker_version,
 status(started|completed|failed),
-classification?, action?, outcome?, error_class?,
-object_path?, object_generation?,
-manifest_path?, manifest_generation?,
-started_at, completed_at?
+decision_domain?(artifact_reconciliation|current_authorization),
+authorization_disposition?(denied|unavailable),
+phase?, classification?, reason_code?, action?, outcome?, action_hash?,
+hold_code?, release_code?, rejection_code?,
+raw_sha256?, raw_crc32c?, raw_size?, raw_generation?, raw_metageneration?,
+manifest_sha256?, manifest_crc32c?, manifest_size?, manifest_generation?, manifest_metageneration?,
+hold_review_due_at?, failure_code?,
+started_at, completed_at?, failed_at?
 ```
 
-recovery attempt는 좌표·raw body·Firebase UID·App ID·credential token을 포함하지 않는 감사·운영 ledger다. expired lease를 takeover한 request와 sweeper/cleanup claim은 claim transaction에서 `started` attempt를 만들고 후속 분류를 별도 fenced update한다. 상태 원장은 receipt이며 attempt completion write 실패를 이유로 이미 commit된 receipt 상태를 되돌리지 않는다. forward recovery와 expiry cleanup은 다른 mode와 완료 조건을 사용한다. 자세한 계약은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)을 따른다.
+recovery attempt는 좌표·artifact path·raw body·Firebase UID·App ID·credential token과 provider 원문 오류를 포함하지 않는 감사·운영 ledger다. `started`와 `failed`에는 decision/action terminal field가 없어야 한다. Completed artifact action은 `decision_domain=artifact_reconciliation`, current authorization hold/release는 `decision_domain=current_authorization`과 exact bounded disposition을 사용하며 서로 교환되지 않는다. expired lease를 takeover한 request와 sweeper/cleanup claim은 claim transaction에서 `started` attempt를 만들고 후속 결과를 fenced update한다. 상태 원장은 receipt이며 current protocol의 receipt action과 attempt completion은 한 transaction에 기록한다. 응답 유실은 fresh outcome correlation으로 판별하고 mutation을 replay하지 않는다. forward recovery와 expiry cleanup은 다른 mode와 완료 조건을 사용한다. 자세한 계약은 [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)과 [ADR-0020](../decisions/ADR-0020-two-pass-forward-reconciliation.md)을 따른다.
 
 Firestore는 parent receipt 삭제 시 `recoveryAttempts`를 cascade delete하지 않는다. attempt는 독립 TTL로 먼저 지우지 않고 receipt의 `purge_eligible_at` 이후 bounded purge job이 document name cursor로 지운다. terminal purge가 시작된 receipt에는 새 attempt 생성을 금지한다.
 

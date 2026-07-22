@@ -256,6 +256,21 @@ bounded error_class, pinned lineage summary, completed_at
 - 과거 구현에서 receipt mutation만 성공한 경우에만 별도 idempotent repair API가 receipt revision·last recovery correlation에서 ledger를 재구성한다. 현재 protocol의 commit 응답 유실은 outcome 조회로 판정하며 이미 성공한 terminal receipt를 ledger 오류 때문에 rollback하지 않는다.
 - attempt 문서와 log에는 raw body, 좌표, Firebase UID, App ID, token, provider credential과 원문 오류를 넣지 않는다.
 
+### 9. Current authorization disposition은 artifact action과 다른 capability domain이다
+
+Current authorization 자체가 denied 또는 unavailable인 경우에는 classifier 결과를 꾸며 일반 `ForwardRecoveryActionGrant`로 처리하지 않는다. 별도 `ForwardRecoveryDispositionCommand`, opaque `ForwardRecoveryDispositionGrant`와 Firestore port를 사용한다.
+
+- public authorization 입력은 tenant, reservation, exact lease와 attempt뿐이다. Caller는 action, hold/release code, provider 오류, artifact path·lineage를 제공하지 않는다.
+- coherent receipt·fence를 읽고 current 관계가 정책상 거부된 경우에만 `denied`를 파생하며, 결과는 `recovery_hold(current_authorization_denied)`로 고정한다.
+- coherent receipt·fence는 읽었지만 관계 snapshot이 의미상 malformed인 경우에만 `unavailable`을 파생하며, 결과는 `release_lease(authorization_unavailable)`와 bounded backoff로 고정한다.
+- transport 오류, missing/unreadable snapshot, caller cancellation·deadline은 current-state authority가 없으므로 disposition capability를 발급하지 않고 mutation 0으로 끝낸다.
+- Firestore transaction은 linked receipt, 모든 current 관계와 exact `started` attempt를 다시 읽고 동일 disposition을 재평가한 뒤 receipt와 attempt를 함께 갱신한다. Preflight 뒤 allowed 또는 반대 disposition으로 바뀌면 write 0이다.
+- attempt에는 classifier phase/class/reason 대신 `decision_domain=current_authorization`과 bounded `authorization_disposition`을 기록한다. 일반 artifact action은 `decision_domain=artifact_reconciliation`을 기록한다.
+- fresh outcome query는 decision domain, prior fence, action hash와 expected revision에 함께 결합한다. Domain·disposition·code가 바뀐 완료 기록은 committed로 채택하지 않는다.
+- hold review due는 current evaluation 이후이며 artifact expiry와 같을 수 없고 반드시 그보다 이르다.
+
+이 필드가 도입되기 전 완료 attempt에 `decision_domain`이 없다면 outcome correlation은 추정 마이그레이션하지 않고 unverifiable로 닫는다. 현재 runtime이 연결되지 않은 단계에서는 운영 데이터 migration을 수행하지 않는다. 향후 기존 attempt 원장을 보존한 채 배포해야 한다면 별도 migration evidence와 rollout 결정을 먼저 남긴다.
+
 ## 구현·검증 gate
 
 ### Provider-neutral unit·race
@@ -315,5 +330,5 @@ bounded error_class, pinned lineage summary, completed_at
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 사전절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
 - 제품 업데이트: 해당 없음 — runtime·사용자 흐름 변화 없음
-- 증거: [EVD-20260722-025](../evidence/2026-07.md#evd-20260722-025--two-pass-forward-recovery-planner와-manifest-only-repair-boundary) — planner·manifest-only capability/GCS 경계까지, Firestore final action·runtime은 미구현
+- 증거: [EVD-20260722-025](../evidence/2026-07.md#evd-20260722-025--two-pass-forward-recovery-planner와-manifest-only-repair-boundary), [EVD-20260722-026](../evidence/2026-07.md#evd-20260722-026--forward-recovery-action-outcome과-attempt-failure-원자-경계), [EVD-20260722-027](../evidence/2026-07.md#evd-20260722-027--current-authorization-disposition-원자-경계) — local protocol component까지, reconciler runtime·staging은 미구현
 - 인시던트: 해당 없음 — production·staging·field 영향 없음
