@@ -17,6 +17,7 @@ const (
 
 	receiptPurgeKeyVersion         = "ingest-receipt-purge@1"
 	receiptPurgeLinkageHashVersion = "ingest-receipt-purge-linkage@1"
+	ReceiptPurgeMaxPageSize        = 100
 )
 
 var (
@@ -199,12 +200,121 @@ type ReceiptPurgeAdmissionOutcome struct {
 	PurgeStartedAt  time.Time
 }
 
+type ReceiptPurgePageKind string
+
+const (
+	ReceiptPurgePageAttempts ReceiptPurgePageKind = "attempts"
+	ReceiptPurgePageLinks    ReceiptPurgePageKind = "links"
+)
+
+// ReceiptPurgePageRequest is a bounded advisory discovery request. It never
+// grants delete authority; R8k-b/c must reread every exact document inside the
+// transaction that deletes it and advances the durable cursor.
+type ReceiptPurgePageRequest struct {
+	PurgeKey            string
+	TenantID            string
+	ReceiptID           string
+	Kind                ReceiptPurgePageKind
+	ExpectedJobStatus   ReceiptPurgeJobStatus
+	ExpectedJobRevision int64
+	AfterDocumentID     string
+	PageSize            int
+}
+
+// ReceiptPurgePageObservation contains at most PageSize exact candidates and
+// one separate lookahead ID. Document IDs are bounded control identifiers,
+// never Firestore paths or document payloads.
+type ReceiptPurgePageObservation struct {
+	Request             ReceiptPurgePageRequest
+	DeleteDocumentIDs   []string
+	LookaheadDocumentID string
+	ReadAt              time.Time
+}
+
 func DeriveReceiptPurgeKey(tenantID, receiptID string) (string, error) {
 	if !telemetry.IsUUID(tenantID) || !telemetry.IsUUID(receiptID) {
 		return "", ErrInvalidReceiptPurgeAdmission
 	}
 	digest := sha256.Sum256([]byte(receiptPurgeKeyVersion + "\x00" + tenantID + "\x00" + receiptID))
 	return hex.EncodeToString(digest[:]), nil
+}
+
+func ValidateReceiptPurgePageRequest(request ReceiptPurgePageRequest) error {
+	key, err := DeriveReceiptPurgeKey(request.TenantID, request.ReceiptID)
+	if err != nil || request.PurgeKey != key || request.ExpectedJobRevision <= 0 ||
+		request.PageSize < 1 || request.PageSize > ReceiptPurgeMaxPageSize ||
+		!validReceiptPurgeCursor(request.AfterDocumentID) {
+		return ErrInvalidReceiptPurgeJob
+	}
+	switch request.Kind {
+	case ReceiptPurgePageAttempts:
+		if request.ExpectedJobStatus != ReceiptPurgeJobAttemptsPurging {
+			return ErrInvalidReceiptPurgeJob
+		}
+	case ReceiptPurgePageLinks:
+		if request.ExpectedJobStatus != ReceiptPurgeJobLinkedDocumentsPurging {
+			return ErrInvalidReceiptPurgeJob
+		}
+	default:
+		return ErrInvalidReceiptPurgeJob
+	}
+	return nil
+}
+
+// BuildReceiptPurgePageObservation splits a query result of at most
+// page_size+1 IDs into the exact transaction candidate set and a lookahead.
+// The input must already be ordered by Firestore document ID ascending.
+func BuildReceiptPurgePageObservation(
+	request ReceiptPurgePageRequest,
+	orderedDocumentIDs []string,
+	readAt time.Time,
+) (ReceiptPurgePageObservation, error) {
+	if ValidateReceiptPurgePageRequest(request) != nil ||
+		!validCleanupFirestoreTimestamp(readAt.UTC()) ||
+		len(orderedDocumentIDs) > request.PageSize+1 ||
+		validateReceiptPurgeOrderedDocumentIDs(request.AfterDocumentID, orderedDocumentIDs) != nil {
+		return ReceiptPurgePageObservation{}, ErrInvalidReceiptPurgeJob
+	}
+	deleteCount := len(orderedDocumentIDs)
+	lookahead := ""
+	if deleteCount == request.PageSize+1 {
+		deleteCount = request.PageSize
+		lookahead = orderedDocumentIDs[deleteCount]
+	}
+	observation := ReceiptPurgePageObservation{
+		Request: request, DeleteDocumentIDs: append([]string(nil), orderedDocumentIDs[:deleteCount]...),
+		LookaheadDocumentID: lookahead, ReadAt: readAt.UTC(),
+	}
+	if ValidateReceiptPurgePageObservation(observation) != nil {
+		return ReceiptPurgePageObservation{}, ErrInvalidReceiptPurgeJob
+	}
+	return observation, nil
+}
+
+func ValidateReceiptPurgePageObservation(observation ReceiptPurgePageObservation) error {
+	if ValidateReceiptPurgePageRequest(observation.Request) != nil ||
+		!validCleanupFirestoreTimestamp(observation.ReadAt.UTC()) ||
+		len(observation.DeleteDocumentIDs) > observation.Request.PageSize ||
+		(observation.LookaheadDocumentID != "" &&
+			len(observation.DeleteDocumentIDs) != observation.Request.PageSize) {
+		return ErrInvalidReceiptPurgeJob
+	}
+	ordered := append([]string(nil), observation.DeleteDocumentIDs...)
+	if observation.LookaheadDocumentID != "" {
+		ordered = append(ordered, observation.LookaheadDocumentID)
+	}
+	return validateReceiptPurgeOrderedDocumentIDs(observation.Request.AfterDocumentID, ordered)
+}
+
+func validateReceiptPurgeOrderedDocumentIDs(after string, values []string) error {
+	previous := after
+	for _, value := range values {
+		if !safeRecoveryDocumentID(value, 1500) || value <= previous {
+			return ErrInvalidReceiptPurgeJob
+		}
+		previous = value
+	}
+	return nil
 }
 
 func ReceiptPurgeLinkageHash(linkage ReceiptPurgeLinkage) (string, error) {

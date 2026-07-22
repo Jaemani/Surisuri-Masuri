@@ -299,6 +299,82 @@ func TestEvaluateReceiptPurgeAdmissionOutcomeClassifiesExactStates(t *testing.T)
 	}
 }
 
+func TestBuildReceiptPurgePageObservationSeparatesLookahead(t *testing.T) {
+	state, readAt := receiptPurgeAdmissionFixture(t)
+	key, _ := DeriveReceiptPurgeKey(state.Receipt.TenantID, state.Receipt.ReceiptID)
+	request := ReceiptPurgePageRequest{
+		PurgeKey: key, TenantID: state.Receipt.TenantID, ReceiptID: state.Receipt.ReceiptID,
+		Kind: ReceiptPurgePageAttempts, ExpectedJobStatus: ReceiptPurgeJobAttemptsPurging,
+		ExpectedJobRevision: 2, PageSize: 2,
+	}
+	ids := []string{"attempt-001", "attempt-002", "attempt-003"}
+	observation, err := BuildReceiptPurgePageObservation(request, ids, readAt)
+	if err != nil || len(observation.DeleteDocumentIDs) != 2 ||
+		observation.DeleteDocumentIDs[0] != ids[0] || observation.DeleteDocumentIDs[1] != ids[1] ||
+		observation.LookaheadDocumentID != ids[2] || !observation.ReadAt.Equal(readAt) {
+		t.Fatalf("BuildReceiptPurgePageObservation() = %#v, %v", observation, err)
+	}
+	ids[0] = "caller-mutated"
+	if observation.DeleteDocumentIDs[0] != "attempt-001" {
+		t.Fatal("page observation retained caller-owned slice")
+	}
+	withoutLookahead, err := BuildReceiptPurgePageObservation(
+		request, []string{"attempt-001"}, readAt,
+	)
+	if err != nil || len(withoutLookahead.DeleteDocumentIDs) != 1 ||
+		withoutLookahead.LookaheadDocumentID != "" {
+		t.Fatalf("short page observation = %#v, %v", withoutLookahead, err)
+	}
+}
+
+func TestReceiptPurgePageContractRejectsUnboundedOrUnorderedInput(t *testing.T) {
+	state, readAt := receiptPurgeAdmissionFixture(t)
+	key, _ := DeriveReceiptPurgeKey(state.Receipt.TenantID, state.Receipt.ReceiptID)
+	valid := ReceiptPurgePageRequest{
+		PurgeKey: key, TenantID: state.Receipt.TenantID, ReceiptID: state.Receipt.ReceiptID,
+		Kind: ReceiptPurgePageLinks, ExpectedJobStatus: ReceiptPurgeJobLinkedDocumentsPurging,
+		ExpectedJobRevision: 3, AfterDocumentID: "link-000", PageSize: 2,
+	}
+	requestMutations := []struct {
+		name   string
+		mutate func(*ReceiptPurgePageRequest)
+	}{
+		{name: "zero page", mutate: func(value *ReceiptPurgePageRequest) { value.PageSize = 0 }},
+		{name: "oversized page", mutate: func(value *ReceiptPurgePageRequest) { value.PageSize = ReceiptPurgeMaxPageSize + 1 }},
+		{name: "wrong status", mutate: func(value *ReceiptPurgePageRequest) { value.ExpectedJobStatus = ReceiptPurgeJobAttemptsPurging }},
+		{name: "unknown kind", mutate: func(value *ReceiptPurgePageRequest) { value.Kind = "provider" }},
+		{name: "path cursor", mutate: func(value *ReceiptPurgePageRequest) { value.AfterDocumentID = "links/child" }},
+	}
+	for _, test := range requestMutations {
+		t.Run(test.name, func(t *testing.T) {
+			request := valid
+			test.mutate(&request)
+			if !errors.Is(ValidateReceiptPurgePageRequest(request), ErrInvalidReceiptPurgeJob) {
+				t.Fatalf("invalid request accepted: %#v", request)
+			}
+		})
+	}
+	invalidIDs := [][]string{
+		{"link-002", "link-001"},
+		{"link-001", "link-001"},
+		{"link-000"},
+		{"link-001", "link-002", "link-003", "link-004"},
+		{"links/child"},
+	}
+	for _, ids := range invalidIDs {
+		if _, err := BuildReceiptPurgePageObservation(valid, ids, readAt); !errors.Is(err, ErrInvalidReceiptPurgeJob) {
+			t.Fatalf("invalid ordered IDs accepted: %#v", ids)
+		}
+	}
+	invalidObservation := ReceiptPurgePageObservation{
+		Request: valid, DeleteDocumentIDs: []string{"link-001"},
+		LookaheadDocumentID: "link-002", ReadAt: readAt,
+	}
+	if !errors.Is(ValidateReceiptPurgePageObservation(invalidObservation), ErrInvalidReceiptPurgeJob) {
+		t.Fatal("lookahead on a short page was accepted")
+	}
+}
+
 func TestReceiptPurgePublicContractHasNoSensitiveSurface(t *testing.T) {
 	types := []reflect.Type{
 		reflect.TypeOf(ReceiptPurgeJob{}), reflect.TypeOf(ReceiptPurgeFence{}),
@@ -306,6 +382,7 @@ func TestReceiptPurgePublicContractHasNoSensitiveSurface(t *testing.T) {
 		reflect.TypeOf(ReceiptPurgeLinkage{}), reflect.TypeOf(ReceiptPurgeAdmissionCommand{}),
 		reflect.TypeOf(ReceiptPurgeAdmissionOutcomeQuery{}), reflect.TypeOf(ReceiptPurgeAdmissionResult{}),
 		reflect.TypeOf(ReceiptPurgeAdmissionOutcomeSnapshot{}), reflect.TypeOf(ReceiptPurgeAdmissionOutcome{}),
+		reflect.TypeOf(ReceiptPurgePageRequest{}), reflect.TypeOf(ReceiptPurgePageObservation{}),
 	}
 	for _, value := range types {
 		for index := 0; index < value.NumField(); index++ {
