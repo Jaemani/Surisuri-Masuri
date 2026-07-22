@@ -100,7 +100,7 @@ Finalization transaction은 다음 네 문서만 갱신한다.
 4. Client-batch index
    - 같은 `purge_eligible_at`
 
-`purge_eligible_at`은 `max(receipt_retention_floor, completed_at)`으로 계산한다. Receipt와 두 index의 값은 exact equality여야 한다. Immutable cleanup target은 읽기만 하며 update·create가 0이다.
+`purge_eligible_at`은 `max(receipt_retention_floor, completed_at + CleanupCompletionAuditWindow)`으로 계산한다. 현재 local policy의 audit window는 7일이며 staging 보존 승인 전 production 값으로 해석하지 않는다. Receipt와 두 index의 값은 exact equality여야 한다. Immutable cleanup target은 읽기만 하며 update·create가 0이다.
 
 ### 4. Response-loss query에는 transaction pre-state만 봉인한다
 
@@ -126,7 +126,9 @@ Exact query에 대한 fresh read-only capability는 30초 이하이며 query bin
 
 - `committed`: Exact terminal attempt·expired receipt·revision·evidence hash와 세 purge eligibility가 모두 일치한다.
 - `not_committed`: Original `cleanup_pending` receipt와 started attempt, pre-finalization ledger·fence가 그대로다.
-- `unverifiable`: 다른 winner, malformed/partial terminal residue, 잘못된 evidence 또는 purge, missing document 등 exact 두 상태로 증명할 수 없다.
+- `unverifiable`: 필요한 문서가 모두 구조적으로 읽힌 뒤에도 다른 winner, partial terminal residue, 잘못된 evidence 또는 purge 때문에 exact 두 상태로 증명할 수 없다.
+
+Attempt·target·linkage 문서 누락, 구조 해석 실패 또는 authorization/read failure는 상태 판정 입력 자체가 성립하지 않으므로 `unavailable` 오류로 닫는다. 이 오류를 `not_committed`나 `unverifiable` outcome으로 축소하지 않는다.
 
 `committed`만 재실행 없이 success로 수렴한다. `not_committed`는 후속 orchestrator가 fresh authority를 다시 얻을 수 있는 사실일 뿐 이 query가 mutation 권한을 주지는 않는다. `unverifiable`에서는 finalization, delete와 purge를 모두 중지한다.
 

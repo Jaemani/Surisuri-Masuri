@@ -167,7 +167,7 @@ R8c local component는 commit `0d6ad55`에 구현됐다.
 - Raw delete timeout/cancel/unavailable은 empty 재감사 뒤에도 bounded error로 종료해 manifest delete call을 0으로 유지한다.
 - Local Go race, Firebase demo Firestore Emulator, pinned official Storage testbench와 GitHub clean CI 근거는 [EVD-20260722-033](../evidence/2026-07.md#evd-20260722-033--generation-pinned-cleanup-delete와-complete-empty-audit)에 기록한다.
 
-구현됐다는 것은 local component와 synthetic test boundary를 뜻한다. Firestore attempt execution/outcome ledger, attempt completion/failure, target 생성 전 cleanup lease renewal과 별도 release, receipt `expired`, purge, scheduler·startup·readiness, staging IAM·lifecycle·soft-delete drill과 production activation은 여전히 미구현이다. ADR-0026은 target in-place state update를 명시적으로 제외한다.
+이 R8c 결정 시점의 구현은 local component와 synthetic test boundary였다. 당시 미구현이던 Firestore attempt execution/outcome ledger와 local success-only receipt `expired` finalizer는 후속 [ADR-0026](./ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md)~[ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md)에서 구현했다. Retry·hold, target 생성 전 cleanup lease renewal과 별도 release, purge, scheduler·startup·readiness, staging IAM·lifecycle·soft-delete drill과 production activation은 계속 미구현·미연결이다. Target in-place state update는 여전히 제외한다.
 
 ## 결과와 위험
 

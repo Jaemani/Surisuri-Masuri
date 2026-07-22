@@ -49,7 +49,7 @@ audience: project owner and technical reviewers
 - Implementation commit: `f7e0a44` (`feat: finalize expired cleanup atomically`)
 - Exact write set: Cleanup attempt, receipt, idempotency index와 client-batch index 네 문서만 같은 transaction에서 변경한다. Immutable cleanup target은 읽기만 한다.
 - Terminal shape: Attempt는 `status=completed`, `outcome=expired`, cleanup revision 8과 evidence를 기록한다. Receipt는 `cleanup_pending -> expired`, revision `+1`, lease 제거와 completion/purge timestamp를 기록한다.
-- Purge boundary: `purge_eligible_at=max(receipt retention floor, completed_at)`을 계산하고 receipt와 두 index에 같은 값을 요구한다. 이 값은 삭제 실행이 아니라 향후 purge 가능 시각이다.
+- Purge boundary: `purge_eligible_at=max(receipt retention floor, completed_at + 7일 audit window)`을 계산하고 receipt와 두 index에 같은 값을 요구한다. 7일은 local policy 값이며, 이 값은 삭제 실행이 아니라 향후 purge 가능 시각이다.
 - Response-loss safety: Outcome query는 transaction의 pre-state와 예상 revision을 봉인하며 `completed_at`을 미리 고정하지 않는다. Write 오류, callback retry drift와 commit response loss에도 첫 non-zero query를 caller가 보존한다.
 - Correlation: Exact terminal state면 `committed`, 원 pre-state가 그대로면 `not_committed`, 다른 winner·partial state·evidence/purge 손상이면 `unverifiable`이다. 어떤 결과도 provider delete나 finalization 재실행 권한을 주지 않는다.
 - Post-lease check: Receipt가 terminal이 되어 lease field가 제거된 뒤에도 immutable target의 original binding으로 terminal plan과 evidence를 read-only 재검증한다.
