@@ -160,6 +160,97 @@ func normalizeForwardRecoveryAttemptStoreError(
 	return ingest.ErrAdmissionUnavailable
 }
 
+func expiredPriorRecoveryAttemptClosureForCleanup(
+	ctx context.Context,
+	transaction admissionTransaction,
+	receipt firestoreIngestReceipt,
+	applicationTime time.Time,
+	receiptReadTime time.Time,
+) (string, []firestore.Update, time.Time, error) {
+	effectiveAt, err := coherentCleanupTransitionTime(applicationTime, receiptReadTime)
+	if err != nil {
+		return "", nil, time.Time{}, err
+	}
+	if !receiptHasLeaseFields(receipt) {
+		return "", nil, effectiveAt, nil
+	}
+	if receipt.RecoveryAttemptCount == 0 {
+		if receipt.LeaseOwnerKind != ingest.LeaseOwnerRequest {
+			return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+		}
+		return "", nil, effectiveAt, nil
+	}
+	if receipt.RecoveryAttemptCount < 0 ||
+		(receipt.LeaseOwnerKind != ingest.LeaseOwnerRequest &&
+			receipt.LeaseOwnerKind != ingest.LeaseOwnerSweeper) {
+		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	reader, ok := transaction.(recoveryAttemptReaderTransaction)
+	if !ok {
+		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	attemptPath := recoveryAttemptDocumentPath(
+		receipt.TenantID,
+		receipt.ReceiptID,
+		receipt.LeaseOwnerID,
+	)
+	attemptResult, exists, err := reader.ReadRecoveryAttempt(ctx, attemptPath)
+	if err != nil {
+		return "", nil, time.Time{}, err
+	}
+	if !exists {
+		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+	effectiveAt, err = coherentCleanupTransitionTime(
+		applicationTime,
+		receiptReadTime,
+		attemptResult.ReadTime,
+	)
+	if err != nil {
+		return "", nil, time.Time{}, err
+	}
+	if effectiveAt.Before(receipt.ReservationDeadline) || effectiveAt.Before(receipt.LeaseExpiresAt) {
+		return "", nil, effectiveAt, nil
+	}
+	expected := ingest.RecoveryAttemptProposal{
+		ID: receipt.LeaseOwnerID, WorkerVersion: ingest.RecoveryWorkerVersion,
+	}
+	fence := ingest.LeaseFence{
+		OwnerID: receipt.LeaseOwnerID, Token: receipt.FencingToken, ExpiresAt: receipt.LeaseExpiresAt,
+	}
+	switch attemptResult.Attempt.Status {
+	case ingest.RecoveryAttemptStarted:
+		if validateStartedRecoveryAttemptForOwner(
+			attemptResult.Attempt,
+			receipt,
+			expected,
+			fence,
+			receipt.LeaseOwnerKind,
+		) != nil || !effectiveAt.After(attemptResult.Attempt.StartedAt) {
+			return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+		}
+		return attemptPath, []firestore.Update{
+			{Path: "status", Value: string(ingest.RecoveryAttemptFailed)},
+			{Path: "failure_code", Value: string(ingest.RecoveryAttemptFailureLeaseExpired)},
+			{Path: "failed_at", Value: effectiveAt.UTC()},
+		}, effectiveAt, nil
+	case ingest.RecoveryAttemptFailed:
+		if validateFailedRecoveryAttemptForOwner(
+			attemptResult.Attempt,
+			receipt,
+			expected,
+			fence,
+			receipt.LeaseOwnerKind,
+			effectiveAt,
+		) != nil {
+			return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+		}
+		return "", nil, effectiveAt, nil
+	default:
+		return "", nil, time.Time{}, ingest.ErrAdmissionUnavailable
+	}
+}
+
 func expiredPriorRecoveryAttemptClosure(
 	ctx context.Context,
 	transaction admissionTransaction,

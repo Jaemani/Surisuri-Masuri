@@ -811,6 +811,24 @@ func (s *FirestoreAdmissionStore) BeginCleanupTransition(
 			resultStatus = ingest.TransitionStatusNotReady
 			return nil
 		}
+		priorAttemptPath, priorAttemptUpdates, attemptEffectiveAt, priorAttemptErr :=
+			expiredPriorRecoveryAttemptClosureForCleanup(
+				runContext,
+				transaction,
+				receipt,
+				requestedAt.UTC(),
+				linked.Receipt.ReadTime,
+			)
+		if priorAttemptErr != nil {
+			return priorAttemptErr
+		}
+		cleanupAt = attemptEffectiveAt
+		if cleanupAt.Before(receipt.ReservationDeadline) ||
+			(receiptHasLeaseFields(receipt) && cleanupAt.Before(receipt.LeaseExpiresAt)) {
+			resultReceipt = receipt.toDomain()
+			resultStatus = ingest.TransitionStatusNotReady
+			return nil
+		}
 		quiescenceBase := cleanupAt
 		if receipt.LeaseExpiresAt.After(quiescenceBase) {
 			quiescenceBase = receipt.LeaseExpiresAt
@@ -821,6 +839,11 @@ func (s *FirestoreAdmissionStore) BeginCleanupTransition(
 		if nextToken <= receipt.FencingToken || nextRevision <= receipt.Revision ||
 			!quiescenceUntil.After(cleanupAt) {
 			return ingest.ErrAdmissionUnavailable
+		}
+		if len(priorAttemptUpdates) > 0 {
+			if updateErr := transaction.Update(runContext, priorAttemptPath, priorAttemptUpdates); updateErr != nil {
+				return normalizeAdmissionError(runContext, updateErr)
+			}
 		}
 		if updateErr := transaction.Update(runContext, linked.ReceiptPath, []firestore.Update{
 			{Path: "status", Value: string(ingest.ReceiptCleanupPending)},
@@ -1530,15 +1553,28 @@ func conservativeAcceptanceTime(applicationTime, readTime time.Time) (time.Time,
 }
 
 func conservativeCleanupTime(applicationTime, readTime time.Time) (time.Time, error) {
-	applicationTime = applicationTime.UTC()
-	readTime = readTime.UTC()
-	if !withinAdmissionClockSkew(applicationTime, readTime) {
+	return coherentCleanupTransitionTime(applicationTime, readTime)
+}
+
+func coherentCleanupTransitionTime(times ...time.Time) (time.Time, error) {
+	var earliest time.Time
+	var latest time.Time
+	for _, candidate := range times {
+		candidate = candidate.UTC()
+		if candidate.IsZero() {
+			return time.Time{}, ingest.ErrAdmissionUnavailable
+		}
+		if earliest.IsZero() || candidate.Before(earliest) {
+			earliest = candidate
+		}
+		if latest.IsZero() || candidate.After(latest) {
+			latest = candidate
+		}
+	}
+	if earliest.IsZero() || latest.IsZero() || latest.Sub(earliest) > maxAdmissionClockSkew {
 		return time.Time{}, ingest.ErrAdmissionUnavailable
 	}
-	if readTime.Before(applicationTime) {
-		return readTime, nil
-	}
-	return applicationTime, nil
+	return earliest, nil
 }
 
 func withinAdmissionClockSkew(left, right time.Time) bool {

@@ -538,6 +538,194 @@ func TestFirestoreAdmissionStoreBeginCleanupTransitionAtDeadline(t *testing.T) {
 	}
 }
 
+func TestFirestoreAdmissionStoreBeginCleanupTransitionClosesExpiredStartedAttempt(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	cleanupAt := reservation.ReservationDeadline
+	tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+	receipt := tx.receipts[admissionReceiptPath()]
+	configureCleanupTransitionRecoveryAttempt(&receipt, cleanupAt)
+	tx.receipts[admissionReceiptPath()] = receipt
+	attemptPath := recoveryAttemptDocumentPath(receipt.TenantID, receipt.ReceiptID, receipt.LeaseOwnerID)
+	tx.attempts[attemptPath] = newFirestoreRecoveryAttempt(
+		ingest.RecoveryAttemptProposal{ID: receipt.LeaseOwnerID, WorkerVersion: ingest.RecoveryWorkerVersion},
+		receipt.TenantID,
+		receipt.ReceiptID,
+		receipt.LeaseOwnerKind,
+		receipt.FencingToken,
+		receipt.LeaseAcquiredAt,
+	)
+	tx.readTime = cleanupAt
+	store := admissionTestStore(cleanupAt, admissionRunner(tx))
+
+	result, status, err := store.BeginCleanupTransition(
+		context.Background(),
+		admissionTenantID,
+		admissionReservationKey,
+		cleanupAt,
+	)
+	if err != nil || status != ingest.TransitionStatusStarted {
+		t.Fatalf("BeginCleanupTransition() = %#v, %q, %v", result, status, err)
+	}
+	if result.State != ingest.ReceiptCleanupPending || result.FencingToken != receipt.FencingToken+1 ||
+		result.Revision != receipt.Revision+1 || !result.UpdatedAt.Equal(cleanupAt) {
+		t.Fatalf("cleanup transition result = %#v", result)
+	}
+	if len(tx.updates) != 2 || tx.updates[0].path != attemptPath || tx.updates[1].path != admissionReceiptPath() {
+		t.Fatalf("cleanup transition updates = %#v, want attempt then receipt", tx.updates)
+	}
+	attemptUpdates := firestoreUpdateMap(tx.updates[0].updates)
+	if attemptUpdates["status"] != string(ingest.RecoveryAttemptFailed) ||
+		attemptUpdates["failure_code"] != string(ingest.RecoveryAttemptFailureLeaseExpired) ||
+		attemptUpdates["failed_at"] != cleanupAt {
+		t.Fatalf("expired attempt closure = %#v", attemptUpdates)
+	}
+}
+
+func TestFirestoreAdmissionStoreBeginCleanupTransitionAcceptsAlreadyClosedExpiredAttempt(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	cleanupAt := reservation.ReservationDeadline
+	tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+	receipt := tx.receipts[admissionReceiptPath()]
+	configureCleanupTransitionRecoveryAttempt(&receipt, cleanupAt)
+	tx.receipts[admissionReceiptPath()] = receipt
+	attemptPath := recoveryAttemptDocumentPath(receipt.TenantID, receipt.ReceiptID, receipt.LeaseOwnerID)
+	attempt := newFirestoreRecoveryAttempt(
+		ingest.RecoveryAttemptProposal{ID: receipt.LeaseOwnerID, WorkerVersion: ingest.RecoveryWorkerVersion},
+		receipt.TenantID,
+		receipt.ReceiptID,
+		receipt.LeaseOwnerKind,
+		receipt.FencingToken,
+		receipt.LeaseAcquiredAt,
+	)
+	attempt.Status = ingest.RecoveryAttemptFailed
+	attempt.FailureCode = ingest.RecoveryAttemptFailureLeaseExpired
+	attempt.FailedAt = cleanupAt
+	tx.attempts[attemptPath] = attempt
+	tx.readTime = cleanupAt
+	store := admissionTestStore(cleanupAt, admissionRunner(tx))
+
+	_, status, err := store.BeginCleanupTransition(
+		context.Background(),
+		admissionTenantID,
+		admissionReservationKey,
+		cleanupAt,
+	)
+	if err != nil || status != ingest.TransitionStatusStarted {
+		t.Fatalf("BeginCleanupTransition() = %q, %v", status, err)
+	}
+	if len(tx.updates) != 1 || tx.updates[0].path != admissionReceiptPath() {
+		t.Fatalf("already closed transition updates = %#v, want receipt only", tx.updates)
+	}
+}
+
+func TestFirestoreAdmissionStoreBeginCleanupTransitionUsesEarliestAttemptReadTime(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	cleanupAt := reservation.ReservationDeadline
+	tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+	receipt := tx.receipts[admissionReceiptPath()]
+	configureCleanupTransitionRecoveryAttempt(&receipt, cleanupAt)
+	tx.receipts[admissionReceiptPath()] = receipt
+	attemptPath := recoveryAttemptDocumentPath(receipt.TenantID, receipt.ReceiptID, receipt.LeaseOwnerID)
+	tx.attempts[attemptPath] = newFirestoreRecoveryAttempt(
+		ingest.RecoveryAttemptProposal{ID: receipt.LeaseOwnerID, WorkerVersion: ingest.RecoveryWorkerVersion},
+		receipt.TenantID,
+		receipt.ReceiptID,
+		receipt.LeaseOwnerKind,
+		receipt.FencingToken,
+		receipt.LeaseAcquiredAt,
+	)
+	tx.readTime = cleanupAt
+	tx.attemptReadTime = cleanupAt.Add(-time.Nanosecond)
+	store := admissionTestStore(cleanupAt, admissionRunner(tx))
+
+	result, status, err := store.BeginCleanupTransition(
+		context.Background(),
+		admissionTenantID,
+		admissionReservationKey,
+		cleanupAt,
+	)
+	if err != nil || status != ingest.TransitionStatusNotReady || result.State != ingest.ReceiptReserved {
+		t.Fatalf("BeginCleanupTransition() = %#v, %q, %v, want read-only not ready", result, status, err)
+	}
+	if len(tx.updates) != 0 || len(tx.creates) != 0 {
+		t.Fatalf("early attempt snapshot updates/creates = %d/%d, want zero", len(tx.updates), len(tx.creates))
+	}
+}
+
+func TestFirestoreAdmissionStoreBeginCleanupTransitionRejectsUnverifiablePriorAttempt(t *testing.T) {
+	createdAt := admissionTestNow()
+	reservation := admissionTestReservation(createdAt)
+	cleanupAt := reservation.ReservationDeadline
+	tests := []struct {
+		name      string
+		configure func(*firestoreRecoveryAttempt)
+		omit      bool
+	}{
+		{name: "missing", omit: true},
+		{name: "foreign fencing token", configure: func(attempt *firestoreRecoveryAttempt) {
+			attempt.FencingToken++
+		}},
+		{name: "completed", configure: func(attempt *firestoreRecoveryAttempt) {
+			attempt.Status = ingest.RecoveryAttemptCompleted
+			attempt.CompletedAt = cleanupAt
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tx, _ := admissionReplayTransaction(t, createdAt, ingest.ReceiptReserved)
+			receipt := tx.receipts[admissionReceiptPath()]
+			configureCleanupTransitionRecoveryAttempt(&receipt, cleanupAt)
+			tx.receipts[admissionReceiptPath()] = receipt
+			attemptPath := recoveryAttemptDocumentPath(receipt.TenantID, receipt.ReceiptID, receipt.LeaseOwnerID)
+			attempt := newFirestoreRecoveryAttempt(
+				ingest.RecoveryAttemptProposal{ID: receipt.LeaseOwnerID, WorkerVersion: ingest.RecoveryWorkerVersion},
+				receipt.TenantID,
+				receipt.ReceiptID,
+				receipt.LeaseOwnerKind,
+				receipt.FencingToken,
+				receipt.LeaseAcquiredAt,
+			)
+			if test.configure != nil {
+				test.configure(&attempt)
+			}
+			if !test.omit {
+				tx.attempts[attemptPath] = attempt
+			}
+			tx.readTime = cleanupAt
+			store := admissionTestStore(cleanupAt, admissionRunner(tx))
+
+			_, status, err := store.BeginCleanupTransition(
+				context.Background(),
+				admissionTenantID,
+				admissionReservationKey,
+				cleanupAt,
+			)
+			if !errors.Is(err, ingest.ErrAdmissionUnavailable) || status != "" {
+				t.Fatalf("BeginCleanupTransition() = %q, %v, want unavailable", status, err)
+			}
+			if len(tx.updates) != 0 || len(tx.creates) != 0 {
+				t.Fatalf("unverifiable transition updates/creates = %d/%d, want zero", len(tx.updates), len(tx.creates))
+			}
+		})
+	}
+}
+
+func configureCleanupTransitionRecoveryAttempt(receipt *firestoreIngestReceipt, cleanupAt time.Time) {
+	receipt.LeaseOwnerID = admissionTakeoverOwnerID
+	receipt.LeaseOwnerKind = ingest.LeaseOwnerSweeper
+	receipt.LeaseAcquiredAt = cleanupAt.Add(-ingest.DefaultRequestLeaseDuration)
+	receipt.LeaseHeartbeatAt = receipt.LeaseAcquiredAt
+	receipt.LeaseExpiresAt = cleanupAt
+	receipt.NextRecoveryAt = cleanupAt
+	receipt.FencingToken = 2
+	receipt.RecoveryAttemptCount = 1
+	receipt.Revision = 2
+	receipt.UpdatedAt = receipt.LeaseAcquiredAt
+}
+
 func TestFirestoreAdmissionStoreBeginCleanupTransitionReadOnlyStatuses(t *testing.T) {
 	createdAt := admissionTestNow()
 	reservation := admissionTestReservation(createdAt)
