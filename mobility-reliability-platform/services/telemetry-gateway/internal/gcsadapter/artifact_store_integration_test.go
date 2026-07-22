@@ -94,3 +94,68 @@ func TestArtifactStoreEmulatorImmutableReplayAndGenerationRead(t *testing.T) {
 		t.Fatalf("provider attrs diverged: object=%#v manifest=%#v", objectAttrs, manifestAttrs)
 	}
 }
+
+func TestArtifactStoreEmulatorRecoveryCreatesManifestOnlyAndFailsClosedOnUnsupportedInventory(t *testing.T) {
+	if os.Getenv("STORAGE_EMULATOR_HOST") == "" {
+		t.Skip("STORAGE_EMULATOR_HOST is required for Cloud Storage integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		t.Fatalf("storage.NewClient(): %v", err)
+	}
+	defer func() {
+		if closeErr := client.Close(); closeErr != nil {
+			t.Errorf("storage client close: %v", closeErr)
+		}
+	}()
+
+	bucketName := fmt.Sprintf("mobility-recovery-artifacts-%d", time.Now().UnixNano())
+	bucket := client.Bucket(bucketName)
+	if err := bucket.Create(ctx, "demo-mobility-reliability", nil); err != nil {
+		t.Fatalf("create emulator bucket: %v", err)
+	}
+	store, err := NewArtifactStore(bucket)
+	if err != nil {
+		t.Fatalf("NewArtifactStore(): %v", err)
+	}
+	now, write, grant := recoveryManifestFixture(t)
+	store = recoveryManifestTestStore(store, write, now.Add(30*time.Second))
+	store.now = func() time.Time { return now.Add(time.Second) }
+
+	first, err := store.CreateManifest(ctx, grant, write)
+	if err != nil {
+		t.Fatalf("first CreateManifest(): %v", err)
+	}
+	second, err := store.CreateManifest(ctx, grant, write)
+	if !errors.Is(err, ingest.ErrArtifactProviderUnavailable) || second != (ingest.StoredArtifact{}) {
+		t.Fatalf("unsupported soft-delete inventory must fail closed: stored=%#v err=%v", second, err)
+	}
+	if first.Replay {
+		t.Fatalf("new manifest was marked replay: %#v", first)
+	}
+	latest, err := bucket.Object(first.Path).Attrs(ctx)
+	if err != nil {
+		t.Fatalf("read latest manifest attrs: %v", err)
+	}
+	if latest.Generation != first.Generation || latest.Metageneration != first.Metageneration {
+		t.Fatalf("failed replay changed immutable generation: first=%#v latest=%#v", first, latest)
+	}
+
+	reader, err := bucket.Object(first.Path).Generation(first.Generation).NewReader(ctx)
+	if err != nil {
+		t.Fatalf("open exact manifest generation: %v", err)
+	}
+	manifestBytes, readErr := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if readErr != nil || closeErr != nil {
+		t.Fatalf("read exact manifest generation: read=%v close=%v", readErr, closeErr)
+	}
+	if !bytes.Equal(manifestBytes, write.CanonicalBody) {
+		t.Fatal("exact replay did not preserve authorized canonical manifest bytes")
+	}
+	if _, err := bucket.Object(write.Raw.Path).Attrs(ctx); !errors.Is(err, storage.ErrObjectNotExist) {
+		t.Fatalf("manifest recovery created or exposed raw object: %v", err)
+	}
+}

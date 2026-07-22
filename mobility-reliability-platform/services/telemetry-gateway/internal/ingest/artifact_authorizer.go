@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	ForwardRecoveryAuthorizationPolicyVersion = "forward-recovery.current-state@1"
-	ForwardRecoveryArtifactReadGrantTTL       = 30 * time.Second
-	MaxForwardRecoveryAuthorizationClockSkew  = 5 * time.Second
+	ForwardRecoveryAuthorizationPolicyVersion  = "forward-recovery.current-state@1"
+	ForwardRecoveryManifestRepairPolicyVersion = "manifest-repair.current-state@1"
+	ForwardRecoveryArtifactReadGrantTTL        = 30 * time.Second
+	MaxForwardRecoveryAuthorizationClockSkew   = 5 * time.Second
 )
 
 var (
@@ -134,8 +135,17 @@ type ForwardRecoveryAuthorizationStore interface {
 // SystemRecoveryAuthorizer reevaluates current control-plane state and is the
 // only production boundary that mints forward-recovery artifact read grants.
 type SystemRecoveryAuthorizer struct {
-	store ForwardRecoveryAuthorizationStore
-	now   func() time.Time
+	store     ForwardRecoveryAuthorizationStore
+	now       func() time.Time
+	validator *registeredTelemetryArtifactValidator
+}
+
+// ForwardRecoveryManifestEvidence is classifier-produced pass-1 evidence. The
+// result carries an unexported request binding, so package-external callers
+// cannot fabricate evidence for an arbitrary receipt revision or fence.
+type ForwardRecoveryManifestEvidence struct {
+	Request ArtifactClassificationRequest
+	Result  ArtifactClassificationResult
 }
 
 func NewSystemRecoveryAuthorizer(
@@ -148,7 +158,77 @@ func NewSystemRecoveryAuthorizer(
 	if now == nil {
 		now = time.Now
 	}
-	return &SystemRecoveryAuthorizer{store: store, now: now}, nil
+	validator, ok := newTelemetryArtifactContentValidator().(*registeredTelemetryArtifactValidator)
+	if !ok {
+		return nil, errors.New("forward recovery validator registry is required")
+	}
+	return &SystemRecoveryAuthorizer{store: store, now: now, validator: validator}, nil
+}
+
+// AuthorizeManifestRepair performs a fresh current-state authorization and
+// mints a write-only capability for one exact canonical manifest. The read
+// grant created by the shared policy path is intentionally not returned.
+func (a *SystemRecoveryAuthorizer) AuthorizeManifestRepair(
+	ctx context.Context,
+	tenantID string,
+	reservationKey string,
+	lease LeaseGrant,
+	evidence ForwardRecoveryManifestEvidence,
+	write RecoveryManifestWrite,
+) (ArtifactClassificationRequest, ManifestRepairAuthorizationGrant, error) {
+	if a == nil || a.validator == nil {
+		return ArtifactClassificationRequest{}, ManifestRepairAuthorizationGrant{}, ErrForwardRecoveryAuthorizationUnavailable
+	}
+	evidence.Request = cloneArtifactClassificationRequest(evidence.Request)
+	evidence.Result = cloneManifestRepairClassificationResult(evidence.Result)
+	write = cloneManifestRepairWrite(write)
+	initialPlan, err := PlanForwardRecoveryAction(ForwardRecoveryPlanInput{
+		Phase: RecoveryPhaseInitial, Request: evidence.Request, Result: evidence.Result,
+	})
+	if err != nil || initialPlan.Action != ForwardRecoveryActionCreateManifest || initialPlan.Raw == nil ||
+		!sameArtifactLineage(*initialPlan.Raw, artifactLineageFromStored(write.Raw)) ||
+		!recoveryManifestWriteMatchesRequest(write, evidence.Request) {
+		return ArtifactClassificationRequest{}, ManifestRepairAuthorizationGrant{}, ErrInvalidManifestRepairAuthorization
+	}
+	request, readGrant, err := a.Authorize(ctx, tenantID, reservationKey, lease)
+	if err != nil {
+		return ArtifactClassificationRequest{}, ManifestRepairAuthorizationGrant{}, err
+	}
+	if canonicalArtifactClassificationRequestBinding(request) !=
+		canonicalArtifactClassificationRequestBinding(evidence.Request) {
+		return ArtifactClassificationRequest{}, ManifestRepairAuthorizationGrant{}, ErrInvalidManifestRepairAuthorization
+	}
+	grant, err := a.validator.mintManifestRepairAuthorizationGrant(
+		ForwardRecoveryManifestRepairPolicyVersion,
+		request,
+		write,
+		readGrant.checkedAt,
+		readGrant.expiresAt,
+	)
+	if err != nil {
+		return ArtifactClassificationRequest{}, ManifestRepairAuthorizationGrant{}, ErrInvalidManifestRepairAuthorization
+	}
+	return request, grant, nil
+}
+
+func cloneManifestRepairClassificationResult(
+	result ArtifactClassificationResult,
+) ArtifactClassificationResult {
+	cloned := result
+	if result.PinnedRaw != nil {
+		raw := *result.PinnedRaw
+		cloned.PinnedRaw = &raw
+	}
+	if result.PinnedManifest != nil {
+		manifest := *result.PinnedManifest
+		cloned.PinnedManifest = &manifest
+	}
+	return cloned
+}
+
+func cloneManifestRepairWrite(write RecoveryManifestWrite) RecoveryManifestWrite {
+	write.CanonicalBody = append([]byte(nil), write.CanonicalBody...)
+	return write
 }
 
 func (a *SystemRecoveryAuthorizer) Authorize(

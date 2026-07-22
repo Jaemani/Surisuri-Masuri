@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"strings"
 	"testing"
@@ -569,6 +570,256 @@ func artifactAuthAuthorizer(
 		t.Fatalf("NewSystemRecoveryAuthorizer() error = %v", err)
 	}
 	return authorizer
+}
+
+func TestSystemRecoveryAuthorizerMintsFreshManifestRepairGrant(t *testing.T) {
+	now := artifactAuthNow()
+	snapshot := artifactAuthSnapshot(now)
+	store := &artifactAuthStoreStub{snapshot: snapshot}
+	authorizer := artifactAuthAuthorizer(t, store, now)
+	lease := artifactAuthLease(snapshot)
+
+	request, _, err := authorizer.Authorize(
+		context.Background(),
+		snapshot.Receipt.TenantID,
+		snapshot.Receipt.ReservationKey,
+		lease,
+	)
+	if err != nil {
+		t.Fatalf("Authorize() = %v", err)
+	}
+	write, reason := authorizer.validator.buildRecoveryManifest(request, ArtifactPinnedLineage{
+		SHA256: strings.Repeat("b", 64), CRC32C: 0, Size: 128,
+		Generation: 91, Metageneration: 2,
+	})
+	if reason != "" {
+		t.Fatalf("buildRecoveryManifest() reason = %q", reason)
+	}
+
+	freshRequest, grant, err := authorizer.AuthorizeManifestRepair(
+		context.Background(),
+		snapshot.Receipt.TenantID,
+		snapshot.Receipt.ReservationKey,
+		lease,
+		artifactAuthManifestEvidence(request, write.Raw, now),
+		write,
+	)
+	if err != nil {
+		t.Fatalf("AuthorizeManifestRepair() = %v", err)
+	}
+	if canonicalArtifactClassificationRequestBinding(freshRequest) !=
+		canonicalArtifactClassificationRequestBinding(request) {
+		t.Fatal("fresh manifest authorization changed authoritative request")
+	}
+	if err := ValidateManifestRepairAuthorization(grant, write, now.Add(time.Second)); err != nil {
+		t.Fatalf("ValidateManifestRepairAuthorization() = %v", err)
+	}
+	if store.calls != 2 {
+		t.Fatalf("authorization store calls = %d, want 2", store.calls)
+	}
+}
+
+func TestSystemRecoveryAuthorizerDeniesManifestRepairAfterConsentWithdrawal(t *testing.T) {
+	now := artifactAuthNow()
+	snapshot := artifactAuthSnapshot(now)
+	store := &artifactAuthStoreStub{snapshot: snapshot}
+	authorizer := artifactAuthAuthorizer(t, store, now)
+	lease := artifactAuthLease(snapshot)
+	request, _, err := authorizer.Authorize(
+		context.Background(),
+		snapshot.Receipt.TenantID,
+		snapshot.Receipt.ReservationKey,
+		lease,
+	)
+	if err != nil {
+		t.Fatalf("Authorize() = %v", err)
+	}
+	write, reason := authorizer.validator.buildRecoveryManifest(request, ArtifactPinnedLineage{
+		SHA256: strings.Repeat("b", 64), Size: 128, Generation: 91, Metageneration: 2,
+	})
+	if reason != "" {
+		t.Fatalf("buildRecoveryManifest() reason = %q", reason)
+	}
+
+	withdrawnAt := now.Add(-time.Second)
+	store.snapshot.Consent.Status = "withdrawn"
+	store.snapshot.Consent.WithdrawnAt = &withdrawnAt
+	store.snapshot.ConsentState.Status = "withdrawn"
+	store.snapshot.ConsentState.EffectiveAt = withdrawnAt
+	deniedRequest, grant, err := authorizer.AuthorizeManifestRepair(
+		context.Background(),
+		snapshot.Receipt.TenantID,
+		snapshot.Receipt.ReservationKey,
+		lease,
+		artifactAuthManifestEvidence(request, write.Raw, now),
+		write,
+	)
+	if !errors.Is(err, ErrForwardRecoveryUnauthorized) {
+		t.Fatalf("AuthorizeManifestRepair() = %v", err)
+	}
+	if grant != (ManifestRepairAuthorizationGrant{}) {
+		t.Fatal("withdrawn consent received manifest repair capability")
+	}
+	if deniedRequest != (ArtifactClassificationRequest{}) {
+		t.Fatal("withdrawn consent received an authoritative classification request")
+	}
+	if store.calls != 2 {
+		t.Fatalf("authorization store calls = %d, want initial plus withdrawal reads", store.calls)
+	}
+}
+
+func TestSystemRecoveryAuthorizerRejectsManifestEvidenceBeforeCurrentStateRead(t *testing.T) {
+	now := artifactAuthNow()
+	snapshot := artifactAuthSnapshot(now)
+	store := &artifactAuthStoreStub{snapshot: snapshot}
+	authorizer := artifactAuthAuthorizer(t, store, now)
+	lease := artifactAuthLease(snapshot)
+	request, _, err := authorizer.Authorize(
+		context.Background(),
+		snapshot.Receipt.TenantID,
+		snapshot.Receipt.ReservationKey,
+		lease,
+	)
+	if err != nil {
+		t.Fatalf("Authorize() = %v", err)
+	}
+	write, reason := authorizer.validator.buildRecoveryManifest(request, ArtifactPinnedLineage{
+		SHA256: strings.Repeat("b", 64), Size: 128, Generation: 91, Metageneration: 2,
+	})
+	if reason != "" {
+		t.Fatalf("buildRecoveryManifest() reason = %q", reason)
+	}
+	store.calls = 0
+
+	tests := []struct {
+		name     string
+		evidence ForwardRecoveryManifestEvidence
+		write    RecoveryManifestWrite
+	}{
+		{
+			name: "pass one raw pin differs from write",
+			evidence: func() ForwardRecoveryManifestEvidence {
+				mismatched := artifactAuthManifestEvidence(request, write.Raw, now)
+				mismatched.Result.PinnedRaw.Generation++
+				return mismatched
+			}(),
+			write: write,
+		},
+		{
+			name: "classifier request binding is absent",
+			evidence: func() ForwardRecoveryManifestEvidence {
+				fabricated := artifactAuthManifestEvidence(request, write.Raw, now)
+				fabricated.Result.requestBindingHash = [sha256.Size]byte{}
+				return fabricated
+			}(),
+			write: write,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, grant, err := authorizer.AuthorizeManifestRepair(
+				context.Background(),
+				snapshot.Receipt.TenantID,
+				snapshot.Receipt.ReservationKey,
+				lease,
+				test.evidence,
+				test.write,
+			)
+			if !errors.Is(err, ErrInvalidManifestRepairAuthorization) {
+				t.Fatalf("AuthorizeManifestRepair() = %v", err)
+			}
+			if grant != (ManifestRepairAuthorizationGrant{}) {
+				t.Fatal("invalid pass-one evidence received manifest repair capability")
+			}
+			if store.calls != 0 {
+				t.Fatalf("invalid evidence reached current-state store: calls=%d", store.calls)
+			}
+		})
+	}
+}
+
+func TestSystemRecoveryAuthorizerRejectsManifestEvidenceAfterLeaseRenewal(t *testing.T) {
+	now := artifactAuthNow()
+	snapshot := artifactAuthSnapshot(now)
+	store := &artifactAuthStoreStub{snapshot: snapshot}
+	authorizer := artifactAuthAuthorizer(t, store, now)
+	lease := artifactAuthLease(snapshot)
+	request, _, err := authorizer.Authorize(
+		context.Background(),
+		snapshot.Receipt.TenantID,
+		snapshot.Receipt.ReservationKey,
+		lease,
+	)
+	if err != nil {
+		t.Fatalf("Authorize() = %v", err)
+	}
+	write, reason := authorizer.validator.buildRecoveryManifest(request, ArtifactPinnedLineage{
+		SHA256: strings.Repeat("b", 64), Size: 128, Generation: 91, Metageneration: 2,
+	})
+	if reason != "" {
+		t.Fatalf("buildRecoveryManifest() reason = %q", reason)
+	}
+	evidence := artifactAuthManifestEvidence(request, write.Raw, now)
+
+	store.snapshot.Receipt.Revision++
+	store.snapshot.Receipt.LeaseHeartbeatAt = now
+	store.snapshot.Receipt.LeaseExpiresAt = now.Add(3 * time.Minute)
+	store.snapshot.Receipt.NextRecoveryAt = store.snapshot.Receipt.LeaseExpiresAt
+	store.snapshot.Receipt.UpdatedAt = now
+	renewedLease := artifactAuthLease(store.snapshot)
+	store.calls = 0
+	_, grant, err := authorizer.AuthorizeManifestRepair(
+		context.Background(),
+		snapshot.Receipt.TenantID,
+		snapshot.Receipt.ReservationKey,
+		renewedLease,
+		evidence,
+		write,
+	)
+	if !errors.Is(err, ErrInvalidManifestRepairAuthorization) {
+		t.Fatalf("AuthorizeManifestRepair() = %v", err)
+	}
+	if grant != (ManifestRepairAuthorizationGrant{}) {
+		t.Fatal("stale pass-one evidence received renewed-lease capability")
+	}
+	if store.calls != 1 {
+		t.Fatalf("fresh current-state reads = %d, want 1", store.calls)
+	}
+}
+
+func artifactAuthManifestEvidence(
+	request ArtifactClassificationRequest,
+	raw StoredArtifact,
+	observedAt time.Time,
+) ForwardRecoveryManifestEvidence {
+	pinnedRaw := ArtifactPinnedLineage{
+		SHA256:         raw.SHA256,
+		CRC32C:         raw.CRC32C,
+		Size:           raw.Size,
+		Generation:     raw.Generation,
+		Metageneration: raw.Metageneration,
+	}
+	return ForwardRecoveryManifestEvidence{
+		Request: request,
+		Result: ArtifactClassificationResult{
+			Classification: ArtifactClassificationValidRawOnly,
+			ReasonCode:     ArtifactReasonRawValidManifestAbsent,
+			RetentionPhase: ArtifactRetentionBeforeExpiry,
+			ManifestInventory: ArtifactInventorySummary{
+				Performed: true,
+				Coverage:  ArtifactInventoryCoverageComplete,
+			},
+			RawInventory: ArtifactInventorySummary{
+				Performed: true, NonSoftDeletedCount: 1,
+				Coverage: ArtifactInventoryCoverageComplete,
+			},
+			PinnedRaw:          &pinnedRaw,
+			ValidatorVersion:   request.ValidatorVersion,
+			ObservedAt:         observedAt,
+			requestBindingHash: canonicalArtifactClassificationRequestBinding(request),
+		},
+	}
 }
 
 func artifactAuthNow() time.Time {

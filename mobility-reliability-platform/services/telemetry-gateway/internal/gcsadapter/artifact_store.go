@@ -58,16 +58,419 @@ type immutableObjectBackend interface {
 // ArtifactStore writes a deterministic gzip object and its canonical manifest.
 // The caller owns the underlying storage client and closes it at shutdown.
 type ArtifactStore struct {
-	backend immutableObjectBackend
+	backend                immutableObjectBackend
+	recoveryReader         ingest.ArtifactInventoryReader
+	now                    func() time.Time
+	validateManifestRepair func(ingest.ManifestRepairAuthorizationGrant, ingest.RecoveryManifestWrite, time.Time) error
+	manifestRepairDeadline func(ingest.ManifestRepairAuthorizationGrant, ingest.RecoveryManifestWrite) (time.Time, error)
 }
 
 var _ ingest.TelemetryArtifactStore = (*ArtifactStore)(nil)
+var _ ingest.TelemetryManifestRecoveryStore = (*ArtifactStore)(nil)
 
 func NewArtifactStore(bucket *storage.BucketHandle) (*ArtifactStore, error) {
 	if bucket == nil {
 		return nil, errors.New("Cloud Storage bucket is required")
 	}
-	return &ArtifactStore{backend: storageBackend{bucket: bucket}}, nil
+	return &ArtifactStore{
+		backend: storageBackend{bucket: bucket},
+		recoveryReader: &HTTPArtifactInventoryReader{
+			backend: storageArtifactInventoryReadBackend{bucket: bucket},
+		},
+		now:                    time.Now,
+		validateManifestRepair: ingest.ValidateManifestRepairAuthorization,
+		manifestRepairDeadline: ingest.ManifestRepairAuthorizationDeadline,
+	}, nil
+}
+
+// CreateManifest performs the only artifact mutation allowed during forward
+// reconciliation. It never receives raw bytes and therefore cannot create,
+// rewrite, or delete the pinned raw generation.
+func (s *ArtifactStore) CreateManifest(
+	ctx context.Context,
+	grant ingest.ManifestRepairAuthorizationGrant,
+	write ingest.RecoveryManifestWrite,
+) (ingest.StoredArtifact, error) {
+	if s == nil || s.backend == nil || s.recoveryReader == nil || ctx == nil {
+		return ingest.StoredArtifact{}, ingest.ErrArtifactUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	if err := s.validateManifestRepairAuthorization(grant, write, s.trustedNow()); err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	authorizationDeadline, err := s.manifestRepairAuthorizationDeadline(grant, write)
+	if err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	boundary := newManifestRepairBoundary(ctx, authorizationDeadline)
+	defer boundary.cancel()
+
+	spec := recoveryManifestWriteSpec(write)
+	snapshot, createErr := s.backend.Create(
+		boundary.ctx,
+		write.ManifestPath,
+		write.CanonicalBody,
+		write.Digest,
+		spec,
+	)
+	if err := s.completeManifestRepairProviderCall(boundary, grant, write, createErr); err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	if createErr == nil {
+		stored, err := validateStoredSnapshot(snapshot, write.ManifestPath, write.Digest, spec, false)
+		if err != nil {
+			return ingest.StoredArtifact{}, stageArtifactError(
+				"validate recovery manifest create",
+				ingest.ErrManifestArtifactConflict,
+				err,
+			)
+		}
+		if err := s.checkManifestRepairBoundary(boundary, grant, write); err != nil {
+			return ingest.StoredArtifact{}, err
+		}
+		return stored, nil
+	}
+	if !isPreconditionFailure(createErr) && !isAmbiguousManifestCreateFailure(createErr) {
+		return ingest.StoredArtifact{}, mapManifestCreateFailure(createErr)
+	}
+	return s.verifyRecoveryManifestReplay(boundary, grant, write, spec)
+}
+
+func (s *ArtifactStore) verifyRecoveryManifestReplay(
+	boundary manifestRepairBoundary,
+	grant ingest.ManifestRepairAuthorizationGrant,
+	write ingest.RecoveryManifestWrite,
+	spec objectWriteSpec,
+) (ingest.StoredArtifact, error) {
+	candidate, err := s.singleRecoveryManifestCandidate(boundary, grant, write)
+	if err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	if err := s.checkManifestRepairBoundary(boundary, grant, write); err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	preRead, err := s.recoveryReader.InspectGeneration(
+		boundary.ctx,
+		candidate.Path,
+		candidate.Generation,
+	)
+	if boundaryErr := s.completeManifestRepairProviderCall(boundary, grant, write, err); boundaryErr != nil {
+		return ingest.StoredArtifact{}, boundaryErr
+	}
+	if err != nil {
+		return ingest.StoredArtifact{}, normalizeRecoveryReaderError(boundary.ctx, err)
+	}
+	if !sameArtifactSnapshot(candidate, preRead) {
+		return ingest.StoredArtifact{}, ingest.ErrArtifactResponseUnverifiable
+	}
+	if err := s.checkManifestRepairBoundary(boundary, grant, write); err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	content, err := s.recoveryReader.ReadManifestGeneration(boundary.ctx, ingest.ArtifactTarget{
+		Path:           preRead.Path,
+		Generation:     preRead.Generation,
+		Metageneration: preRead.Metageneration,
+	}, write.Digest.Size)
+	if boundaryErr := s.completeManifestRepairProviderCall(boundary, grant, write, err); boundaryErr != nil {
+		return ingest.StoredArtifact{}, boundaryErr
+	}
+	if err != nil {
+		return ingest.StoredArtifact{}, normalizeRecoveryReaderError(boundary.ctx, err)
+	}
+	if !bytes.Equal(content, write.CanonicalBody) || ingest.ComputeArtifactDigest(content) != write.Digest {
+		return ingest.StoredArtifact{}, errors.Join(
+			ingest.ErrArtifactConflict,
+			ingest.ErrManifestArtifactConflict,
+		)
+	}
+	if err := s.checkManifestRepairBoundary(boundary, grant, write); err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	postRead, err := s.recoveryReader.InspectGeneration(
+		boundary.ctx,
+		candidate.Path,
+		candidate.Generation,
+	)
+	if boundaryErr := s.completeManifestRepairProviderCall(boundary, grant, write, err); boundaryErr != nil {
+		return ingest.StoredArtifact{}, boundaryErr
+	}
+	if err != nil {
+		return ingest.StoredArtifact{}, normalizeRecoveryReaderError(boundary.ctx, err)
+	}
+	if !sameArtifactSnapshot(preRead, postRead) {
+		return ingest.StoredArtifact{}, ingest.ErrArtifactResponseUnverifiable
+	}
+	recheckedCandidate, err := s.singleRecoveryManifestCandidate(boundary, grant, write)
+	if err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	if !sameArtifactSnapshot(postRead, recheckedCandidate) {
+		return ingest.StoredArtifact{}, ingest.ErrArtifactResponseUnverifiable
+	}
+	stored, err := validateStoredSnapshot(
+		objectSnapshotFromArtifactSnapshot(postRead),
+		write.ManifestPath,
+		write.Digest,
+		spec,
+		true,
+	)
+	if err != nil {
+		return ingest.StoredArtifact{}, stageArtifactError(
+			"validate recovery manifest replay",
+			ingest.ErrManifestArtifactConflict,
+			err,
+		)
+	}
+	if err := s.checkManifestRepairBoundary(boundary, grant, write); err != nil {
+		return ingest.StoredArtifact{}, err
+	}
+	return stored, nil
+}
+
+func (s *ArtifactStore) singleRecoveryManifestCandidate(
+	boundary manifestRepairBoundary,
+	grant ingest.ManifestRepairAuthorizationGrant,
+	write ingest.RecoveryManifestWrite,
+) (ingest.ArtifactSnapshot, error) {
+	if err := s.checkManifestRepairBoundary(boundary, grant, write); err != nil {
+		return ingest.ArtifactSnapshot{}, err
+	}
+	inventory, err := s.recoveryReader.ListExactPathGenerations(
+		boundary.ctx,
+		write.ManifestPath,
+		2,
+	)
+	if boundaryErr := s.completeManifestRepairProviderCall(boundary, grant, write, err); boundaryErr != nil {
+		return ingest.ArtifactSnapshot{}, boundaryErr
+	}
+	if err != nil {
+		return ingest.ArtifactSnapshot{}, normalizeRecoveryReaderError(boundary.ctx, err)
+	}
+	if inventory.Coverage != ingest.ArtifactInventoryCoverageComplete ||
+		!inventory.NonSoftDeleted.Performed || !inventory.SoftDeleted.Performed ||
+		inventory.NonSoftDeleted.Truncated || inventory.SoftDeleted.Truncated {
+		return ingest.ArtifactSnapshot{}, ingest.ErrArtifactResponseUnverifiable
+	}
+	if len(inventory.NonSoftDeleted.Candidates) == 0 && len(inventory.SoftDeleted.Candidates) == 0 {
+		return ingest.ArtifactSnapshot{}, ingest.ErrArtifactUnavailable
+	}
+	if len(inventory.NonSoftDeleted.Candidates) != 1 || len(inventory.SoftDeleted.Candidates) != 0 {
+		return ingest.ArtifactSnapshot{}, ingest.ErrArtifactResponseUnverifiable
+	}
+	candidate := inventory.NonSoftDeleted.Candidates[0]
+	if candidate.Path != write.ManifestPath || candidate.SoftDeleted || candidate.Generation <= 0 ||
+		candidate.Metageneration <= 0 {
+		return ingest.ArtifactSnapshot{}, ingest.ErrArtifactResponseUnverifiable
+	}
+	return candidate, nil
+}
+
+func recoveryManifestWriteSpec(write ingest.RecoveryManifestWrite) objectWriteSpec {
+	return objectWriteSpec{
+		ContentType:  manifestContentType,
+		CacheControl: artifactCacheControl,
+		Metadata: map[string]string{
+			"artifact_kind":     "telemetry_manifest",
+			"artifact_version":  strconv.Itoa(ingest.TelemetryManifestVersion),
+			"batch_id":          write.ManifestInput.BatchID,
+			"expires_at":        canonicalTime(write.ManifestInput.ArtifactExpiresAt),
+			"object_generation": strconv.FormatInt(write.Raw.Generation, 10),
+			"sha256":            write.Digest.SHA256,
+			"tenant_id":         write.ManifestInput.TenantID,
+		},
+	}
+}
+
+type manifestRepairBoundary struct {
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	parent               context.Context
+	authorizationLimited bool
+}
+
+func newManifestRepairBoundary(
+	parent context.Context,
+	authorizationDeadline time.Time,
+) manifestRepairBoundary {
+	authorizationLimited := true
+	if parentDeadline, exists := parent.Deadline(); exists &&
+		!authorizationDeadline.Before(parentDeadline) {
+		authorizationLimited = false
+	}
+	ctx, cancel := context.WithDeadline(parent, authorizationDeadline)
+	return manifestRepairBoundary{
+		ctx: ctx, cancel: cancel, parent: parent,
+		authorizationLimited: authorizationLimited,
+	}
+}
+
+func (b manifestRepairBoundary) contextError() error {
+	if b.parent != nil {
+		if parentErr := b.parent.Err(); parentErr != nil {
+			return parentErr
+		}
+	}
+	if b.ctx != nil && b.ctx.Err() != nil {
+		if b.authorizationLimited && errors.Is(b.ctx.Err(), context.DeadlineExceeded) {
+			return ingest.ErrManifestRepairAuthorizationExpired
+		}
+		return b.ctx.Err()
+	}
+	return nil
+}
+
+func (b manifestRepairBoundary) normalizeProviderError(err error) error {
+	if contextErr := b.contextError(); contextErr != nil {
+		return contextErr
+	}
+	if errors.Is(err, context.Canceled) || status.Code(err) == codes.Canceled {
+		return ingest.ErrArtifactProviderCancelled
+	}
+	return nil
+}
+
+func (s *ArtifactStore) trustedNow() time.Time {
+	if s != nil && s.now != nil {
+		return s.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (s *ArtifactStore) validateManifestRepairAuthorization(
+	grant ingest.ManifestRepairAuthorizationGrant,
+	write ingest.RecoveryManifestWrite,
+	observedAt time.Time,
+) error {
+	if s != nil && s.validateManifestRepair != nil {
+		return s.validateManifestRepair(grant, write, observedAt)
+	}
+	return ingest.ValidateManifestRepairAuthorization(grant, write, observedAt)
+}
+
+func (s *ArtifactStore) manifestRepairAuthorizationDeadline(
+	grant ingest.ManifestRepairAuthorizationGrant,
+	write ingest.RecoveryManifestWrite,
+) (time.Time, error) {
+	if s != nil && s.manifestRepairDeadline != nil {
+		return s.manifestRepairDeadline(grant, write)
+	}
+	return ingest.ManifestRepairAuthorizationDeadline(grant, write)
+}
+
+func (s *ArtifactStore) checkManifestRepairBoundary(
+	boundary manifestRepairBoundary,
+	grant ingest.ManifestRepairAuthorizationGrant,
+	write ingest.RecoveryManifestWrite,
+) error {
+	if err := boundary.contextError(); err != nil {
+		return err
+	}
+	return s.validateManifestRepairAuthorization(grant, write, s.trustedNow())
+}
+
+func (s *ArtifactStore) completeManifestRepairProviderCall(
+	boundary manifestRepairBoundary,
+	grant ingest.ManifestRepairAuthorizationGrant,
+	write ingest.RecoveryManifestWrite,
+	providerErr error,
+) error {
+	if err := s.checkManifestRepairBoundary(boundary, grant, write); err != nil {
+		return err
+	}
+	return boundary.normalizeProviderError(providerErr)
+}
+
+func isAmbiguousManifestCreateFailure(err error) bool {
+	var apiError *googleapi.Error
+	if errors.As(err, &apiError) {
+		switch apiError.Code {
+		case 408, 500, 502, 503, 504:
+			return true
+		}
+	}
+	if grpcStatus, ok := status.FromError(err); ok {
+		switch grpcStatus.Code() {
+		case codes.DeadlineExceeded, codes.Unavailable, codes.Unknown, codes.Internal:
+			return true
+		}
+	}
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
+func mapManifestCreateFailure(err error) error {
+	var apiError *googleapi.Error
+	if errors.As(err, &apiError) {
+		switch apiError.Code {
+		case 401, 403:
+			return ingest.ErrArtifactPermissionDenied
+		case 429:
+			return ingest.ErrArtifactQuotaLimited
+		default:
+			return ingest.ErrArtifactUnavailable
+		}
+	}
+	switch status.Code(err) {
+	case codes.PermissionDenied, codes.Unauthenticated:
+		return ingest.ErrArtifactPermissionDenied
+	case codes.ResourceExhausted:
+		return ingest.ErrArtifactQuotaLimited
+	default:
+		return ingest.ErrArtifactUnavailable
+	}
+}
+
+func normalizeRecoveryReaderError(ctx context.Context, err error) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	for _, bounded := range []error{
+		ingest.ErrArtifactPermissionDenied,
+		ingest.ErrArtifactQuotaLimited,
+		ingest.ErrArtifactProviderTimeout,
+		ingest.ErrArtifactProviderCancelled,
+		ingest.ErrArtifactProviderUnavailable,
+		ingest.ErrArtifactResponseUnverifiable,
+		ingest.ErrArtifactReadLimitExceeded,
+		ingest.ErrArtifactGenerationNotFound,
+		ingest.ErrArtifactPreconditionDrift,
+	} {
+		if errors.Is(err, bounded) {
+			return bounded
+		}
+	}
+	return ingest.ErrArtifactUnavailable
+}
+
+func objectSnapshotFromArtifactSnapshot(snapshot ingest.ArtifactSnapshot) objectSnapshot {
+	return objectSnapshot{
+		Path:            snapshot.Path,
+		CRC32C:          snapshot.CRC32C,
+		Size:            snapshot.Size,
+		Generation:      snapshot.Generation,
+		Metageneration:  snapshot.Metageneration,
+		ContentType:     snapshot.ContentType,
+		ContentEncoding: snapshot.ContentEncoding,
+		CacheControl:    snapshot.CacheControl,
+		Metadata:        cloneMetadata(snapshot.Metadata),
+	}
+}
+
+func sameArtifactSnapshot(left, right ingest.ArtifactSnapshot) bool {
+	if left.Path != right.Path || left.SHA256 != right.SHA256 || left.CRC32C != right.CRC32C ||
+		left.Size != right.Size || left.Generation != right.Generation ||
+		left.Metageneration != right.Metageneration || left.ContentType != right.ContentType ||
+		left.ContentEncoding != right.ContentEncoding || left.CacheControl != right.CacheControl ||
+		left.SoftDeleted != right.SoftDeleted || len(left.Metadata) != len(right.Metadata) {
+		return false
+	}
+	for key, value := range left.Metadata {
+		if right.Metadata[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *ArtifactStore) StoreBatch(

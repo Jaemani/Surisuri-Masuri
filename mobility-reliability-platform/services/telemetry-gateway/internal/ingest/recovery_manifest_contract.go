@@ -102,6 +102,24 @@ func ValidateManifestRepairAuthorization(
 	return nil
 }
 
+// ManifestRepairAuthorizationDeadline returns the provider deadline only
+// after the exact write binding and opaque seal have been verified.
+func ManifestRepairAuthorizationDeadline(
+	grant ManifestRepairAuthorizationGrant,
+	write RecoveryManifestWrite,
+) (time.Time, error) {
+	if ValidateRecoveryManifestWrite(write) != nil ||
+		!validArtifactServerLabel(grant.policyVersion) || grant.receiptRevision <= 0 ||
+		ValidateLeaseFence(grant.forwardFence) != nil || grant.checkedAt.IsZero() ||
+		grant.expiresAt.IsZero() || !grant.checkedAt.Before(grant.expiresAt) ||
+		grant.expiresAt.After(grant.forwardFence.ExpiresAt) ||
+		grant.writeBindingHash != canonicalRecoveryManifestWriteBinding(write) ||
+		grant.capabilitySeal != manifestRepairCapabilitySeal(grant) {
+		return time.Time{}, ErrInvalidManifestRepairAuthorization
+	}
+	return grant.expiresAt, nil
+}
+
 func (v *registeredTelemetryArtifactValidator) mintManifestRepairAuthorizationGrant(
 	policyVersion string,
 	request ArtifactClassificationRequest,
