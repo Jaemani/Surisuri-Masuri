@@ -35,6 +35,7 @@ type ArtifactReadPurpose string
 const (
 	ArtifactReadForwardRecovery        ArtifactReadPurpose = "forward_recovery"
 	ArtifactReadAcceptedIntegrityAudit ArtifactReadPurpose = "accepted_integrity_audit"
+	ArtifactReadCleanupDryRun          ArtifactReadPurpose = "cleanup_dry_run"
 )
 
 // ArtifactClassification is intentionally coarse. ReasonCode carries the
@@ -190,6 +191,7 @@ type ArtifactClassificationRequest struct {
 	AcceptedRawLineage      *ArtifactLineage
 	AcceptedManifestLineage *ArtifactLineage
 	ForwardFence            *LeaseFence
+	CleanupFence            *LeaseFence
 }
 
 type ArtifactInventorySummary struct {
@@ -219,6 +221,7 @@ type ArtifactClassificationResult struct {
 	ValidatorVersion   string
 	ObservedAt         time.Time
 	requestBindingHash [sha256.Size]byte
+	evidenceSeal       [sha256.Size]byte
 }
 
 type ArtifactClassifier interface {
@@ -247,10 +250,12 @@ const (
 	artifactReadGrantIssuerUnknown artifactReadGrantIssuer = iota
 	artifactReadGrantIssuerForwardRecovery
 	artifactReadGrantIssuerAcceptedIntegrityAudit
+	artifactReadGrantIssuerCleanupDryRun
 )
 
 const artifactRequestBindingVersion = "telemetry-artifact-read-request@1"
 const artifactGrantSealVersion = "telemetry-artifact-read-grant@1"
+const artifactClassificationEvidenceVersion = "telemetry-artifact-classification-evidence@1"
 
 // ValidateArtifactClassificationRequest validates only receipt-derived shape
 // and invariants. It performs no provider calls and is safe to invoke before a
@@ -345,15 +350,27 @@ func ValidateArtifactClassificationRequest(request ArtifactClassificationRequest
 		if request.AcceptedRawLineage != nil || request.AcceptedManifestLineage != nil {
 			return invalidArtifactClassificationRequest("accepted_lineage")
 		}
-		if request.ForwardFence == nil || ValidateLeaseFence(*request.ForwardFence) != nil {
+		if request.ForwardFence == nil || request.CleanupFence != nil ||
+			ValidateLeaseFence(*request.ForwardFence) != nil {
 			return invalidArtifactClassificationRequest("forward_fence")
+		}
+	case ArtifactReadCleanupDryRun:
+		if request.ReceiptState != ReceiptCleanupPending {
+			return invalidArtifactClassificationRequest("receipt_state")
+		}
+		if request.AcceptedRawLineage != nil || request.AcceptedManifestLineage != nil {
+			return invalidArtifactClassificationRequest("accepted_lineage")
+		}
+		if request.ForwardFence != nil || request.CleanupFence == nil ||
+			ValidateLeaseFence(*request.CleanupFence) != nil {
+			return invalidArtifactClassificationRequest("cleanup_fence")
 		}
 	case ArtifactReadAcceptedIntegrityAudit:
 		if !acceptedIntegrityReceiptState(request.ReceiptState) {
 			return invalidArtifactClassificationRequest("receipt_state")
 		}
-		if request.ForwardFence != nil {
-			return invalidArtifactClassificationRequest("forward_fence")
+		if request.ForwardFence != nil || request.CleanupFence != nil {
+			return invalidArtifactClassificationRequest("lease_fence")
 		}
 		if validateArtifactLineage(request.AcceptedRawLineage, request.ExpectedRawPath) != nil {
 			return invalidArtifactClassificationRequest("accepted_raw_lineage")
@@ -408,7 +425,9 @@ func ValidateArtifactReadAuthorization(
 		return ErrArtifactReadAuthorizationExpired
 	}
 	if request.Purpose == ArtifactReadForwardRecovery &&
-		!observedAt.Before(request.ForwardFence.ExpiresAt) {
+		!observedAt.Before(request.ForwardFence.ExpiresAt) ||
+		request.Purpose == ArtifactReadCleanupDryRun &&
+			!observedAt.Before(request.CleanupFence.ExpiresAt) {
 		return ErrArtifactReadAuthorizationExpired
 	}
 	return nil
@@ -436,7 +455,8 @@ func mintArtifactReadAuthorizationGrant(
 	if checkedAt.IsZero() || expiresAt.IsZero() || !checkedAt.Before(expiresAt) {
 		return ArtifactReadAuthorizationGrant{}, invalidArtifactReadAuthorization("grant_time")
 	}
-	if request.Purpose == ArtifactReadForwardRecovery && !checkedAt.Before(request.ForwardFence.ExpiresAt) {
+	if request.Purpose == ArtifactReadForwardRecovery && !checkedAt.Before(request.ForwardFence.ExpiresAt) ||
+		request.Purpose == ArtifactReadCleanupDryRun && !checkedAt.Before(request.CleanupFence.ExpiresAt) {
 		return ArtifactReadAuthorizationGrant{}, ErrArtifactReadAuthorizationExpired
 	}
 
@@ -485,7 +505,80 @@ func canonicalArtifactClassificationRequestBinding(request ArtifactClassificatio
 	encoder.addArtifactLineage(request.AcceptedRawLineage)
 	encoder.addArtifactLineage(request.AcceptedManifestLineage)
 	encoder.addLeaseFence(request.ForwardFence)
+	encoder.addLeaseFence(request.CleanupFence)
 	return encoder.sum()
+}
+
+// validArtifactClassificationEvidence binds every mutable result field to the
+// exact request/fence. Package-external callers may copy a genuine result, but
+// cannot substitute a syntactically valid classification, inventory or pinned
+// generation without invalidating this unexported seal.
+func validArtifactClassificationEvidence(
+	request ArtifactClassificationRequest,
+	result ArtifactClassificationResult,
+) bool {
+	requestBinding := canonicalArtifactClassificationRequestBinding(request)
+	return result.requestBindingHash == requestBinding &&
+		result.evidenceSeal == canonicalArtifactClassificationEvidence(requestBinding, result)
+}
+
+func sealArtifactClassificationResult(
+	request ArtifactClassificationRequest,
+	result ArtifactClassificationResult,
+) ArtifactClassificationResult {
+	result.requestBindingHash = canonicalArtifactClassificationRequestBinding(request)
+	result.evidenceSeal = canonicalArtifactClassificationEvidence(result.requestBindingHash, result)
+	return result
+}
+
+func canonicalArtifactClassificationEvidence(
+	requestBinding [sha256.Size]byte,
+	result ArtifactClassificationResult,
+) [sha256.Size]byte {
+	encoder := newArtifactBindingEncoder(artifactClassificationEvidenceVersion)
+	encoder.addBytes(requestBinding[:])
+	encoder.addString(string(result.Classification))
+	encoder.addString(string(result.ReasonCode))
+	encoder.addString(string(result.RetentionPhase))
+	addArtifactInventoryBinding(encoder, result.ManifestInventory)
+	addArtifactInventoryBinding(encoder, result.RawInventory)
+	addArtifactPinnedLineageBinding(encoder, result.PinnedManifest)
+	addArtifactPinnedLineageBinding(encoder, result.PinnedRaw)
+	encoder.addString(result.ValidatorVersion)
+	encoder.addTime(result.ObservedAt)
+	return encoder.sum()
+}
+
+func addArtifactInventoryBinding(encoder *artifactBindingEncoder, summary ArtifactInventorySummary) {
+	if summary.Performed {
+		encoder.addInt64(1)
+	} else {
+		encoder.addInt64(0)
+	}
+	encoder.addInt64(int64(summary.NonSoftDeletedCount))
+	encoder.addInt64(int64(summary.SoftDeletedCount))
+	if summary.Truncated {
+		encoder.addInt64(1)
+	} else {
+		encoder.addInt64(0)
+	}
+	encoder.addString(string(summary.Coverage))
+}
+
+func addArtifactPinnedLineageBinding(
+	encoder *artifactBindingEncoder,
+	lineage *ArtifactPinnedLineage,
+) {
+	if lineage == nil {
+		encoder.addBytes(nil)
+		return
+	}
+	encoder.addBytes([]byte{1})
+	encoder.addString(lineage.SHA256)
+	encoder.addUint32(lineage.CRC32C)
+	encoder.addInt64(lineage.Size)
+	encoder.addInt64(lineage.Generation)
+	encoder.addInt64(lineage.Metageneration)
 }
 
 func artifactReadCapabilitySeal(
@@ -513,7 +606,8 @@ func validateArtifactLineage(lineage *ArtifactLineage, expectedPath string) erro
 }
 
 func validArtifactReadPurpose(purpose ArtifactReadPurpose) bool {
-	return purpose == ArtifactReadForwardRecovery || purpose == ArtifactReadAcceptedIntegrityAudit
+	return purpose == ArtifactReadForwardRecovery || purpose == ArtifactReadAcceptedIntegrityAudit ||
+		purpose == ArtifactReadCleanupDryRun
 }
 
 func acceptedIntegrityReceiptState(state ReceiptState) bool {
@@ -527,12 +621,14 @@ func acceptedIntegrityReceiptState(state ReceiptState) bool {
 
 func validArtifactReadGrantIssuer(issuer artifactReadGrantIssuer) bool {
 	return issuer == artifactReadGrantIssuerForwardRecovery ||
-		issuer == artifactReadGrantIssuerAcceptedIntegrityAudit
+		issuer == artifactReadGrantIssuerAcceptedIntegrityAudit ||
+		issuer == artifactReadGrantIssuerCleanupDryRun
 }
 
 func issuerAllowsPurpose(issuer artifactReadGrantIssuer, purpose ArtifactReadPurpose) bool {
 	return issuer == artifactReadGrantIssuerForwardRecovery && purpose == ArtifactReadForwardRecovery ||
-		issuer == artifactReadGrantIssuerAcceptedIntegrityAudit && purpose == ArtifactReadAcceptedIntegrityAudit
+		issuer == artifactReadGrantIssuerAcceptedIntegrityAudit && purpose == ArtifactReadAcceptedIntegrityAudit ||
+		issuer == artifactReadGrantIssuerCleanupDryRun && purpose == ArtifactReadCleanupDryRun
 }
 
 func validArtifactServerLabel(value string) bool {

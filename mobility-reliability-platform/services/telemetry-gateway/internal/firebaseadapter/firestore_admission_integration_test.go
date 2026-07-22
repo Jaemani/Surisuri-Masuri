@@ -1232,6 +1232,7 @@ func clearAdmissionIngestCollections(t *testing.T, client *firestore.Client) {
 		}
 	}
 	for _, collection := range []string{
+		"ingestCleanupTargets",
 		"ingestIdempotency",
 		"ingestClientBatches",
 		"ingestReceipts",

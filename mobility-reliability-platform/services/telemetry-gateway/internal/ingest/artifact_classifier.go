@@ -75,7 +75,7 @@ func (c *readOnlyArtifactClassifier) Classify(
 		},
 	}
 	switch request.Purpose {
-	case ArtifactReadForwardRecovery:
+	case ArtifactReadForwardRecovery, ArtifactReadCleanupDryRun:
 		return run.classifyForward()
 	case ArtifactReadAcceptedIntegrityAudit:
 		return run.classifyAccepted()
@@ -660,6 +660,7 @@ func (r *artifactClassificationRun) terminal(
 	}
 	r.result.Classification = classification
 	r.result.ReasonCode = reason
+	r.result = sealArtifactClassificationResult(r.request, r.result)
 	return r.result, nil
 }
 
@@ -745,13 +746,16 @@ func validArtifactClassificationOutcome(
 	}
 	switch classification {
 	case ArtifactClassificationNone:
-		return purpose == ArtifactReadForwardRecovery && reason == ArtifactReasonNoCandidates
+		return (purpose == ArtifactReadForwardRecovery || purpose == ArtifactReadCleanupDryRun) &&
+			reason == ArtifactReasonNoCandidates
 	case ArtifactClassificationValidRawOnly:
-		return purpose == ArtifactReadForwardRecovery && reason == ArtifactReasonRawValidManifestAbsent
+		return (purpose == ArtifactReadForwardRecovery || purpose == ArtifactReadCleanupDryRun) &&
+			reason == ArtifactReasonRawValidManifestAbsent
 	case ArtifactClassificationValidComplete:
 		return reason == ArtifactReasonManifestAndReferencedRawValid
 	case ArtifactClassificationManifestOnly:
-		return purpose == ArtifactReadForwardRecovery && reason == ArtifactReasonReferencedRawNotFound
+		return (purpose == ArtifactReadForwardRecovery || purpose == ArtifactReadCleanupDryRun) &&
+			reason == ArtifactReasonReferencedRawNotFound
 	case ArtifactClassificationRawContentConflict:
 		return reason == ArtifactReasonDecompressedBodyHashMismatch ||
 			reason == ArtifactReasonPayloadLineageMismatch ||
@@ -766,7 +770,7 @@ func validArtifactClassificationOutcome(
 			reason == ArtifactReasonContentHeadersMismatch
 	case ArtifactClassificationGenerationDrift:
 		if reason == ArtifactReasonReferencedGenerationMissingOtherPresent {
-			return purpose == ArtifactReadForwardRecovery
+			return purpose == ArtifactReadForwardRecovery || purpose == ArtifactReadCleanupDryRun
 		}
 		if reason == ArtifactReasonAcceptedGenerationMissingOtherPresent {
 			return purpose == ArtifactReadAcceptedIntegrityAudit
@@ -916,6 +920,10 @@ func cloneArtifactClassificationRequest(
 	if request.ForwardFence != nil {
 		fence := *request.ForwardFence
 		request.ForwardFence = &fence
+	}
+	if request.CleanupFence != nil {
+		fence := *request.CleanupFence
+		request.CleanupFence = &fence
 	}
 	return request
 }

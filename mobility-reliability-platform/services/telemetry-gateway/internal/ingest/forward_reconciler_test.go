@@ -517,7 +517,7 @@ func reconcilerClassificationResult(
 		result.PinnedManifest = &value
 		result.ManifestInventory.NonSoftDeletedCount = 1
 	}
-	return result
+	return sealArtifactClassificationResult(request, result)
 }
 
 type reconcilerFakeAuthorizer struct {

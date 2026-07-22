@@ -249,7 +249,7 @@ func validateForwardRecoveryClassification(
 		ValidateArtifactClassificationRequest(request) != nil ||
 		!validArtifactClassificationOutcome(request.Purpose, result.Classification, result.ReasonCode) ||
 		result.ValidatorVersion != request.ValidatorVersion || result.ObservedAt.IsZero() ||
-		result.requestBindingHash != canonicalArtifactClassificationRequestBinding(request) ||
+		!validArtifactClassificationEvidence(request, result) ||
 		result.ObservedAt.Before(request.ReceivedAt) ||
 		!result.ObservedAt.Before(request.ArtifactExpiresAt) ||
 		request.ForwardFence == nil || !result.ObservedAt.Before(request.ForwardFence.ExpiresAt) ||

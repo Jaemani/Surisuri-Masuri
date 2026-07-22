@@ -806,25 +806,25 @@ func artifactAuthManifestEvidence(
 		Generation:     raw.Generation,
 		Metageneration: raw.Metageneration,
 	}
+	result := ArtifactClassificationResult{
+		Classification: ArtifactClassificationValidRawOnly,
+		ReasonCode:     ArtifactReasonRawValidManifestAbsent,
+		RetentionPhase: ArtifactRetentionBeforeExpiry,
+		ManifestInventory: ArtifactInventorySummary{
+			Performed: true,
+			Coverage:  ArtifactInventoryCoverageComplete,
+		},
+		RawInventory: ArtifactInventorySummary{
+			Performed: true, NonSoftDeletedCount: 1,
+			Coverage: ArtifactInventoryCoverageComplete,
+		},
+		PinnedRaw:        &pinnedRaw,
+		ValidatorVersion: request.ValidatorVersion,
+		ObservedAt:       observedAt,
+	}
 	return ForwardRecoveryManifestEvidence{
 		Request: request,
-		Result: ArtifactClassificationResult{
-			Classification: ArtifactClassificationValidRawOnly,
-			ReasonCode:     ArtifactReasonRawValidManifestAbsent,
-			RetentionPhase: ArtifactRetentionBeforeExpiry,
-			ManifestInventory: ArtifactInventorySummary{
-				Performed: true,
-				Coverage:  ArtifactInventoryCoverageComplete,
-			},
-			RawInventory: ArtifactInventorySummary{
-				Performed: true, NonSoftDeletedCount: 1,
-				Coverage: ArtifactInventoryCoverageComplete,
-			},
-			PinnedRaw:          &pinnedRaw,
-			ValidatorVersion:   request.ValidatorVersion,
-			ObservedAt:         observedAt,
-			requestBindingHash: canonicalArtifactClassificationRequestBinding(request),
-		},
+		Result:  sealArtifactClassificationResult(request, result),
 	}
 }
 

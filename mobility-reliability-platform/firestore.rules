@@ -240,6 +240,10 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      match /ingestCleanupTargets/{document=**} {
+        allow read, write: if false;
+      }
+
       match /ingestIdempotency/{document=**} {
         allow read, write: if false;
       }

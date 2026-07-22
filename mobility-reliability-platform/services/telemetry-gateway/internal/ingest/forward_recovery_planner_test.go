@@ -86,6 +86,7 @@ func TestPlanForwardRecoveryConfirmationRequiresExactCrossPassEvidence(t *testin
 		changedPin := *changed.PinnedManifest
 		changedPin.Generation++
 		changed.PinnedManifest = &changedPin
+		changed = sealArtifactClassificationResult(fixture.request, changed)
 		plan, err := PlanForwardRecoveryAction(ForwardRecoveryPlanInput{
 			Phase: RecoveryPhaseConfirmation, Request: fixture.request, Result: changed, PriorResult: &prior,
 		})
@@ -99,6 +100,7 @@ func TestPlanForwardRecoveryConfirmationRequiresExactCrossPassEvidence(t *testin
 		changedPin := *changed.PinnedRaw
 		changedPin.Metageneration++
 		changed.PinnedRaw = &changedPin
+		changed = sealArtifactClassificationResult(fixture.request, changed)
 		plan, err := PlanForwardRecoveryAction(ForwardRecoveryPlanInput{
 			Phase: RecoveryPhaseConfirmation, Request: fixture.request, Result: changed, PriorResult: &prior,
 		})
@@ -164,6 +166,7 @@ func TestPlanForwardRecoveryRawConflictRejectsOnlySamePinnedEvidence(t *testing.
 
 	changed := current
 	changed.ReasonCode = ArtifactReasonStrictPayloadInvalid
+	changed = sealArtifactClassificationResult(fixture.request, changed)
 	plan, err = PlanForwardRecoveryAction(ForwardRecoveryPlanInput{
 		Phase: RecoveryPhaseConfirmation, Request: fixture.request, Result: changed, PriorResult: &prior,
 	})
@@ -369,6 +372,7 @@ func forwardRecoveryResultFixture(
 		result.RawInventory = complete(1)
 		result.PinnedRaw = artifactPinnedLineageFromSnapshot(fixture.rawSnapshot)
 	}
+	result = sealArtifactClassificationResult(fixture.request, result)
 	return result
 }
 

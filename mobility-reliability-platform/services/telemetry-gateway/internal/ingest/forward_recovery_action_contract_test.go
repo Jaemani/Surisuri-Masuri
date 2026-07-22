@@ -268,6 +268,7 @@ func TestSystemRecoveryAuthorizerDerivesBoundedHoldReviewTime(t *testing.T) {
 		ObservedAt:         now,
 		requestBindingHash: canonicalArtifactClassificationRequestBinding(request),
 	}
+	result = sealArtifactClassificationResult(request, result)
 	command, grant, err := authorizer.AuthorizeForwardRecoveryAction(
 		context.Background(),
 		snapshot.Receipt.TenantID,
@@ -322,7 +323,7 @@ func forwardActionStoredInput(
 			value := manifest
 			result.PinnedManifest = &value
 		}
-		return result
+		return sealArtifactClassificationResult(request, result)
 	}
 	prior := complete(true, true, observedAt.Add(-time.Second))
 	current := complete(true, true, observedAt)
