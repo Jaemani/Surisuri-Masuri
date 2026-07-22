@@ -615,7 +615,7 @@ func cleanupExecutorTestInstance(
 			firebaseadapter.CleanupExecutionAuthorizationGrant,
 			ingest.CleanupExecutionPlan,
 		) (time.Time, error) {
-			return now.Add(time.Minute), nil
+			return time.Now().UTC().Add(time.Minute), nil
 		},
 	}
 }
