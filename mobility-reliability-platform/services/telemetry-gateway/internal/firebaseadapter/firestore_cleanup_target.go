@@ -217,6 +217,9 @@ func (s *FirestoreAdmissionStore) createCleanupDryRunTarget(
 		if loadErr != nil {
 			return loadErr
 		}
+		if receiptHasPurgeFenceFields(linked.Receipt.Receipt) {
+			return ingest.ErrInvalidCleanupTarget
+		}
 		cleanupTransaction, ok := transaction.(cleanupTargetTransaction)
 		if !ok {
 			return ingest.ErrCleanupArtifactAuthorizationUnavailable

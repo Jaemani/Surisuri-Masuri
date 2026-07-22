@@ -1209,6 +1209,19 @@ func assertAdmissionCollectionCount(
 
 func clearAdmissionIngestCollections(t *testing.T, client *firestore.Client) {
 	t.Helper()
+	purgeJobs, err := client.Collection("ingestPurgeJobs").Documents(context.Background()).GetAll()
+	if err != nil {
+		t.Fatalf("list ingestPurgeJobs for cleanup: %v", err)
+	}
+	if len(purgeJobs) > 0 {
+		batch := client.Batch()
+		for _, job := range purgeJobs {
+			batch.Delete(job.Ref)
+		}
+		if _, err := batch.Commit(context.Background()); err != nil {
+			t.Fatalf("clear ingestPurgeJobs: %v", err)
+		}
+	}
 	receipts, err := client.Collection(
 		"tenants/" + emulatorTenantID + "/ingestReceipts",
 	).Documents(context.Background()).GetAll()

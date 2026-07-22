@@ -130,6 +130,9 @@ type Receipt struct {
 	ArtifactExpiresAt           time.Time
 	ReceiptRetentionFloor       time.Time
 	PurgeEligibleAt             *time.Time
+	PurgeJobID                  string
+	PurgeStartedAt              time.Time
+	PurgeFenceVersion           string
 }
 
 type ReservationStatus string

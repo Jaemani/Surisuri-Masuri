@@ -39,6 +39,10 @@ func (s *FirestoreAdmissionStore) ClaimCleanupLease(
 			return loadErr
 		}
 		receipt := linked.Receipt.Receipt
+		if receiptHasPurgeFenceFields(receipt) {
+			resultStatus = ingest.LeaseStatusNotEligible
+			return nil
+		}
 		if receipt.State != ingest.ReceiptCleanupPending ||
 			receipt.CleanupMode != ingest.CleanupModeReservationExpiry ||
 			receipt.CleanupOriginStatus != ingest.ReceiptReserved {

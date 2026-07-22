@@ -613,6 +613,10 @@ func (s *FirestoreAdmissionStore) ClaimRecoveryLease(
 			return loadErr
 		}
 		receipt := linked.Receipt.Receipt
+		if receiptHasPurgeFenceFields(receipt) {
+			resultStatus = ingest.LeaseStatusNotEligible
+			return nil
+		}
 		if receipt.State != ingest.ReceiptReserved {
 			resultStatus = ingest.LeaseStatusNotEligible
 			return nil
@@ -1253,6 +1257,9 @@ type firestoreIngestReceipt struct {
 	ArtifactExpiresAt           time.Time                          `firestore:"artifact_expires_at"`
 	ReceiptRetentionFloor       time.Time                          `firestore:"receipt_retention_floor"`
 	PurgeEligibleAt             *time.Time                         `firestore:"purge_eligible_at,omitempty"`
+	PurgeJobID                  string                             `firestore:"purge_job_id,omitempty"`
+	PurgeStartedAt              time.Time                          `firestore:"purge_started_at,omitempty"`
+	PurgeFenceVersion           string                             `firestore:"purge_fence_version,omitempty"`
 }
 
 type firestoreRecoveryAttempt struct {
@@ -1434,6 +1441,9 @@ func (receipt firestoreIngestReceipt) toDomain() ingest.Receipt {
 		ArtifactExpiresAt:           receipt.ArtifactExpiresAt,
 		ReceiptRetentionFloor:       receipt.ReceiptRetentionFloor,
 		PurgeEligibleAt:             cloneOptionalTime(receipt.PurgeEligibleAt),
+		PurgeJobID:                  receipt.PurgeJobID,
+		PurgeStartedAt:              receipt.PurgeStartedAt,
+		PurgeFenceVersion:           receipt.PurgeFenceVersion,
 	}
 }
 
@@ -1750,6 +1760,9 @@ func validateReceiptReservation(receipt firestoreIngestReceipt, reservation inge
 }
 
 func validateReceiptState(receipt firestoreIngestReceipt) error {
+	if validateReceiptPurgeFence(receipt) != nil {
+		return ingest.ErrAdmissionUnavailable
+	}
 	switch receipt.State {
 	case ingest.ReceiptReserved:
 		if hasStoredArtifactData(receipt) || receipt.SampleCount != 0 || receipt.RejectionCode != "" ||
@@ -1795,6 +1808,35 @@ func validateReceiptState(receipt firestoreIngestReceipt) error {
 		return ingest.ErrAdmissionUnavailable
 	}
 	return nil
+}
+
+func validateReceiptPurgeFence(receipt firestoreIngestReceipt) error {
+	fieldCount := 0
+	if receipt.PurgeJobID != "" {
+		fieldCount++
+	}
+	if !receipt.PurgeStartedAt.IsZero() {
+		fieldCount++
+	}
+	if receipt.PurgeFenceVersion != "" {
+		fieldCount++
+	}
+	if fieldCount == 0 {
+		return nil
+	}
+	if fieldCount != 3 || receipt.State != ingest.ReceiptExpired ||
+		!lowerHexDigest(receipt.PurgeJobID) ||
+		receipt.PurgeFenceVersion != ingest.ReceiptPurgeFenceVersion ||
+		receipt.PurgeEligibleAt == nil || receipt.PurgeEligibleAt.IsZero() ||
+		receipt.PurgeStartedAt.Before(receipt.PurgeEligibleAt.UTC()) ||
+		!receipt.UpdatedAt.Equal(receipt.PurgeStartedAt.UTC()) {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func receiptHasPurgeFenceFields(receipt firestoreIngestReceipt) bool {
+	return receipt.PurgeJobID != "" || !receipt.PurgeStartedAt.IsZero() || receipt.PurgeFenceVersion != ""
 }
 
 func validateRecoveryHold(receipt firestoreIngestReceipt) error {

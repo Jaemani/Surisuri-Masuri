@@ -1063,6 +1063,26 @@ func TestValidateReservedOriginCleanupReceiptState(t *testing.T) {
 	if err := validateReceiptState(expired); err != nil {
 		t.Fatalf("valid expired receipt rejected: %v", err)
 	}
+	purgeEligibleAt := expired.ReceiptRetentionFloor
+	fenced := expired
+	fenced.PurgeEligibleAt = &purgeEligibleAt
+	fenced.PurgeJobID = strings.Repeat("a", 64)
+	fenced.PurgeStartedAt = purgeEligibleAt.Add(time.Second)
+	fenced.PurgeFenceVersion = ingest.ReceiptPurgeFenceVersion
+	fenced.UpdatedAt = fenced.PurgeStartedAt
+	if err := validateReceiptState(fenced); err != nil {
+		t.Fatalf("valid purge-fenced expired receipt rejected: %v", err)
+	}
+	partialFence := fenced
+	partialFence.PurgeStartedAt = time.Time{}
+	if err := validateReceiptState(partialFence); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatal("partial purge fence was accepted")
+	}
+	nonTerminalFence := fenced
+	nonTerminalFence.State = ingest.ReceiptCleanupPending
+	if err := validateReceiptState(nonTerminalFence); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatal("purge fence on non-terminal receipt was accepted")
+	}
 	expired.UpdatedAt = quiescenceUntil.Add(-time.Nanosecond)
 	if err := validateReceiptState(expired); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
 		t.Fatal("expired receipt completed before quiescence was accepted")
@@ -2249,6 +2269,9 @@ func admissionTestReceiptDTO(receipt ingest.Receipt) firestoreIngestReceipt {
 		ArtifactExpiresAt:       receipt.ArtifactExpiresAt,
 		ReceiptRetentionFloor:   receipt.ReceiptRetentionFloor,
 		PurgeEligibleAt:         receipt.PurgeEligibleAt,
+		PurgeJobID:              receipt.PurgeJobID,
+		PurgeStartedAt:          receipt.PurgeStartedAt,
+		PurgeFenceVersion:       receipt.PurgeFenceVersion,
 	}
 }
 
