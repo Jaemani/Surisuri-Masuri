@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Jaemani/Surisuri-Masuri/mobility-reliability-platform/services/telemetry-gateway/internal/ingest"
 )
@@ -243,6 +245,20 @@ func TestFirestoreAdmissionStoreEmulatorConcurrentCleanupTargetCreateConverges(t
 		!reflect.DeepEqual(domainTarget.Command, command) {
 		t.Fatalf("persisted cleanup target = %#v, %v", persisted, err)
 	}
+	persistedLink := readCleanupTargetPurgeLinkEmulator(t, client, command)
+	if ingest.ValidateReceiptPurgeInverseLinkPair(
+		persistedLink,
+		cleanupTargetPurgeChildIdentity(command),
+	) != nil {
+		t.Fatalf("persisted cleanup target inverse link = %#v", persistedLink)
+	}
+	links, err := client.Collection(
+		"tenants/" + receiptBefore.TenantID + "/ingestReceipts/" +
+			receiptBefore.ReceiptID + "/purgeLinks",
+	).Documents(context.Background()).GetAll()
+	if err != nil || len(links) != 1 {
+		t.Fatalf("cleanup target link count = %d, err=%v, want 1", len(links), err)
+	}
 	assertCleanupControlDocumentsUnchanged(t, client, receiptBefore, attemptBefore)
 }
 
@@ -267,6 +283,19 @@ func TestFirestoreAdmissionStoreEmulatorConflictingCleanupTargetWritesNothing(t 
 		conflictingCommand.CleanupID,
 	)).Create(context.Background(), conflictingTarget); err != nil {
 		t.Fatalf("preseed conflicting cleanup target: %v", err)
+	}
+	conflictingLink, err := ingest.BuildReceiptPurgeInverseLink(
+		cleanupTargetPurgeChildIdentity(conflictingCommand),
+	)
+	if err != nil {
+		t.Fatalf("BuildReceiptPurgeInverseLink(conflict) = %v", err)
+	}
+	if _, err := client.Doc(receiptPurgeLinkDocumentPath(
+		conflictingCommand.TenantID,
+		conflictingCommand.ReceiptID,
+		conflictingLink.LinkID,
+	)).Create(context.Background(), newFirestoreReceiptPurgeLink(conflictingLink)); err != nil {
+		t.Fatalf("preseed conflicting inverse link: %v", err)
 	}
 	targetBefore := readCleanupTargetEmulator(
 		t,
@@ -305,6 +334,171 @@ func TestFirestoreAdmissionStoreEmulatorConflictingCleanupTargetWritesNothing(t 
 		t.Fatalf("cleanup target count after conflict = %d, want 1", len(targets))
 	}
 	assertCleanupControlDocumentsUnchanged(t, client, receiptBefore, attemptBefore)
+}
+
+func TestFirestoreAdmissionStoreEmulatorRejectsPartialCleanupTargetLinkPairs(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		seedTarget bool
+		seedLink   bool
+	}{
+		{name: "target only", seedTarget: true},
+		{name: "link only", seedLink: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := newAdmissionEmulatorClient(t)
+			clearAdmissionIngestCollections(t, client)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			store, receiptBefore, attemptBefore := seedClaimedCleanupTargetFixture(t, client, now)
+			command := cleanupTargetCommandFixture(
+				t,
+				receiptBefore,
+				ingest.ArtifactClassificationValidComplete,
+			)
+			targetHash, err := ingest.CleanupTargetHash(command)
+			if err != nil {
+				t.Fatalf("CleanupTargetHash() = %v", err)
+			}
+			link, err := ingest.BuildReceiptPurgeInverseLink(cleanupTargetPurgeChildIdentity(command))
+			if err != nil {
+				t.Fatalf("BuildReceiptPurgeInverseLink() = %v", err)
+			}
+			if test.seedTarget {
+				if _, err := client.Doc(cleanupTargetDocumentPath(
+					command.TenantID,
+					command.CleanupID,
+				)).Create(context.Background(), newFirestoreCleanupTarget(command, targetHash)); err != nil {
+					t.Fatalf("preseed target: %v", err)
+				}
+			}
+			if test.seedLink {
+				if _, err := client.Doc(receiptPurgeLinkDocumentPath(
+					command.TenantID,
+					command.ReceiptID,
+					link.LinkID,
+				)).Create(context.Background(), newFirestoreReceiptPurgeLink(link)); err != nil {
+					t.Fatalf("preseed link: %v", err)
+				}
+			}
+
+			target, createStatus, createErr := store.createCleanupDryRunTarget(
+				context.Background(),
+				ingest.CleanupTargetAuthorizationGrant{},
+				command,
+				command.CreatedAt,
+				exactCleanupTargetSnapshotValidator(receiptBefore, attemptBefore),
+			)
+			if !errors.Is(createErr, ingest.ErrCleanupTargetConflict) ||
+				target != (ingest.CleanupTarget{}) || createStatus != "" {
+				t.Fatalf("partial pair create = %#v, %q, %v", target, createStatus, createErr)
+			}
+			targetSnapshot, targetErr := client.Doc(cleanupTargetDocumentPath(
+				command.TenantID,
+				command.CleanupID,
+			)).Get(context.Background())
+			linkSnapshot, linkErr := client.Doc(receiptPurgeLinkDocumentPath(
+				command.TenantID,
+				command.ReceiptID,
+				link.LinkID,
+			)).Get(context.Background())
+			targetPresent := targetErr == nil && targetSnapshot != nil && targetSnapshot.Exists()
+			linkPresent := linkErr == nil && linkSnapshot != nil && linkSnapshot.Exists()
+			if targetPresent != test.seedTarget || linkPresent != test.seedLink ||
+				(!test.seedTarget && status.Code(targetErr) != codes.NotFound) ||
+				(!test.seedLink && status.Code(linkErr) != codes.NotFound) {
+				t.Fatalf("partial pair changed: targetErr=%v linkErr=%v", targetErr, linkErr)
+			}
+			assertCleanupControlDocumentsUnchanged(t, client, receiptBefore, attemptBefore)
+		})
+	}
+}
+
+func TestFirestoreAdmissionStoreEmulatorRejectsMalformedCleanupTargetReplay(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		update firestore.Update
+	}{
+		{name: "unknown top-level field", update: firestore.Update{Path: "future", Value: "field"}},
+		{name: "unknown nested field", update: firestore.Update{Path: "raw.future", Value: "field"}},
+		{name: "missing required field", update: firestore.Update{Path: "target_hash", Value: firestore.Delete}},
+		{name: "wrong field type", update: firestore.Update{Path: "target_hash", Value: int64(1)}},
+		{name: "wrong nested type", update: firestore.Update{Path: "raw.generation", Value: "one"}},
+		{name: "body document ID drift", update: firestore.Update{Path: "cleanup_id", Value: emulatorThirdReceiptID}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := newAdmissionEmulatorClient(t)
+			clearAdmissionIngestCollections(t, client)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			store, receiptBefore, attemptBefore := seedClaimedCleanupTargetFixture(t, client, now)
+			command := cleanupTargetCommandFixture(
+				t,
+				receiptBefore,
+				ingest.ArtifactClassificationValidComplete,
+			)
+			targetHash, err := ingest.CleanupTargetHash(command)
+			if err != nil {
+				t.Fatalf("CleanupTargetHash() = %v", err)
+			}
+			targetReference := client.Doc(cleanupTargetDocumentPath(command.TenantID, command.CleanupID))
+			if _, err := targetReference.Create(
+				context.Background(),
+				newFirestoreCleanupTarget(command, targetHash),
+			); err != nil {
+				t.Fatalf("preseed cleanup target: %v", err)
+			}
+			if _, err := targetReference.Update(context.Background(), []firestore.Update{test.update}); err != nil {
+				t.Fatalf("mutate cleanup target: %v", err)
+			}
+			link, err := ingest.BuildReceiptPurgeInverseLink(cleanupTargetPurgeChildIdentity(command))
+			if err != nil {
+				t.Fatalf("BuildReceiptPurgeInverseLink() = %v", err)
+			}
+			linkReference := client.Doc(receiptPurgeLinkDocumentPath(
+				command.TenantID,
+				command.ReceiptID,
+				link.LinkID,
+			))
+			if _, err := linkReference.Create(
+				context.Background(),
+				newFirestoreReceiptPurgeLink(link),
+			); err != nil {
+				t.Fatalf("preseed inverse link: %v", err)
+			}
+			targetBefore, err := targetReference.Get(context.Background())
+			if err != nil {
+				t.Fatalf("read malformed target before replay: %v", err)
+			}
+			linkBefore, err := linkReference.Get(context.Background())
+			if err != nil {
+				t.Fatalf("read inverse link before replay: %v", err)
+			}
+
+			target, createStatus, createErr := store.createCleanupDryRunTarget(
+				context.Background(),
+				ingest.CleanupTargetAuthorizationGrant{},
+				command,
+				command.CreatedAt,
+				exactCleanupTargetSnapshotValidator(receiptBefore, attemptBefore),
+			)
+			if !errors.Is(createErr, ingest.ErrCleanupTargetConflict) ||
+				target != (ingest.CleanupTarget{}) || createStatus != "" {
+				t.Fatalf("malformed replay = %#v, %q, %v", target, createStatus, createErr)
+			}
+			targetAfter, err := targetReference.Get(context.Background())
+			if err != nil {
+				t.Fatalf("read malformed target after replay: %v", err)
+			}
+			linkAfter, err := linkReference.Get(context.Background())
+			if err != nil {
+				t.Fatalf("read inverse link after replay: %v", err)
+			}
+			if !reflect.DeepEqual(targetBefore.Data(), targetAfter.Data()) ||
+				!reflect.DeepEqual(linkBefore.Data(), linkAfter.Data()) {
+				t.Fatalf("malformed pair changed during rejected replay")
+			}
+			assertCleanupControlDocumentsUnchanged(t, client, receiptBefore, attemptBefore)
+		})
+	}
 }
 
 func seedClaimedCleanupTargetFixture(
@@ -444,6 +638,38 @@ func readCleanupTargetEmulator(
 		t.Fatalf("decode cleanup target: %v", err)
 	}
 	return target
+}
+
+func readCleanupTargetPurgeLinkEmulator(
+	t *testing.T,
+	client *firestore.Client,
+	command ingest.CleanupTargetCommand,
+) ingest.ReceiptPurgeInverseLink {
+	t.Helper()
+	want, err := ingest.BuildReceiptPurgeInverseLink(cleanupTargetPurgeChildIdentity(command))
+	if err != nil {
+		t.Fatalf("BuildReceiptPurgeInverseLink() = %v", err)
+	}
+	document, err := client.Doc(receiptPurgeLinkDocumentPath(
+		command.TenantID,
+		command.ReceiptID,
+		want.LinkID,
+	)).Get(context.Background())
+	if err != nil {
+		t.Fatalf("read cleanup target inverse link: %v", err)
+	}
+	if validateReceiptPurgeLinkDocumentShape(document.Data()) != nil {
+		t.Fatalf("cleanup target inverse link shape = %#v", document.Data())
+	}
+	var stored firestoreReceiptPurgeLink
+	if document.DataTo(&stored) != nil {
+		t.Fatal("decode cleanup target inverse link")
+	}
+	link, err := stored.toDomain(document.Ref.ID, command.TenantID, command.ReceiptID)
+	if err != nil {
+		t.Fatalf("cleanup target inverse link domain = %v", err)
+	}
+	return link
 }
 
 func assertCleanupControlDocumentsUnchanged(

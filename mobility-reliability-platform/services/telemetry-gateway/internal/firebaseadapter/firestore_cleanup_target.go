@@ -29,6 +29,23 @@ type cleanupTargetTransaction interface {
 	ReadCleanupTarget(context.Context, string) (cleanupTargetRead, bool, error)
 }
 
+type cleanupTargetCreateTransaction interface {
+	cleanupTargetTransaction
+	ReadCleanupTargetForCreate(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+	) (cleanupTargetRead, bool, error)
+	ReadReceiptPurgeLink(
+		context.Context,
+		string,
+		string,
+		string,
+	) (receiptPurgeLinkRead, bool, error)
+}
+
 type currentCleanupTargetValidator func(
 	ingest.CleanupTargetAuthorizationGrant,
 	ingest.CleanupTargetCommand,
@@ -220,7 +237,7 @@ func (s *FirestoreAdmissionStore) createCleanupDryRunTarget(
 		if receiptHasPurgeFenceFields(linked.Receipt.Receipt) {
 			return ingest.ErrInvalidCleanupTarget
 		}
-		cleanupTransaction, ok := transaction.(cleanupTargetTransaction)
+		cleanupTransaction, ok := transaction.(cleanupTargetCreateTransaction)
 		if !ok {
 			return ingest.ErrCleanupArtifactAuthorizationUnavailable
 		}
@@ -240,13 +257,41 @@ func (s *FirestoreAdmissionStore) createCleanupDryRunTarget(
 		}
 
 		targetPath := cleanupTargetDocumentPath(command.TenantID, command.CleanupID)
-		existing, targetExists, targetErr := cleanupTransaction.ReadCleanupTarget(runContext, targetPath)
+		existing, targetExists, targetErr := cleanupTransaction.ReadCleanupTargetForCreate(
+			runContext,
+			targetPath,
+			command.TenantID,
+			command.ReceiptID,
+			command.CleanupID,
+		)
 		if targetErr != nil {
 			return targetErr
+		}
+		link, linkErr := ingest.BuildReceiptPurgeInverseLink(
+			cleanupTargetPurgeChildIdentity(command),
+		)
+		if linkErr != nil {
+			return ingest.ErrInvalidCleanupTarget
+		}
+		linkPath := receiptPurgeLinkDocumentPath(command.TenantID, command.ReceiptID, link.LinkID)
+		existingLink, linkExists, readLinkErr := cleanupTransaction.ReadReceiptPurgeLink(
+			runContext,
+			linkPath,
+			command.TenantID,
+			command.ReceiptID,
+		)
+		if readLinkErr != nil {
+			if errors.Is(readLinkErr, ingest.ErrInvalidReceiptPurgeLink) {
+				return ingest.ErrCleanupTargetConflict
+			}
+			return readLinkErr
 		}
 		readTimes := []time.Time{linked.Receipt.ReadTime, attemptResult.ReadTime}
 		if targetExists {
 			readTimes = append(readTimes, existing.ReadTime)
+		}
+		if linkExists {
+			readTimes = append(readTimes, existingLink.ReadTime)
 		}
 		readTime, clockErr := coherentCleanupTargetReadTime(readTimes...)
 		if clockErr != nil {
@@ -271,9 +316,16 @@ func (s *FirestoreAdmissionStore) createCleanupDryRunTarget(
 			return hashErr
 		}
 		result = ingest.CleanupTarget{Command: cloneCleanupTargetCommand(command), TargetHash: targetHash}
-		if targetExists {
+		if targetExists != linkExists {
+			return ingest.ErrCleanupTargetConflict
+		}
+		if targetExists && linkExists {
 			persisted, persistedErr := existing.Target.toDomain()
-			if persistedErr != nil || persisted.TargetHash != targetHash {
+			if persistedErr != nil || persisted.TargetHash != targetHash ||
+				ingest.ValidateReceiptPurgeInverseLinkPair(
+					existingLink.Link,
+					cleanupTargetPurgeChildIdentity(persisted.Command),
+				) != nil {
 				return ingest.ErrCleanupTargetConflict
 			}
 			resultStatus = ingest.CleanupTargetReplayed
@@ -283,6 +335,13 @@ func (s *FirestoreAdmissionStore) createCleanupDryRunTarget(
 			runContext,
 			targetPath,
 			newFirestoreCleanupTarget(command, targetHash),
+		); createErr != nil {
+			return normalizeAdmissionError(runContext, createErr)
+		}
+		if createErr := transaction.Create(
+			runContext,
+			linkPath,
+			newFirestoreReceiptPurgeLink(link),
 		); createErr != nil {
 			return normalizeAdmissionError(runContext, createErr)
 		}
@@ -296,6 +355,18 @@ func (s *FirestoreAdmissionStore) createCleanupDryRunTarget(
 		return ingest.CleanupTarget{}, "", ingest.ErrCleanupArtifactAuthorizationUnavailable
 	}
 	return result, resultStatus, nil
+}
+
+func cleanupTargetPurgeChildIdentity(
+	command ingest.CleanupTargetCommand,
+) ingest.ReceiptPurgeLinkedChildIdentity {
+	return ingest.ReceiptPurgeLinkedChildIdentity{
+		TenantID:   command.TenantID,
+		ReceiptID:  command.ReceiptID,
+		Kind:       ingest.ReceiptPurgeLinkCleanupTarget,
+		DocumentID: command.CleanupID,
+		CreatedAt:  command.CreatedAt.UTC(),
+	}
 }
 
 func (transaction firestoreAdmissionTransaction) ReadCleanupTarget(
@@ -316,8 +387,160 @@ func (transaction firestoreAdmissionTransaction) ReadCleanupTarget(
 	return cleanupTargetRead{Target: target, ReadTime: document.ReadTime.UTC()}, true, nil
 }
 
+func (transaction firestoreAdmissionTransaction) ReadCleanupTargetForCreate(
+	ctx context.Context,
+	path string,
+	expectedTenantID string,
+	expectedReceiptID string,
+	expectedCleanupID string,
+) (cleanupTargetRead, bool, error) {
+	expectedReference := transaction.client.Doc(path)
+	document, err := transaction.transaction.Get(expectedReference)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return cleanupTargetRead{}, false, nil
+		}
+		return cleanupTargetRead{}, false, normalizeAdmissionError(ctx, err)
+	}
+	var target firestoreIngestCleanupTarget
+	if document == nil || !document.Exists() || document.Ref == nil ||
+		document.ReadTime.IsZero() || document.Ref.Path != expectedReference.Path ||
+		path != cleanupTargetDocumentPath(expectedTenantID, expectedCleanupID) ||
+		validateCleanupTargetDocumentShape(document.Data()) != nil ||
+		document.DataTo(&target) != nil ||
+		validateCleanupTargetDocumentContext(
+			target,
+			document.Ref.ID,
+			expectedTenantID,
+			expectedReceiptID,
+			expectedCleanupID,
+		) != nil {
+		return cleanupTargetRead{}, false, ingest.ErrCleanupTargetConflict
+	}
+	return cleanupTargetRead{Target: target, ReadTime: document.ReadTime.UTC()}, true, nil
+}
+
 func cleanupTargetDocumentPath(tenantID, cleanupID string) string {
 	return "tenants/" + tenantID + "/ingestCleanupTargets/" + cleanupID
+}
+
+func validateCleanupTargetDocumentContext(
+	target firestoreIngestCleanupTarget,
+	snapshotDocumentID string,
+	expectedTenantID string,
+	expectedReceiptID string,
+	expectedCleanupID string,
+) error {
+	if snapshotDocumentID != expectedCleanupID || target.TenantID != expectedTenantID ||
+		target.ReceiptID != expectedReceiptID || target.CleanupID != expectedCleanupID {
+		return ingest.ErrCleanupTargetConflict
+	}
+	if _, err := target.toDomain(); err != nil {
+		return ingest.ErrCleanupTargetConflict
+	}
+	return nil
+}
+
+func validateCleanupTargetDocumentShape(data map[string]any) error {
+	for _, field := range []string{
+		"schema_version", "cleanup_id", "tenant_id", "receipt_id", "reservation_key",
+		"attempt_id", "mode", "cleanup_origin_status", "cleanup_policy_version",
+		"worker_version", "status", "decision", "classification", "reason_code",
+		"retention_phase", "validator_version", "target_hash",
+	} {
+		value, exists := data[field]
+		if !exists {
+			return ingest.ErrCleanupTargetConflict
+		}
+		if _, valid := value.(string); !valid {
+			return ingest.ErrCleanupTargetConflict
+		}
+	}
+	for _, field := range []string{
+		"cleanup_transitioned_at", "cleanup_quiescence_until", "lease_acquired_at",
+		"lease_heartbeat_at", "lease_expires_at", "classified_at", "created_at", "updated_at",
+	} {
+		value, exists := data[field]
+		if !exists {
+			return ingest.ErrCleanupTargetConflict
+		}
+		if _, valid := value.(time.Time); !valid {
+			return ingest.ErrCleanupTargetConflict
+		}
+	}
+	for _, field := range []string{"receipt_revision", "fencing_token"} {
+		value, exists := data[field]
+		if !exists {
+			return ingest.ErrCleanupTargetConflict
+		}
+		if _, valid := value.(int64); !valid {
+			return ingest.ErrCleanupTargetConflict
+		}
+	}
+	for _, field := range []string{"manifest_inventory", "raw_inventory"} {
+		value, exists := data[field]
+		if !exists || validateCleanupTargetInventoryShape(value) != nil {
+			return ingest.ErrCleanupTargetConflict
+		}
+	}
+	for field, value := range data {
+		switch field {
+		case "schema_version", "cleanup_id", "tenant_id", "receipt_id", "reservation_key",
+			"attempt_id", "mode", "cleanup_origin_status", "cleanup_policy_version",
+			"cleanup_transitioned_at", "cleanup_quiescence_until", "receipt_revision",
+			"fencing_token", "lease_acquired_at", "lease_heartbeat_at", "lease_expires_at",
+			"worker_version", "status", "decision", "classification", "reason_code",
+			"retention_phase", "validator_version", "classified_at", "manifest_inventory",
+			"raw_inventory", "created_at", "updated_at", "target_hash":
+			continue
+		case "raw", "manifest":
+			if validateCleanupTargetLineageShape(value) != nil {
+				return ingest.ErrCleanupTargetConflict
+			}
+		default:
+			return ingest.ErrCleanupTargetConflict
+		}
+	}
+	return nil
+}
+
+func validateCleanupTargetInventoryShape(value any) error {
+	data, valid := value.(map[string]any)
+	if !valid || len(data) != 5 {
+		return ingest.ErrCleanupTargetConflict
+	}
+	for _, field := range []string{"performed", "truncated"} {
+		if _, valid := data[field].(bool); !valid {
+			return ingest.ErrCleanupTargetConflict
+		}
+	}
+	for _, field := range []string{"non_soft_deleted_count", "soft_deleted_count"} {
+		if _, valid := data[field].(int64); !valid {
+			return ingest.ErrCleanupTargetConflict
+		}
+	}
+	if _, valid := data["coverage"].(string); !valid {
+		return ingest.ErrCleanupTargetConflict
+	}
+	return nil
+}
+
+func validateCleanupTargetLineageShape(value any) error {
+	data, valid := value.(map[string]any)
+	if !valid || len(data) != 6 {
+		return ingest.ErrCleanupTargetConflict
+	}
+	for _, field := range []string{"path", "sha256"} {
+		if _, valid := data[field].(string); !valid {
+			return ingest.ErrCleanupTargetConflict
+		}
+	}
+	for _, field := range []string{"crc32c", "size", "generation", "metageneration"} {
+		if _, valid := data[field].(int64); !valid {
+			return ingest.ErrCleanupTargetConflict
+		}
+	}
+	return nil
 }
 
 func validateCleanupStartedAttempt(

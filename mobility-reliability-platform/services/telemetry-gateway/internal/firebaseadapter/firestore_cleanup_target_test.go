@@ -35,20 +35,20 @@ func TestFirestoreCleanupTargetCreatesValidImmutableTarget(t *testing.T) {
 	if target.TargetHash != wantHash || !reflect.DeepEqual(target.Command, fixture.command) {
 		t.Fatalf("created target = %#v, want command hash %s", target, wantHash)
 	}
-	if len(fixture.transaction.creates) != 1 || len(fixture.transaction.updates) != 0 {
+	if len(fixture.transaction.creates) != 2 || len(fixture.transaction.updates) != 0 {
 		t.Fatalf(
-			"transaction creates/updates = %d/%d, want 1/0",
+			"transaction creates/updates = %d/%d, want 2/0",
 			len(fixture.transaction.creates),
 			len(fixture.transaction.updates),
 		)
 	}
-	created := fixture.transaction.creates[0]
-	if created.path != fixture.targetPath {
-		t.Fatalf("created path = %q, want %q", created.path, fixture.targetPath)
+	createdTarget := fixture.transaction.creates[0]
+	if createdTarget.path != fixture.targetPath {
+		t.Fatalf("created target path = %q, want %q", createdTarget.path, fixture.targetPath)
 	}
-	persisted, ok := created.value.(firestoreIngestCleanupTarget)
+	persisted, ok := createdTarget.value.(firestoreIngestCleanupTarget)
 	if !ok {
-		t.Fatalf("created value type = %T, want firestoreIngestCleanupTarget", created.value)
+		t.Fatalf("created target type = %T, want firestoreIngestCleanupTarget", createdTarget.value)
 	}
 	roundTripped, err := persisted.toDomain()
 	if err != nil {
@@ -56,6 +56,25 @@ func TestFirestoreCleanupTargetCreatesValidImmutableTarget(t *testing.T) {
 	}
 	if roundTripped.TargetHash != wantHash || !reflect.DeepEqual(roundTripped.Command, fixture.command) {
 		t.Fatalf("persisted target round trip = %#v", roundTripped)
+	}
+	createdLink := fixture.transaction.creates[1]
+	if createdLink.path != fixture.linkPath {
+		t.Fatalf("created link path = %q, want %q", createdLink.path, fixture.linkPath)
+	}
+	persistedLink, ok := createdLink.value.(firestoreReceiptPurgeLink)
+	if !ok {
+		t.Fatalf("created link type = %T, want firestoreReceiptPurgeLink", createdLink.value)
+	}
+	domainLink, err := persistedLink.toDomain(
+		fixture.linkID(t),
+		fixture.command.TenantID,
+		fixture.command.ReceiptID,
+	)
+	if err != nil || ingest.ValidateReceiptPurgeInverseLinkPair(
+		domainLink,
+		cleanupTargetPurgeChildIdentity(fixture.command),
+	) != nil {
+		t.Fatalf("persisted inverse link = %#v, %v", persistedLink, err)
 	}
 }
 
@@ -95,6 +114,7 @@ func TestFirestoreCleanupTargetConflictingTargetWritesNothing(t *testing.T) {
 		Target:   newFirestoreCleanupTarget(conflicting, conflictingHash),
 		ReadTime: fixture.observedAt,
 	}
+	fixture.seedLinkForCommand(t, conflicting)
 
 	target, createStatus, err := fixture.store.createCleanupDryRunTarget(
 		context.Background(),
@@ -108,6 +128,70 @@ func TestFirestoreCleanupTargetConflictingTargetWritesNothing(t *testing.T) {
 	}
 	if target != (ingest.CleanupTarget{}) || createStatus != "" {
 		t.Fatalf("conflicting result = %#v, %q, want zero", target, createStatus)
+	}
+	fixture.assertNoWrites(t)
+}
+
+func TestFirestoreCleanupTargetRejectsPartialInverseLinkPairs(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		seed func(*cleanupTargetAdapterFixture, *testing.T)
+	}{
+		{
+			name: "target only",
+			seed: func(fixture *cleanupTargetAdapterFixture, t *testing.T) {
+				fixture.seedTargetForCommand(t, fixture.command)
+			},
+		},
+		{
+			name: "link only",
+			seed: func(fixture *cleanupTargetAdapterFixture, t *testing.T) {
+				fixture.seedLinkForCommand(t, fixture.command)
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newCleanupTargetAdapterFixture(t)
+			test.seed(fixture, t)
+
+			target, status, err := fixture.store.createCleanupDryRunTarget(
+				context.Background(),
+				ingest.CleanupTargetAuthorizationGrant{},
+				fixture.command,
+				fixture.observedAt,
+				validateCleanupTargetAdapterSnapshot,
+			)
+			if !errors.Is(err, ingest.ErrCleanupTargetConflict) ||
+				target != (ingest.CleanupTarget{}) || status != "" {
+				t.Fatalf("partial pair result = %#v, %q, %v", target, status, err)
+			}
+			fixture.assertNoWrites(t)
+		})
+	}
+}
+
+func TestFirestoreCleanupTargetRejectsInverseLinkIdentityDrift(t *testing.T) {
+	fixture := newCleanupTargetAdapterFixture(t)
+	fixture.seedTargetForCommand(t, fixture.command)
+	link, err := ingest.BuildReceiptPurgeInverseLink(cleanupTargetPurgeChildIdentity(fixture.command))
+	if err != nil {
+		t.Fatalf("BuildReceiptPurgeInverseLink() = %v", err)
+	}
+	link.CreatedAt = link.CreatedAt.Add(time.Nanosecond)
+	fixture.transaction.links[fixture.linkPath] = receiptPurgeLinkRead{
+		Link: link, ReadTime: fixture.observedAt,
+	}
+
+	target, status, createErr := fixture.store.createCleanupDryRunTarget(
+		context.Background(),
+		ingest.CleanupTargetAuthorizationGrant{},
+		fixture.command,
+		fixture.observedAt,
+		validateCleanupTargetAdapterSnapshot,
+	)
+	if !errors.Is(createErr, ingest.ErrCleanupTargetConflict) ||
+		target != (ingest.CleanupTarget{}) || status != "" {
+		t.Fatalf("drifted link result = %#v, %q, %v", target, status, createErr)
 	}
 	fixture.assertNoWrites(t)
 }
@@ -286,12 +370,79 @@ func TestFirestoreCleanupTargetPersistenceHashRoundTrip(t *testing.T) {
 	}
 }
 
+func TestValidateCleanupTargetDocumentContextRejectsSnapshotDrift(t *testing.T) {
+	fixture := newCleanupTargetAdapterFixture(t)
+	targetHash, err := ingest.CleanupTargetHash(fixture.command)
+	if err != nil {
+		t.Fatalf("CleanupTargetHash() = %v", err)
+	}
+	valid := newFirestoreCleanupTarget(fixture.command, targetHash)
+	if err := validateCleanupTargetDocumentContext(
+		valid,
+		fixture.command.CleanupID,
+		fixture.command.TenantID,
+		fixture.command.ReceiptID,
+		fixture.command.CleanupID,
+	); err != nil {
+		t.Fatalf("valid cleanup target context = %v", err)
+	}
+	for _, test := range []struct {
+		name       string
+		documentID string
+		tenantID   string
+		receiptID  string
+		cleanupID  string
+		mutate     func(*firestoreIngestCleanupTarget)
+	}{
+		{
+			name: "snapshot document", documentID: fixture.command.ReceiptID,
+			tenantID: fixture.command.TenantID, receiptID: fixture.command.ReceiptID,
+			cleanupID: fixture.command.CleanupID,
+		},
+		{
+			name: "expected tenant", documentID: fixture.command.CleanupID,
+			tenantID: fixture.command.ReceiptID, receiptID: fixture.command.ReceiptID,
+			cleanupID: fixture.command.CleanupID,
+		},
+		{
+			name: "expected receipt", documentID: fixture.command.CleanupID,
+			tenantID: fixture.command.TenantID, receiptID: fixture.command.TenantID,
+			cleanupID: fixture.command.CleanupID,
+		},
+		{
+			name: "body cleanup ID", documentID: fixture.command.CleanupID,
+			tenantID: fixture.command.TenantID, receiptID: fixture.command.ReceiptID,
+			cleanupID: fixture.command.CleanupID,
+			mutate: func(target *firestoreIngestCleanupTarget) {
+				target.CleanupID = fixture.command.ReceiptID
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := valid
+			if test.mutate != nil {
+				test.mutate(&candidate)
+			}
+			if err := validateCleanupTargetDocumentContext(
+				candidate,
+				test.documentID,
+				test.tenantID,
+				test.receiptID,
+				test.cleanupID,
+			); !errors.Is(err, ingest.ErrCleanupTargetConflict) {
+				t.Fatalf("cleanup target context = %v", err)
+			}
+		})
+	}
+}
+
 type cleanupTargetAdapterFixture struct {
 	transaction *fakeCleanupTargetTransaction
 	store       *FirestoreAdmissionStore
 	command     ingest.CleanupTargetCommand
 	attemptPath string
 	targetPath  string
+	linkPath    string
 	observedAt  time.Time
 }
 
@@ -321,6 +472,7 @@ func newCleanupTargetAdapterFixture(t *testing.T) *cleanupTargetAdapterFixture {
 		receipts: map[string]firestoreIngestReceipt{admissionReceiptPath(): receipt},
 		attempts: map[string]firestoreRecoveryAttempt{attemptPath: attempt},
 		targets:  make(map[string]cleanupTargetRead),
+		links:    make(map[string]receiptPurgeLinkRead),
 	}
 	stored := admissionStoredReceiptData(admissionTestReservation(receipt.CreatedAt))
 	raw := artifactLineageFromStoredData(stored.Artifacts.Object)
@@ -353,6 +505,11 @@ func newCleanupTargetAdapterFixture(t *testing.T) *cleanupTargetAdapterFixture {
 		t.Fatalf("cleanup target fixture command = %v", err)
 	}
 	targetPath := cleanupTargetDocumentPath(command.TenantID, command.CleanupID)
+	link, err := ingest.BuildReceiptPurgeInverseLink(cleanupTargetPurgeChildIdentity(command))
+	if err != nil {
+		t.Fatalf("BuildReceiptPurgeInverseLink() = %v", err)
+	}
+	linkPath := receiptPurgeLinkDocumentPath(command.TenantID, command.ReceiptID, link.LinkID)
 	return &cleanupTargetAdapterFixture{
 		transaction: transaction,
 		store: &FirestoreAdmissionStore{
@@ -363,19 +520,52 @@ func newCleanupTargetAdapterFixture(t *testing.T) *cleanupTargetAdapterFixture {
 				return operation(ctx, transaction)
 			},
 		},
-		command: command, attemptPath: attemptPath, targetPath: targetPath, observedAt: observedAt,
+		command: command, attemptPath: attemptPath, targetPath: targetPath,
+		linkPath: linkPath, observedAt: observedAt,
 	}
 }
 
 func (fixture *cleanupTargetAdapterFixture) seedExactTarget(t *testing.T) {
 	t.Helper()
-	targetHash, err := ingest.CleanupTargetHash(fixture.command)
+	fixture.seedTargetForCommand(t, fixture.command)
+	fixture.seedLinkForCommand(t, fixture.command)
+}
+
+func (fixture *cleanupTargetAdapterFixture) seedTargetForCommand(
+	t *testing.T,
+	command ingest.CleanupTargetCommand,
+) {
+	t.Helper()
+	targetHash, err := ingest.CleanupTargetHash(command)
 	if err != nil {
 		t.Fatalf("CleanupTargetHash() = %v", err)
 	}
 	fixture.transaction.targets[fixture.targetPath] = cleanupTargetRead{
-		Target: newFirestoreCleanupTarget(fixture.command, targetHash), ReadTime: fixture.observedAt,
+		Target: newFirestoreCleanupTarget(command, targetHash), ReadTime: fixture.observedAt,
 	}
+}
+
+func (fixture *cleanupTargetAdapterFixture) seedLinkForCommand(
+	t *testing.T,
+	command ingest.CleanupTargetCommand,
+) {
+	t.Helper()
+	link, err := ingest.BuildReceiptPurgeInverseLink(cleanupTargetPurgeChildIdentity(command))
+	if err != nil {
+		t.Fatalf("BuildReceiptPurgeInverseLink() = %v", err)
+	}
+	fixture.transaction.links[fixture.linkPath] = receiptPurgeLinkRead{
+		Link: link, ReadTime: fixture.observedAt,
+	}
+}
+
+func (fixture *cleanupTargetAdapterFixture) linkID(t *testing.T) string {
+	t.Helper()
+	link, err := ingest.BuildReceiptPurgeInverseLink(cleanupTargetPurgeChildIdentity(fixture.command))
+	if err != nil {
+		t.Fatalf("BuildReceiptPurgeInverseLink() = %v", err)
+	}
+	return link.LinkID
 }
 
 func (fixture *cleanupTargetAdapterFixture) assertNoWrites(t *testing.T) {
@@ -427,6 +617,7 @@ type fakeCleanupTargetTransaction struct {
 	receipts     map[string]firestoreIngestReceipt
 	attempts     map[string]firestoreRecoveryAttempt
 	targets      map[string]cleanupTargetRead
+	links        map[string]receiptPurgeLinkRead
 	creates      []cleanupTargetAdapterCreate
 	updates      []cleanupTargetAdapterUpdate
 	createErr    error
@@ -485,6 +676,27 @@ func (transaction *fakeCleanupTargetTransaction) ReadCleanupTarget(
 	return value, exists, nil
 }
 
+func (transaction *fakeCleanupTargetTransaction) ReadCleanupTargetForCreate(
+	_ context.Context,
+	path string,
+	_ string,
+	_ string,
+	_ string,
+) (cleanupTargetRead, bool, error) {
+	value, exists := transaction.targets[path]
+	return value, exists, nil
+}
+
+func (transaction *fakeCleanupTargetTransaction) ReadReceiptPurgeLink(
+	_ context.Context,
+	path string,
+	_ string,
+	_ string,
+) (receiptPurgeLinkRead, bool, error) {
+	value, exists := transaction.links[path]
+	return value, exists, nil
+}
+
 func (transaction *fakeCleanupTargetTransaction) Create(
 	_ context.Context,
 	path string,
@@ -496,6 +708,12 @@ func (transaction *fakeCleanupTargetTransaction) Create(
 	}
 	if target, ok := value.(firestoreIngestCleanupTarget); ok {
 		transaction.targets[path] = cleanupTargetRead{Target: target, ReadTime: transaction.readTime}
+	}
+	if link, ok := value.(firestoreReceiptPurgeLink); ok {
+		domain, err := link.toDomain(link.LinkID, link.TenantID, link.ReceiptID)
+		if err == nil {
+			transaction.links[path] = receiptPurgeLinkRead{Link: domain, ReadTime: transaction.readTime}
+		}
 	}
 	return nil
 }

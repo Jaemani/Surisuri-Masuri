@@ -1229,19 +1229,22 @@ func clearAdmissionIngestCollections(t *testing.T, client *firestore.Client) {
 		t.Fatalf("list ingestReceipts for nested cleanup: %v", err)
 	}
 	for _, receipt := range receipts {
-		attempts, attemptErr := receipt.Ref.Collection("recoveryAttempts").Documents(context.Background()).GetAll()
-		if attemptErr != nil {
-			t.Fatalf("list recovery attempts for cleanup: %v", attemptErr)
-		}
-		if len(attempts) == 0 {
-			continue
-		}
-		batch := client.Batch()
-		for _, attempt := range attempts {
-			batch.Delete(attempt.Ref)
-		}
-		if _, commitErr := batch.Commit(context.Background()); commitErr != nil {
-			t.Fatalf("clear recovery attempts: %v", commitErr)
+		for _, nestedCollection := range []string{"recoveryAttempts", "purgeLinks"} {
+			documents, listErr := receipt.Ref.Collection(nestedCollection).
+				Documents(context.Background()).GetAll()
+			if listErr != nil {
+				t.Fatalf("list %s for cleanup: %v", nestedCollection, listErr)
+			}
+			if len(documents) == 0 {
+				continue
+			}
+			batch := client.Batch()
+			for _, document := range documents {
+				batch.Delete(document.Ref)
+			}
+			if _, commitErr := batch.Commit(context.Background()); commitErr != nil {
+				t.Fatalf("clear %s: %v", nestedCollection, commitErr)
+			}
 		}
 	}
 	for _, collection := range []string{
