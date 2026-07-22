@@ -16,11 +16,29 @@ func decodeCleanupExecutionLedger(
 	attempt firestoreRecoveryAttempt,
 	observedAt time.Time,
 ) (ingest.CleanupExecutionLedger, bool, error) {
+	ledger, present, err := projectCleanupExecutionLedger(plan.Target, attempt)
+	if err != nil || !present {
+		return ledger, present, err
+	}
+	if err := ingest.ValidateCleanupExecutionLedger(plan, ledger, observedAt.UTC()); err != nil {
+		return ingest.CleanupExecutionLedger{}, true, ingest.ErrInvalidCleanupExecutionLedger
+	}
+	return ledger, true, nil
+}
+
+// projectCleanupExecutionLedger reconstructs only the stored bounded ledger.
+// Semantic validation remains the caller's responsibility so terminal
+// response-loss correlation can classify malformed completed state as
+// unverifiable instead of silently treating it as live authority.
+func projectCleanupExecutionLedger(
+	target ingest.CleanupTarget,
+	attempt firestoreRecoveryAttempt,
+) (ingest.CleanupExecutionLedger, bool, error) {
 	if !hasCleanupExecutionLedgerResidue(attempt) {
 		return ingest.CleanupExecutionLedger{}, false, nil
 	}
-	command := plan.Target.Command
-	if observedAt.IsZero() || attempt.CleanupRawTargeted == nil ||
+	command := target.Command
+	if attempt.CleanupRawTargeted == nil ||
 		attempt.CleanupManifestTargeted == nil ||
 		attempt.AttemptID != command.AttemptID || attempt.TenantID != command.TenantID ||
 		attempt.ReceiptID != command.ReceiptID || attempt.OwnerKind != ingest.LeaseOwnerCleanup ||
@@ -62,9 +80,6 @@ func decodeCleanupExecutionLedger(
 		ErrorClass:   attempt.CleanupErrorClass,
 		EvidenceHash: attempt.CleanupEvidenceHash,
 		CompletedAt:  attempt.CompletedAt.UTC(),
-	}
-	if err := ingest.ValidateCleanupExecutionLedger(plan, ledger, observedAt.UTC()); err != nil {
-		return ingest.CleanupExecutionLedger{}, true, ingest.ErrInvalidCleanupExecutionLedger
 	}
 	return ledger, true, nil
 }

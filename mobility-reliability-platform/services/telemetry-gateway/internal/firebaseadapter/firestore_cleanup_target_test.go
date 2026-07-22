@@ -422,14 +422,17 @@ func validateCleanupTargetAdapterSnapshot(
 }
 
 type fakeCleanupTargetTransaction struct {
-	readTime  time.Time
-	indexes   map[string]firestoreIngestIndex
-	receipts  map[string]firestoreIngestReceipt
-	attempts  map[string]firestoreRecoveryAttempt
-	targets   map[string]cleanupTargetRead
-	creates   []cleanupTargetAdapterCreate
-	updates   []cleanupTargetAdapterUpdate
-	createErr error
+	readTime     time.Time
+	indexes      map[string]firestoreIngestIndex
+	receipts     map[string]firestoreIngestReceipt
+	attempts     map[string]firestoreRecoveryAttempt
+	targets      map[string]cleanupTargetRead
+	creates      []cleanupTargetAdapterCreate
+	updates      []cleanupTargetAdapterUpdate
+	createErr    error
+	updateErr    error
+	failUpdateAt int
+	updateCalls  int
 }
 
 type cleanupTargetAdapterCreate struct {
@@ -502,8 +505,13 @@ func (transaction *fakeCleanupTargetTransaction) Update(
 	path string,
 	updates []firestore.Update,
 ) error {
+	transaction.updateCalls++
 	transaction.updates = append(transaction.updates, cleanupTargetAdapterUpdate{
 		path: path, updates: append([]firestore.Update(nil), updates...),
 	})
+	if transaction.updateErr != nil &&
+		(transaction.failUpdateAt == 0 || transaction.updateCalls == transaction.failUpdateAt) {
+		return transaction.updateErr
+	}
 	return nil
 }

@@ -82,6 +82,9 @@ const (
 	RecoveryAttemptOutcomeRejected      RecoveryAttemptOutcome = "rejected"
 	RecoveryAttemptOutcomeHold          RecoveryAttemptOutcome = "recovery_hold"
 	RecoveryAttemptOutcomeLeaseReleased RecoveryAttemptOutcome = "lease_released"
+	// RecoveryAttemptOutcomeExpired is cleanup-only. Forward recovery action
+	// validators must continue to require their exact action/outcome mapping.
+	RecoveryAttemptOutcomeExpired RecoveryAttemptOutcome = "expired"
 )
 
 func ValidRecoveryAttemptOutcome(outcome RecoveryAttemptOutcome) bool {

@@ -15,6 +15,7 @@ type cleanupExecutionLedgerState struct {
 	attempt     firestoreRecoveryAttempt
 	plan        ingest.CleanupExecutionLedgerPlan
 	effectiveAt time.Time
+	linked      linkedReceiptRead
 }
 
 func (s *FirestoreAdmissionStore) InitializeCleanupExecutionLedger(
@@ -272,7 +273,7 @@ func loadCurrentCleanupExecutionLedgerState(
 	}
 	return cleanupExecutionLedgerState{
 		attemptPath: attemptPath, attempt: attemptResult.Attempt,
-		plan: plan, effectiveAt: effectiveAt,
+		plan: plan, effectiveAt: effectiveAt, linked: linked,
 	}, nil
 }
 
