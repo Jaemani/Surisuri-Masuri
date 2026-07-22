@@ -256,6 +256,10 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      match /recoveryWorkerState/{document=**} {
+        allow read, write: if false;
+      }
+
       match /deadLetters/{document=**} {
         allow read, write: if false;
       }

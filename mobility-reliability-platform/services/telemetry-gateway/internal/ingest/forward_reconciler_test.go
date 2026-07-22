@@ -34,6 +34,12 @@ func TestForwardRecoveryReconcilerCompletesTwoPassWithoutManifestWrite(t *testin
 		h.authorizer.actionInputs[0].PriorResult == nil {
 		t.Fatalf("terminal input = %#v", h.authorizer.actionInputs[0])
 	}
+	assertForwardArtifactProvenance(
+		t,
+		result,
+		ArtifactClassificationValidComplete,
+		ArtifactReasonManifestAndReferencedRawValid,
+	)
 	h.classifier.assertDone(t)
 }
 
@@ -69,6 +75,12 @@ func TestForwardRecoveryReconcilerRepairsRawOnlyThenPostConfirmsStored(t *testin
 		*input.WrittenManifest != written {
 		t.Fatalf("post-manifest input = %#v", input)
 	}
+	assertForwardArtifactProvenance(
+		t,
+		result,
+		ArtifactClassificationValidComplete,
+		ArtifactReasonManifestAndReferencedRawValid,
+	)
 	h.classifier.assertDone(t)
 }
 
@@ -96,10 +108,39 @@ func TestForwardRecoveryReconcilerUsesAuthorizationDispositionWithoutArtifactIO(
 			if result.DecisionDomain != ForwardRecoveryDecisionCurrentAuthorization ||
 				result.AuthorizationDisposition != test.disposition || result.Action != test.wantAction ||
 				result.Outcome != test.wantOutcome || h.classifier.calls != 0 || h.manifests.calls != 0 ||
+				result.Classification != "" || result.ReasonCode != "" ||
 				h.control.actionCalls != 0 || h.control.dispositionCalls != 1 {
 				t.Fatalf("result/side effects = %#v classifier=%d writer=%d action=%d disposition=%d", result, h.classifier.calls, h.manifests.calls, h.control.actionCalls, h.control.dispositionCalls)
 			}
 		})
+	}
+}
+
+func TestForwardRecoveryReconcilerCorrelatedDispositionHasNoArtifactProvenance(t *testing.T) {
+	h := newForwardReconcilerHarness(t)
+	h.authorizer.authorizeErr = ErrForwardRecoveryUnauthorized
+	h.authorizer.disposition = ForwardRecoveryAuthorizationDenied
+	h.control.dispositionErr = ErrAdmissionUnavailable
+	h.control.outcome = RecoveryActionOutcome{
+		CommitStatus:    RecoveryActionCommitted,
+		Outcome:         RecoveryAttemptOutcomeHold,
+		ReceiptRevision: 2,
+		ReceiptState:    ReceiptRecoveryHold,
+		CompletedAt:     h.now.Add(time.Second),
+	}
+
+	result, err := h.reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+	if result.Status != ForwardRecoveryExecutionCorrelated ||
+		result.DecisionDomain != ForwardRecoveryDecisionCurrentAuthorization ||
+		result.AuthorizationDisposition != ForwardRecoveryAuthorizationDenied ||
+		result.Classification != "" || result.ReasonCode != "" ||
+		result.Action != ForwardRecoveryActionMarkHold || result.Outcome != RecoveryAttemptOutcomeHold ||
+		h.classifier.calls != 0 || h.control.actionCalls != 0 || h.control.dispositionCalls != 1 ||
+		h.control.outcomeCalls != 1 {
+		t.Fatalf("result/side effects = %#v classifier=%d action=%d disposition=%d outcome=%d", result, h.classifier.calls, h.control.actionCalls, h.control.dispositionCalls, h.control.outcomeCalls)
 	}
 }
 
@@ -169,6 +210,12 @@ func TestForwardRecoveryReconcilerCorrelatesCommittedOutcomeAfterResponseLoss(t 
 		h.control.lastOutcomeQuery.ExpectedDecisionDomain != ForwardRecoveryDecisionArtifactReconciliation {
 		t.Fatalf("outcome query = %#v", h.control.lastOutcomeQuery)
 	}
+	assertForwardArtifactProvenance(
+		t,
+		result,
+		ArtifactClassificationValidComplete,
+		ArtifactReasonManifestAndReferencedRawValid,
+	)
 }
 
 func TestForwardRecoveryReconcilerPreservesCallerCancellation(t *testing.T) {
@@ -210,6 +257,12 @@ func TestForwardRecoveryReconcilerCorrelatesCommittedOutcomeAfterCommitCancelsPa
 		h.control.outcomeCalls != 1 || h.control.failureCalls != 0 {
 		t.Fatalf("post-commit cancellation result = %#v ctx=%v action=%d outcome=%d failure=%d", result, ctx.Err(), h.control.actionCalls, h.control.outcomeCalls, h.control.failureCalls)
 	}
+	assertForwardArtifactProvenance(
+		t,
+		result,
+		ArtifactClassificationValidComplete,
+		ArtifactReasonManifestAndReferencedRawValid,
+	)
 }
 
 func TestForwardRecoveryReconcilerRechecksExactOldOutcomeWhenFailureBarrierDenied(t *testing.T) {
@@ -232,6 +285,12 @@ func TestForwardRecoveryReconcilerRechecksExactOldOutcomeWhenFailureBarrierDenie
 		!reflect.DeepEqual(h.control.outcomeQueries[0], h.control.outcomeQueries[1]) {
 		t.Fatalf("late correlation result = %#v action=%d outcomes=%#v failure=%d/%d", result, h.control.actionCalls, h.control.outcomeQueries, h.authorizer.failureAuthorizationCalls, h.control.failureCalls)
 	}
+	assertForwardArtifactProvenance(
+		t,
+		result,
+		ArtifactClassificationValidComplete,
+		ArtifactReasonManifestAndReferencedRawValid,
+	)
 }
 
 func TestForwardRecoveryReconcilerStopsAfterSuccessfulNotCommittedBarrier(t *testing.T) {
@@ -315,6 +374,20 @@ func TestForwardRecoveryExecutionResultHasNoPrivateDataSurface(t *testing.T) {
 		}
 	}
 	inspect(reflect.TypeOf(ForwardRecoveryExecutionResult{}), "ForwardRecoveryExecutionResult.")
+}
+
+func assertForwardArtifactProvenance(
+	t *testing.T,
+	result ForwardRecoveryExecutionResult,
+	classification ArtifactClassification,
+	reason ArtifactReasonCode,
+) {
+	t.Helper()
+	if result.DecisionDomain != ForwardRecoveryDecisionArtifactReconciliation ||
+		result.Classification != classification || result.ReasonCode != reason ||
+		result.AuthorizationDisposition != "" {
+		t.Fatalf("artifact provenance = %#v", result)
+	}
 }
 
 type forwardReconcilerHarness struct {

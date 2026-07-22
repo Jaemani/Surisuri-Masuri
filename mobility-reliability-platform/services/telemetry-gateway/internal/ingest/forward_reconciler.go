@@ -76,6 +76,8 @@ const (
 type ForwardRecoveryExecutionResult struct {
 	Status                   ForwardRecoveryExecutionStatus
 	DecisionDomain           ForwardRecoveryDecisionDomain
+	Classification           ArtifactClassification
+	ReasonCode               ArtifactReasonCode
 	Action                   ForwardRecoveryAction
 	AuthorizationDisposition ForwardRecoveryAuthorizationDisposition
 	Outcome                  RecoveryAttemptOutcome
@@ -504,6 +506,8 @@ func (run *forwardRecoveryRun) commitPlannedAction(
 	if commitErr == nil {
 		run.result.Status = ForwardRecoveryExecutionCommitted
 		run.result.DecisionDomain = ForwardRecoveryDecisionArtifactReconciliation
+		run.result.Classification = command.Plan.Classification
+		run.result.ReasonCode = command.Plan.ReasonCode
 		run.result.Action = command.Plan.Action
 		run.result.Outcome = outcomeForForwardRecoveryAction(command.Plan.Action)
 		run.result.ReceiptState = receipt.State
@@ -514,7 +518,15 @@ func (run *forwardRecoveryRun) commitPlannedAction(
 	if err != nil {
 		return false, run.result, ErrForwardRecoveryCommitUnverified
 	}
-	return run.correlateCommit(ctx, query, command.Plan.Action, "", commitErr)
+	return run.correlateCommit(
+		ctx,
+		query,
+		command.Plan.Action,
+		"",
+		command.Plan.Classification,
+		command.Plan.ReasonCode,
+		commitErr,
+	)
 }
 
 func (run *forwardRecoveryRun) handleExecutionError(
@@ -584,7 +596,7 @@ func (run *forwardRecoveryRun) handleExecutionError(
 	if queryErr != nil {
 		return false, run.result, ErrForwardRecoveryCommitUnverified
 	}
-	return run.correlateCommit(ctx, query, action, command.Disposition, commitErr)
+	return run.correlateCommit(ctx, query, action, command.Disposition, "", "", commitErr)
 }
 
 func (run *forwardRecoveryRun) correlateCommit(
@@ -592,6 +604,8 @@ func (run *forwardRecoveryRun) correlateCommit(
 	query ForwardRecoveryOutcomeQuery,
 	action ForwardRecoveryAction,
 	disposition ForwardRecoveryAuthorizationDisposition,
+	classification ArtifactClassification,
+	reason ArtifactReasonCode,
 	commitErr error,
 ) (bool, ForwardRecoveryExecutionResult, error) {
 	outcome, err := run.readCommitOutcome(ctx, query)
@@ -600,10 +614,10 @@ func (run *forwardRecoveryRun) correlateCommit(
 	}
 	switch outcome.CommitStatus {
 	case RecoveryActionCommitted:
-		run.applyCorrelatedOutcome(query, action, disposition, outcome)
+		run.applyCorrelatedOutcome(query, action, disposition, classification, reason, outcome)
 		return false, run.result, nil
 	case RecoveryActionNotCommitted:
-		closeErr := run.closeNotCommittedAction(ctx, query, action, disposition)
+		closeErr := run.closeNotCommittedAction(ctx, query, action, disposition, classification, reason)
 		if run.result.Status == ForwardRecoveryExecutionCommitted ||
 			run.result.Status == ForwardRecoveryExecutionCorrelated {
 			return false, run.result, nil
@@ -652,10 +666,14 @@ func (run *forwardRecoveryRun) applyCorrelatedOutcome(
 	query ForwardRecoveryOutcomeQuery,
 	action ForwardRecoveryAction,
 	disposition ForwardRecoveryAuthorizationDisposition,
+	classification ArtifactClassification,
+	reason ArtifactReasonCode,
 	outcome RecoveryActionOutcome,
 ) {
 	run.result.Status = ForwardRecoveryExecutionCorrelated
 	run.result.DecisionDomain = query.ExpectedDecisionDomain
+	run.result.Classification = classification
+	run.result.ReasonCode = reason
 	run.result.AuthorizationDisposition = disposition
 	run.result.Action = action
 	run.result.Outcome = outcome.Outcome
@@ -674,6 +692,8 @@ func (run *forwardRecoveryRun) closeNotCommittedAction(
 	query ForwardRecoveryOutcomeQuery,
 	action ForwardRecoveryAction,
 	disposition ForwardRecoveryAuthorizationDisposition,
+	classification ArtifactClassification,
+	reason ArtifactReasonCode,
 ) error {
 	finalizerContext, cancel := run.outcomeContext(ctx)
 	defer cancel()
@@ -695,7 +715,7 @@ func (run *forwardRecoveryRun) closeNotCommittedAction(
 		return errors.Join(ErrForwardRecoveryCommitUnverified, failureErr, lateErr)
 	}
 	if lateOutcome.CommitStatus == RecoveryActionCommitted {
-		run.applyCorrelatedOutcome(query, action, disposition, lateOutcome)
+		run.applyCorrelatedOutcome(query, action, disposition, classification, reason, lateOutcome)
 		return nil
 	}
 	if lateOutcome.CommitStatus != RecoveryActionNotCommitted {
@@ -912,6 +932,8 @@ func (run *forwardRecoveryRun) finalizeAuthorizationDisposition(ctx context.Cont
 		query,
 		action,
 		command.Disposition,
+		"",
+		"",
 		commitErr,
 	)
 	return correlationErr
