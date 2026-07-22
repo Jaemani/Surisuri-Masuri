@@ -93,7 +93,7 @@ func TestCleanupArtifactReadCapabilitySeparatesForwardAndCleanupFences(t *testin
 }
 
 func TestCleanupArtifactClassifierUsesCleanupPurposeForReadOnlyDiscovery(t *testing.T) {
-	now, snapshot, lease, _ := cleanupTargetFixture(t)
+	now, snapshot, lease, _ := cleanupTargetFixtureAt(t, time.Now().UTC())
 	authorizer := mustCleanupAuthorizer(t, &cleanupAuthorizationStoreStub{snapshot: snapshot}, now)
 	request, grant, err := authorizer.AuthorizeArtifactRead(
 		context.Background(), cleanupTargetTenantID, snapshot.Receipt.ReservationKey, lease,
@@ -419,6 +419,15 @@ func cleanupTargetFixture(
 ) (time.Time, CurrentCleanupSnapshot, CleanupLeaseGrant, CleanupAttemptProposal) {
 	t.Helper()
 	now := time.Date(2026, time.July, 22, 12, 0, 0, 0, time.UTC)
+	return cleanupTargetFixtureAt(t, now)
+}
+
+func cleanupTargetFixtureAt(
+	t *testing.T,
+	now time.Time,
+) (time.Time, CurrentCleanupSnapshot, CleanupLeaseGrant, CleanupAttemptProposal) {
+	t.Helper()
+	now = now.UTC()
 	createdAt := now.Add(-30 * time.Minute)
 	transitionedAt := now.Add(-13 * time.Minute)
 	quiescenceUntil := transitionedAt.Add(DefaultCleanupLateWriteGrace)
