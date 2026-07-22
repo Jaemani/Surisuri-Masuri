@@ -279,10 +279,6 @@ func (s *FirestoreAdmissionStore) AuthorizeAndReserve(
 				resultStatus = ingest.ReservationReplayInProgress
 				return nil
 			}
-			leaseExpiresAt := now.Add(leaseProposal.Duration)
-			if leaseExpiresAt.After(storedReceipt.ReservationDeadline) {
-				return ingest.ErrAdmissionUnavailable
-			}
 			if ingest.ValidateRecoveryAttemptProposal(leaseProposal.Attempt) != nil {
 				return ingest.ErrAdmissionUnavailable
 			}
@@ -292,6 +288,39 @@ func (s *FirestoreAdmissionStore) AuthorizeAndReserve(
 			if nextToken <= 1 || nextRevision <= storedReceipt.Revision ||
 				nextAttemptCount <= storedReceipt.RecoveryAttemptCount {
 				return ingest.ErrAdmissionUnavailable
+			}
+			priorAttemptPath, priorAttemptUpdates, attemptEffectiveAt, priorAttemptErr := expiredPriorRecoveryAttemptClosure(
+				runContext,
+				transaction,
+				storedReceipt,
+				now,
+			)
+			if priorAttemptErr != nil {
+				return priorAttemptErr
+			}
+			if attemptEffectiveAt.After(now) {
+				now = attemptEffectiveAt
+				if evaluationErr := authorization.EvaluateSnapshot(
+					principal,
+					scope,
+					authorizationResult.Snapshot,
+					now,
+				); evaluationErr != nil {
+					if errors.Is(evaluationErr, ingest.ErrBatchUnauthorized) {
+						return ingest.ErrBatchUnauthorized
+					}
+					return ingest.ErrAdmissionUnavailable
+				}
+			}
+			leaseExpiresAt := now.Add(leaseProposal.Duration)
+			if !now.Before(storedReceipt.ReservationDeadline) ||
+				leaseExpiresAt.After(storedReceipt.ReservationDeadline) {
+				return ingest.ErrAdmissionUnavailable
+			}
+			if len(priorAttemptUpdates) > 0 {
+				if updateErr := transaction.Update(runContext, priorAttemptPath, priorAttemptUpdates); updateErr != nil {
+					return normalizeAdmissionError(runContext, updateErr)
+				}
 			}
 			if updateErr := transaction.Update(runContext, receiptPath, leaseTakeoverUpdates(
 				leaseProposal.Owner,
@@ -598,16 +627,32 @@ func (s *FirestoreAdmissionStore) ClaimRecoveryLease(
 			resultStatus = ingest.LeaseStatusNotDue
 			return nil
 		}
-		leaseExpiresAt := effectiveAt.Add(duration)
-		if leaseExpiresAt.After(receipt.ReservationDeadline) {
-			return ingest.ErrAdmissionUnavailable
-		}
 		nextToken := receipt.FencingToken + 1
 		nextRevision := receipt.Revision + 1
 		nextAttemptCount := receipt.RecoveryAttemptCount + 1
 		if nextToken <= receipt.FencingToken || nextRevision <= receipt.Revision ||
 			nextAttemptCount <= receipt.RecoveryAttemptCount {
 			return ingest.ErrAdmissionUnavailable
+		}
+		priorAttemptPath, priorAttemptUpdates, attemptEffectiveAt, priorAttemptErr := expiredPriorRecoveryAttemptClosure(
+			runContext,
+			transaction,
+			receipt,
+			effectiveAt,
+		)
+		if priorAttemptErr != nil {
+			return priorAttemptErr
+		}
+		effectiveAt = attemptEffectiveAt
+		leaseExpiresAt := effectiveAt.Add(duration)
+		if !effectiveAt.Before(receipt.ReservationDeadline) ||
+			leaseExpiresAt.After(receipt.ReservationDeadline) {
+			return ingest.ErrAdmissionUnavailable
+		}
+		if len(priorAttemptUpdates) > 0 {
+			if updateErr := transaction.Update(runContext, priorAttemptPath, priorAttemptUpdates); updateErr != nil {
+				return normalizeAdmissionError(runContext, updateErr)
+			}
 		}
 		if updateErr := transaction.Update(runContext, linked.ReceiptPath, leaseTakeoverUpdates(
 			owner,
@@ -1170,35 +1215,37 @@ type firestoreIngestReceipt struct {
 }
 
 type firestoreRecoveryAttempt struct {
-	AttemptID              string                        `firestore:"attempt_id"`
-	TenantID               string                        `firestore:"tenant_id"`
-	ReceiptID              string                        `firestore:"receipt_id"`
-	OwnerKind              ingest.LeaseOwnerKind         `firestore:"owner_kind"`
-	FencingToken           int64                         `firestore:"fencing_token"`
-	WorkerVersion          string                        `firestore:"worker_version"`
-	Status                 ingest.RecoveryAttemptStatus  `firestore:"status"`
-	Phase                  ingest.RecoveryActionPhase    `firestore:"phase,omitempty"`
-	Classification         ingest.ArtifactClassification `firestore:"classification,omitempty"`
-	ReasonCode             ingest.ArtifactReasonCode     `firestore:"reason_code,omitempty"`
-	Action                 ingest.ForwardRecoveryAction  `firestore:"action,omitempty"`
-	Outcome                ingest.RecoveryAttemptOutcome `firestore:"outcome,omitempty"`
-	ActionHash             string                        `firestore:"action_hash,omitempty"`
-	HoldCode               ingest.RecoveryHoldCode       `firestore:"hold_code,omitempty"`
-	ReleaseCode            ingest.LeaseReleaseCode       `firestore:"release_code,omitempty"`
-	RejectionCode          string                        `firestore:"rejection_code,omitempty"`
-	RawSHA256              string                        `firestore:"raw_sha256,omitempty"`
-	RawCRC32C              int64                         `firestore:"raw_crc32c,omitempty"`
-	RawSize                int64                         `firestore:"raw_size,omitempty"`
-	RawGeneration          int64                         `firestore:"raw_generation,omitempty"`
-	RawMetageneration      int64                         `firestore:"raw_metageneration,omitempty"`
-	ManifestSHA256         string                        `firestore:"manifest_sha256,omitempty"`
-	ManifestCRC32C         int64                         `firestore:"manifest_crc32c,omitempty"`
-	ManifestSize           int64                         `firestore:"manifest_size,omitempty"`
-	ManifestGeneration     int64                         `firestore:"manifest_generation,omitempty"`
-	ManifestMetageneration int64                         `firestore:"manifest_metageneration,omitempty"`
-	HoldReviewDueAt        time.Time                     `firestore:"hold_review_due_at,omitempty"`
-	StartedAt              time.Time                     `firestore:"started_at"`
-	CompletedAt            time.Time                     `firestore:"completed_at,omitempty"`
+	AttemptID              string                            `firestore:"attempt_id"`
+	TenantID               string                            `firestore:"tenant_id"`
+	ReceiptID              string                            `firestore:"receipt_id"`
+	OwnerKind              ingest.LeaseOwnerKind             `firestore:"owner_kind"`
+	FencingToken           int64                             `firestore:"fencing_token"`
+	WorkerVersion          string                            `firestore:"worker_version"`
+	Status                 ingest.RecoveryAttemptStatus      `firestore:"status"`
+	Phase                  ingest.RecoveryActionPhase        `firestore:"phase,omitempty"`
+	Classification         ingest.ArtifactClassification     `firestore:"classification,omitempty"`
+	ReasonCode             ingest.ArtifactReasonCode         `firestore:"reason_code,omitempty"`
+	Action                 ingest.ForwardRecoveryAction      `firestore:"action,omitempty"`
+	Outcome                ingest.RecoveryAttemptOutcome     `firestore:"outcome,omitempty"`
+	ActionHash             string                            `firestore:"action_hash,omitempty"`
+	HoldCode               ingest.RecoveryHoldCode           `firestore:"hold_code,omitempty"`
+	ReleaseCode            ingest.LeaseReleaseCode           `firestore:"release_code,omitempty"`
+	RejectionCode          string                            `firestore:"rejection_code,omitempty"`
+	RawSHA256              string                            `firestore:"raw_sha256,omitempty"`
+	RawCRC32C              int64                             `firestore:"raw_crc32c,omitempty"`
+	RawSize                int64                             `firestore:"raw_size,omitempty"`
+	RawGeneration          int64                             `firestore:"raw_generation,omitempty"`
+	RawMetageneration      int64                             `firestore:"raw_metageneration,omitempty"`
+	ManifestSHA256         string                            `firestore:"manifest_sha256,omitempty"`
+	ManifestCRC32C         int64                             `firestore:"manifest_crc32c,omitempty"`
+	ManifestSize           int64                             `firestore:"manifest_size,omitempty"`
+	ManifestGeneration     int64                             `firestore:"manifest_generation,omitempty"`
+	ManifestMetageneration int64                             `firestore:"manifest_metageneration,omitempty"`
+	HoldReviewDueAt        time.Time                         `firestore:"hold_review_due_at,omitempty"`
+	StartedAt              time.Time                         `firestore:"started_at"`
+	CompletedAt            time.Time                         `firestore:"completed_at,omitempty"`
+	FailureCode            ingest.RecoveryAttemptFailureCode `firestore:"failure_code,omitempty"`
+	FailedAt               time.Time                         `firestore:"failed_at,omitempty"`
 }
 
 func newFirestoreRecoveryAttempt(

@@ -1671,6 +1671,8 @@ type fakeAdmissionTransaction struct {
 	authorizationErr      error
 	indexes               map[string]firestoreIngestIndex
 	receipts              map[string]firestoreIngestReceipt
+	attempts              map[string]firestoreRecoveryAttempt
+	attemptReadTime       time.Time
 	calls                 []string
 	creates               []fakeAdmissionCreate
 	updates               []fakeAdmissionUpdate
@@ -1693,6 +1695,7 @@ func newFakeAdmissionTransaction(snapshot authorization.Snapshot) *fakeAdmission
 		readTime: snapshot.Trip.StartedAt.Add(time.Hour).UTC(),
 		indexes:  make(map[string]firestoreIngestIndex),
 		receipts: make(map[string]firestoreIngestReceipt),
+		attempts: make(map[string]firestoreRecoveryAttempt),
 	}
 }
 
@@ -1724,6 +1727,16 @@ func (tx *fakeAdmissionTransaction) ReadReceipt(_ context.Context, path string) 
 		readTime = tx.readTime
 	}
 	return receiptRead{Receipt: value, ReadTime: readTime}, exists, nil
+}
+
+func (tx *fakeAdmissionTransaction) ReadRecoveryAttempt(_ context.Context, path string) (recoveryAttemptRead, bool, error) {
+	tx.calls = append(tx.calls, "attempt:"+path)
+	value, exists := tx.attempts[path]
+	readTime := tx.attemptReadTime
+	if readTime.IsZero() {
+		readTime = tx.readTime
+	}
+	return recoveryAttemptRead{Attempt: value, ReadTime: readTime}, exists, nil
 }
 
 func (tx *fakeAdmissionTransaction) Create(_ context.Context, path string, value any) error {

@@ -268,10 +268,26 @@ func validateStartedRecoveryAttempt(
 	receipt firestoreIngestReceipt,
 	command ingest.ForwardRecoveryActionCommand,
 ) error {
-	if attempt.AttemptID != command.Attempt.ID || attempt.TenantID != command.TenantID ||
-		attempt.ReceiptID != receipt.ReceiptID || attempt.OwnerKind != ingest.LeaseOwnerSweeper ||
-		attempt.FencingToken != command.Fence.Token ||
-		attempt.WorkerVersion != command.Attempt.WorkerVersion ||
+	return validateStartedRecoveryAttemptForOwner(
+		attempt,
+		receipt,
+		command.Attempt,
+		command.Fence,
+		ingest.LeaseOwnerSweeper,
+	)
+}
+
+func validateStartedRecoveryAttemptForOwner(
+	attempt firestoreRecoveryAttempt,
+	receipt firestoreIngestReceipt,
+	expected ingest.RecoveryAttemptProposal,
+	fence ingest.LeaseFence,
+	ownerKind ingest.LeaseOwnerKind,
+) error {
+	if attempt.AttemptID != expected.ID || attempt.TenantID != receipt.TenantID ||
+		attempt.ReceiptID != receipt.ReceiptID || attempt.OwnerKind != ownerKind ||
+		attempt.FencingToken != fence.Token ||
+		attempt.WorkerVersion != expected.WorkerVersion ||
 		attempt.Status != ingest.RecoveryAttemptStarted || attempt.StartedAt.IsZero() ||
 		!attempt.StartedAt.Equal(receipt.LeaseAcquiredAt) ||
 		attempt.Phase != "" || attempt.Classification != "" || attempt.ReasonCode != "" ||
@@ -281,7 +297,8 @@ func validateStartedRecoveryAttempt(
 		attempt.RawGeneration != 0 || attempt.RawMetageneration != 0 ||
 		attempt.ManifestSHA256 != "" || attempt.ManifestCRC32C != 0 || attempt.ManifestSize != 0 ||
 		attempt.ManifestGeneration != 0 || attempt.ManifestMetageneration != 0 ||
-		!attempt.HoldReviewDueAt.IsZero() || !attempt.CompletedAt.IsZero() {
+		!attempt.HoldReviewDueAt.IsZero() || !attempt.CompletedAt.IsZero() ||
+		attempt.FailureCode != "" || !attempt.FailedAt.IsZero() {
 		return ingest.ErrInvalidForwardRecoveryActionAuthorization
 	}
 	return nil

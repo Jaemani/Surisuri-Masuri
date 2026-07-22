@@ -55,10 +55,70 @@ func TestFirestoreAdmissionStoreEmulatorCommitsForwardRecoveryActionsAtomically(
 			if receiptHasLeaseFields(persistedReceipt) {
 				t.Fatalf("terminal action retained lease = %#v", persistedReceipt)
 			}
+			query, err := ingest.ForwardRecoveryOutcomeQueryForAction(fixture.command)
+			if err != nil {
+				t.Fatalf("ForwardRecoveryOutcomeQueryForAction() = %v", err)
+			}
+			outcomeAuthorizer, err := ingest.NewSystemRecoveryOutcomeAuthorizer(fixture.store, time.Now)
+			if err != nil {
+				t.Fatalf("NewSystemRecoveryOutcomeAuthorizer() = %v", err)
+			}
+			outcomeGrant, err := outcomeAuthorizer.Authorize(context.Background(), query)
+			if err != nil {
+				t.Fatalf("outcome Authorize() = %v", err)
+			}
+			outcome, err := fixture.store.GetForwardRecoveryActionOutcome(
+				context.Background(), outcomeGrant, query, time.Now().UTC(),
+			)
+			if err != nil || outcome.CommitStatus != ingest.RecoveryActionCommitted ||
+				outcome.Outcome != test.wantOutcome || outcome.ActionHash != query.ExpectedActionHash ||
+				outcome.ReceiptRevision != query.ExpectedReceiptRevision || outcome.CompletedAt.IsZero() {
+				t.Fatalf("GetForwardRecoveryActionOutcome() = %#v, %v", outcome, err)
+			}
+			unchanged := readAdmissionEmulatorReceipt(
+				t, fixture.client, fixture.command.TenantID, fixture.receiptID,
+			)
+			if unchanged.Revision != persistedReceipt.Revision ||
+				!unchanged.UpdatedAt.Equal(persistedReceipt.UpdatedAt) {
+				t.Fatalf("outcome read replayed mutation = %#v, before %#v", unchanged, persistedReceipt)
+			}
 			assertAdmissionCollectionCount(t, fixture.client, "ingestIdempotency", 1)
 			assertAdmissionCollectionCount(t, fixture.client, "ingestClientBatches", 1)
 			assertAdmissionCollectionCount(t, fixture.client, "ingestReceipts", 1)
 		})
+	}
+}
+
+func TestFirestoreAdmissionStoreEmulatorReportsForwardRecoveryNotCommittedReadOnly(t *testing.T) {
+	fixture := newEmulatorForwardRecoveryActionFixture(t, ingest.ForwardRecoveryActionMarkStored)
+	query, err := ingest.ForwardRecoveryOutcomeQueryForAction(fixture.command)
+	if err != nil {
+		t.Fatalf("ForwardRecoveryOutcomeQueryForAction() = %v", err)
+	}
+	authorizer, err := ingest.NewSystemRecoveryOutcomeAuthorizer(fixture.store, time.Now)
+	if err != nil {
+		t.Fatalf("NewSystemRecoveryOutcomeAuthorizer() = %v", err)
+	}
+	grant, err := authorizer.Authorize(context.Background(), query)
+	if err != nil {
+		t.Fatalf("Authorize() = %v", err)
+	}
+	before := readAdmissionEmulatorReceipt(
+		t, fixture.client, fixture.command.TenantID, fixture.receiptID,
+	)
+	outcome, err := fixture.store.GetForwardRecoveryActionOutcome(
+		context.Background(), grant, query, time.Now().UTC(),
+	)
+	if err != nil || outcome.CommitStatus != ingest.RecoveryActionNotCommitted || outcome.Outcome != "" {
+		t.Fatalf("GetForwardRecoveryActionOutcome() = %#v, %v", outcome, err)
+	}
+	after := readAdmissionEmulatorReceipt(t, fixture.client, fixture.command.TenantID, fixture.receiptID)
+	attempt := readAdmissionEmulatorAttempt(
+		t, fixture.client, fixture.command.TenantID, fixture.receiptID, fixture.command.Attempt.ID,
+	)
+	if after.Revision != before.Revision || after.LeaseOwnerID != before.LeaseOwnerID ||
+		attempt.Status != ingest.RecoveryAttemptStarted {
+		t.Fatalf("outcome read mutated receipt/attempt = %#v / %#v", after, attempt)
 	}
 }
 
@@ -128,12 +188,107 @@ func TestFirestoreAdmissionStoreEmulatorMissingAttemptRollsBackReceiptAction(t *
 	}
 }
 
+func TestFirestoreAdmissionStoreEmulatorFailsAttemptWithGenuineGrantAndLeavesReceipt(t *testing.T) {
+	fixture := newEmulatorForwardRecoveryActionFixture(t, ingest.ForwardRecoveryActionMarkStored)
+	before := readAdmissionEmulatorReceipt(
+		t, fixture.client, fixture.command.TenantID, fixture.receiptID,
+	)
+	authorizer, err := ingest.NewSystemRecoveryAuthorizer(fixture.store, time.Now)
+	if err != nil {
+		t.Fatalf("NewSystemRecoveryAuthorizer() = %v", err)
+	}
+	failure, grant, err := authorizer.AuthorizeForwardRecoveryAttemptFailure(
+		context.Background(),
+		fixture.command.TenantID,
+		fixture.command.ReservationKey,
+		fixture.lease,
+		fixture.command.Attempt,
+		ingest.RecoveryAttemptFailureFinalizerAbort,
+	)
+	if err != nil {
+		t.Fatalf("AuthorizeForwardRecoveryAttemptFailure() = %v", err)
+	}
+	if err := fixture.store.FailForwardRecoveryAttempt(
+		context.Background(), grant, failure, time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("FailForwardRecoveryAttempt() = %v", err)
+	}
+	after := readAdmissionEmulatorReceipt(t, fixture.client, fixture.command.TenantID, fixture.receiptID)
+	attempt := readAdmissionEmulatorAttempt(
+		t, fixture.client, fixture.command.TenantID, fixture.receiptID, fixture.command.Attempt.ID,
+	)
+	if after.State != before.State || after.Revision != before.Revision ||
+		after.LeaseOwnerID != before.LeaseOwnerID || !after.LeaseExpiresAt.Equal(before.LeaseExpiresAt) ||
+		attempt.Status != ingest.RecoveryAttemptFailed ||
+		attempt.FailureCode != ingest.RecoveryAttemptFailureFinalizerAbort || attempt.FailedAt.IsZero() ||
+		attempt.Action != "" || attempt.Outcome != "" || attempt.ActionHash != "" ||
+		!attempt.CompletedAt.IsZero() {
+		t.Fatalf("failure receipt/attempt = %#v / %#v", after, attempt)
+	}
+}
+
+func TestFirestoreAdmissionStoreEmulatorClaimClosesExpiredPriorStartedAttempt(t *testing.T) {
+	fixture := newEmulatorForwardRecoveryActionFixture(t, ingest.ForwardRecoveryActionMarkStored)
+	expiredAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Millisecond)
+	startedAt := expiredAt.Add(-time.Minute)
+	receiptPath := receiptDocumentPath(fixture.command.TenantID, fixture.receiptID)
+	attemptPath := recoveryAttemptDocumentPath(
+		fixture.command.TenantID, fixture.receiptID, fixture.command.Attempt.ID,
+	)
+	if _, err := fixture.client.Doc(receiptPath).Update(context.Background(), []firestore.Update{
+		{Path: "lease_acquired_at", Value: startedAt},
+		{Path: "lease_heartbeat_at", Value: startedAt},
+		{Path: "lease_expires_at", Value: expiredAt},
+		{Path: "next_recovery_at", Value: expiredAt},
+		{Path: "updated_at", Value: startedAt},
+	}); err != nil {
+		t.Fatalf("expire receipt lease: %v", err)
+	}
+	if _, err := fixture.client.Doc(attemptPath).Update(context.Background(), []firestore.Update{
+		{Path: "started_at", Value: startedAt},
+	}); err != nil {
+		t.Fatalf("align prior attempt start: %v", err)
+	}
+	newAttempt := ingest.RecoveryAttemptProposal{
+		ID: emulatorThirdReceiptID, WorkerVersion: ingest.RecoveryWorkerVersion,
+	}
+	lease, status, err := fixture.store.ClaimRecoveryLease(
+		context.Background(),
+		fixture.command.TenantID,
+		fixture.command.ReservationKey,
+		ingest.LeaseOwner{ID: newAttempt.ID, Kind: ingest.LeaseOwnerSweeper},
+		newAttempt,
+		time.Now().UTC(),
+		ingest.DefaultRequestLeaseDuration,
+	)
+	if err != nil || status != ingest.LeaseStatusAcquired {
+		t.Fatalf("ClaimRecoveryLease() = %#v, %q, %v", lease, status, err)
+	}
+	prior := readAdmissionEmulatorAttempt(
+		t, fixture.client, fixture.command.TenantID, fixture.receiptID, fixture.command.Attempt.ID,
+	)
+	current := readAdmissionEmulatorAttempt(
+		t, fixture.client, fixture.command.TenantID, fixture.receiptID, newAttempt.ID,
+	)
+	receipt := readAdmissionEmulatorReceipt(
+		t, fixture.client, fixture.command.TenantID, fixture.receiptID,
+	)
+	if prior.Status != ingest.RecoveryAttemptFailed ||
+		prior.FailureCode != ingest.RecoveryAttemptFailureLeaseExpired || prior.FailedAt.IsZero() ||
+		current.Status != ingest.RecoveryAttemptStarted || current.AttemptID != newAttempt.ID ||
+		receipt.LeaseOwnerID != newAttempt.ID || receipt.FencingToken != lease.Fence.Token ||
+		receipt.RecoveryAttemptCount != 2 {
+		t.Fatalf("prior/current/receipt = %#v / %#v / %#v", prior, current, receipt)
+	}
+}
+
 type emulatorForwardRecoveryActionFixture struct {
 	client     *firestore.Client
 	store      *FirestoreAdmissionStore
 	command    ingest.ForwardRecoveryActionCommand
 	receiptID  string
 	observedAt time.Time
+	lease      ingest.LeaseGrant
 }
 
 func newEmulatorForwardRecoveryActionFixture(
@@ -170,7 +325,7 @@ func newEmulatorForwardRecoveryActionFixture(
 	command := emulatorForwardRecoveryActionCommand(t, receipt, attempt, lease, action, observedAt)
 	return emulatorForwardRecoveryActionFixture{
 		client: client, store: store, command: command,
-		receiptID: receipt.ReceiptID, observedAt: observedAt,
+		receiptID: receipt.ReceiptID, observedAt: observedAt, lease: lease,
 	}
 }
 
