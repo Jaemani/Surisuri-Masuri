@@ -58,11 +58,14 @@
 - exact target·plan·receipt revision·fence·artifact·pre-dispatch revision을 묶고 Firestore transaction `applied` winner만 non-zero single-artifact capability를 받는 durable cleanup dispatch
 - raw 또는 manifest 하나의 bounded inventory·inspect·generation+metageneration conditional delete와 mutation 30초 상한·5초 outcome persistence grace, timeout/cancel/unavailable/response-unverifiable의 durable `unknown` 보존
 - durable outcome 뒤 known result만 paired signed absence audit로 전진하고 raw absence 전 manifest 호출을 0으로 유지하는 cleanup phase executor. Replay dispatch는 `dispatch_pending`, 성공은 `ready_for_finalization`에서 정지
+- exact `manifest_absence_confirmed/revision 7`, non-unknown outcome·fresh evidence와 immutable fence deadline만 받는 cleanup expiry finalizer
+- attempt `completed/outcome=expired`, receipt `expired`와 receipt·두 uniqueness index의 같은 `purge_eligible_at`을 한 transaction으로 commit하고 immutable target을 보존하는 terminal 경계
+- commit response loss에서 mutation을 반복하지 않고 terminal historical plan·evidence·purge를 재계산해 `committed|not_committed|unverifiable`만 반환하는 short-lived read-only correlation
 
 아직 구현하지 않은 production 운영 경계:
 
 - scheduler·startup composition과 실제 metrics exporter를 포함한 bounded sweeper runtime
-- [ADR-0029](../../docs/decisions/ADR-0029-durable-artifact-phase-cleanup-execution.md) 이후에도 남은 retry·hold disposition, terminal attempt completion·receipt `expired`·purge eligibility, commit response-loss correlation과 nested ledger purge
+- [ADR-0030](../../docs/decisions/ADR-0030-atomic-cleanup-expiry-finalization.md) 이후에도 남은 retry·hold disposition, phase executor의 terminal call wiring과 nested ledger purge
 - accepted deletion auditor, held/rejected cleanup과 auditor key rotation·cross-process lifecycle. Immutable target은 execution state로 갱신하지 않고 target 생성 뒤 renewal도 허용하지 않음
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 

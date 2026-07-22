@@ -115,11 +115,11 @@ Persistence는 먼저 paired verifier로 evidence를 확인하고 grant가 evide
 
 ### 6. 실행·운영 활성화는 계속 닫아 둔다
 
-이 R8e 증분은 raw 또는 manifest 한 단계의 read-only audit와 persistence component만 제공한다. 당시 후속 범위였던 progress-bearing expired cleanup takeover는 [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md)에서, durable artifact phase executor는 [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md)에서 local component로 구현했지만 runtime에는 연결하지 않았다. 다음은 계속 미연결·미구현이다.
+이 R8e 증분은 raw 또는 manifest 한 단계의 read-only audit와 persistence component만 제공한다. 당시 후속 범위였던 progress-bearing expired cleanup takeover는 [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md)에서, durable artifact phase executor는 [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md)에서, local success-only finalizer와 response-loss correlation은 [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md)에서 구현했지만 runtime에는 연결하지 않았다. 다음은 계속 미연결·미구현이다.
 
 - Retry·hold disposition persistence
-- Attempt `completed`, receipt `expired`와 세 control document의 `purge_eligible_at`을 묶는 terminal finalizer
-- Commit response-loss `committed|not_committed|unverifiable` correlation
+- Accepted/held/rejected cleanup completion
+- Nested attempt·target·finding과 receipt/index purge
 - Scheduler, startup, readiness, runtime route와 실제 staging/production delete
 - Auditor key lifecycle, rotation과 cross-process 배포 정책
 
@@ -130,7 +130,7 @@ Persistence는 먼저 paired verifier로 evidence를 확인하고 grant가 evide
 - Evidence는 한 request와 한 grant에 묶여 다른 fence·revision·artifact에 재사용할 수 없다.
 - In-memory private key는 local composition의 최소 경계일 뿐 production key management 설계가 아니다.
 - Sequential GCS listing 사이의 out-of-band write race는 provider 수준에서 제거되지 않았다. Application fencing만으로 외부 writer를 막을 수 없으므로 least-privilege IAM과 staging write-exclusion 검증이 필수다.
-- Terminal finalizer가 없으므로 이 구현만으로 receipt가 `expired`가 되거나 object가 purge되는 일은 없다.
+- 이 R8e component 단독으로 receipt가 `expired`가 되거나 object가 purge되는 일은 없다. 후속 ADR-0030도 local success-only metadata finalization만 제공하며 nested purge는 수행하지 않는다.
 
 ## 연결 문서
 
@@ -140,5 +140,6 @@ Persistence는 먼저 paired verifier로 evidence를 확인하고 grant가 evide
 - 증거: [EVD-20260722-035](../evidence/2026-07.md#evd-20260722-035--서명된-read-only-cleanup-absence-audit와-firestore-persistence)
 - 사람 대상 리포트: [HR-20260722-26](../reports/human/HR-20260722-26-signed-cleanup-absence-audit.md)
 - 후속 증거: [EVD-20260722-037](../evidence/2026-07.md#evd-20260722-037--durable-artifact-phase-cleanup-execution)
+- 후속 finalization 결정·증거·리포트: [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md), [EVD-20260722-038](../evidence/2026-07.md#evd-20260722-038--atomic-cleanup-expiry-finalization과-response-loss-correlation), [HR-20260722-29](../reports/human/HR-20260722-29-atomic-cleanup-expiry-finalization.md)
 - 제품 업데이트: 해당 없음 — executable·scheduler·사용자·staging·production 경로 미연결
 - 인시던트: 해당 없음 — production·staging·field 영향 없음

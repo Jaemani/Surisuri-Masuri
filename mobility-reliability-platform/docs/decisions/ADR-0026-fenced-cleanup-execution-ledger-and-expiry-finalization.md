@@ -213,7 +213,7 @@ Commit 호출이 timeout, cancellation 또는 unavailable로 끝나면 provider 
 
 ### 7. Retry·hold와 purge 실행은 후속 하위 단계로 분리한다
 
-구현 상태는 하위 gate로 분리한다. R8d는 success-path progress foundation을, R8e [ADR-0027](./ADR-0027-paired-read-only-cleanup-absence-attestation.md)은 signed absence persistence를, R8f [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md)은 progress-aware expired takeover를 local component로 닫았다. Atomic expiry finalization, purge eligibility, outcome correlation과 다음 bounded taxonomy는 같은 attempt ledger를 사용하되 별도 구현 gate로 둔다.
+구현 상태는 하위 gate로 분리한다. R8d는 success-path progress foundation을, R8e [ADR-0027](./ADR-0027-paired-read-only-cleanup-absence-attestation.md)은 signed absence persistence를, R8f [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md)은 progress-aware expired takeover를 local component로 닫았다. R8h [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md)은 success-only atomic expiry finalization, 세 linkage 문서의 같은 purge eligibility와 read-only outcome correlation을 구현했다. 다음 bounded retry·hold taxonomy와 purge 실행은 같은 attempt ledger를 사용하되 별도 구현 gate로 둔다.
 
 - Retry 후보: timeout, cancellation, provider unavailable, quota, incomplete/truncated inventory
 - Hold 후보: precondition drift, lineage mismatch, late/soft-deleted generation, permission·retention policy conflict
@@ -223,7 +223,7 @@ Policy가 결정한 retry·hold는 attempt를 `completed`로 닫고 `decision_do
 
 ### 8. 실행·운영 활성화는 계속 닫아 둔다
 
-R8d와 후속 R8g local implementation은 scheduler, startup, readiness와 runtime route에 연결하지 않는다. 실제 staging/production delete와 `expired` 운영 전환은 다음을 별도로 검증해야 한다.
+R8d~R8h local implementation은 scheduler, startup, readiness와 runtime route에 연결하지 않는다. 실제 staging/production delete와 `expired` 운영 전환은 다음을 별도로 검증해야 한다.
 
 - Bucket versioning, soft-delete, lifecycle, retention, KMS와 IAM 실제 정책
 - Firestore index와 transaction latency
@@ -246,11 +246,14 @@ R8d와 후속 R8g local implementation은 scheduler, startup, readiness와 runti
 - 후속 결정: [ADR-0027](./ADR-0027-paired-read-only-cleanup-absence-attestation.md) — paired signed read-only audit와 raw·manifest absence persistence를 구현했다. 당시 phase executor와 terminal finalizer는 후속 범위였다.
 - 후속 결정: [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md) — historical/live authority를 분리하고 prior progress 보존 closure와 pristine new attempt의 원자 인계를 구현했다. Provider 권한 상속·runtime 연결은 없다.
 - 후속 결정: [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md) — durable dispatch winner, single-artifact mutation, bounded outcome persistence와 raw-first signed audit sequencing을 구현했다. Terminal finalizer·correlation·runtime 권한은 없다.
+- 후속 결정: [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md) — success-only 4문서 terminal commit, 동일 purge eligibility와 read-only response-loss correlation을 구현했다. Retry·hold, nested purge와 runtime 권한은 없다.
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
 - 증거: [EVD-20260722-034](../evidence/2026-07.md#evd-20260722-034--fenced-cleanup-execution-ledger와-firestore-progress-persistence) — pure ledger와 fresh non-audit Firestore progress persistence의 local/Emulator 근거. 해당 증거 시점에는 absence audit·takeover·terminal finalizer·correlation이 미구현이었다.
 - 후속 증거: [EVD-20260722-035](../evidence/2026-07.md#evd-20260722-035--서명된-read-only-cleanup-absence-audit와-firestore-persistence) — signed absence persistence까지의 local/Emulator 근거. GCS sequential listing non-atomic residual과 staging IAM/write-exclusion gate를 유지
 - 후속 증거: [EVD-20260722-036](../evidence/2026-07.md#evd-20260722-036--progress-aware-expired-cleanup-takeover) — all-phase historical validation, progress-preserving closure와 pristine attempt 원자 인계의 local/Emulator 근거
 - 후속 증거: [EVD-20260722-037](../evidence/2026-07.md#evd-20260722-037--durable-artifact-phase-cleanup-execution) — dispatch-before-mutation, single-artifact outcome persistence와 `unknown` barrier의 local/Emulator/testbench/clean CI 근거
+- 후속 증거: [EVD-20260722-038](../evidence/2026-07.md#evd-20260722-038--atomic-cleanup-expiry-finalization과-response-loss-correlation) — atomic terminal linkage, immutable target write 0와 three-state read-only correlation의 local/Emulator/clean CI 근거
+- 사람 대상 리포트: [HR-20260722-29](../reports/human/HR-20260722-29-atomic-cleanup-expiry-finalization.md)
 - 제품 업데이트: 해당 없음 — executable·사용자·운영 경로 미연결
 - 인시던트: 해당 없음 — production·staging·field 영향 없음

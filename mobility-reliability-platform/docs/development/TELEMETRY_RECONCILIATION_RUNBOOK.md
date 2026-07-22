@@ -157,6 +157,8 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 
 이어 [ADR-0029](../decisions/ADR-0029-durable-artifact-phase-cleanup-execution.md)의 durable artifact phase executor를 구현했다. Exact dispatch transaction의 `applied` winner만 non-zero single-artifact grant를 받고 replay는 write 0·provider call 0이다. GCS executor가 bounded outcome을 반환하면 다음 durable revision에 저장하고 known outcome에서만 paired signed audit를 호출한다. Mutation 30초 상한 뒤 5초 persistence grace를 두며 timeout·cancel·unavailable·deadline crossing·response-unverifiable은 `unknown`으로 보존한다. Raw `unknown` 뒤 audit·manifest가 0이고 성공해도 `manifest_absence_confirmed/ready_for_finalization`에서 멈춘다. [EVD-20260722-037](../evidence/2026-07.md#evd-20260722-037--durable-artifact-phase-cleanup-execution)의 local/Emulator/testbench/clean CI 근거이며 actual staging/production delete와 terminal 권한은 아니다.
 
+[ADR-0030](../decisions/ADR-0030-atomic-cleanup-expiry-finalization.md)의 R8h local finalizer는 exact `manifest_absence_confirmed/revision 7`, non-unknown outcome, fresh two-path evidence와 immutable fence deadline을 다시 확인한다. Attempt `completed/outcome=expired`, receipt `expired`와 receipt·두 index의 같은 `purge_eligible_at`을 4문서 transaction으로 commit하고 target write는 0이다. Commit 결과가 불명확해도 mutation을 replay하지 않으며 pre-state-bound query가 fresh read-only grant를 통해 `committed|not_committed|unverifiable`만 반환한다. [EVD-20260722-038](../evidence/2026-07.md#evd-20260722-038--atomic-cleanup-expiry-finalization과-response-loss-correlation)의 local race·Firestore Emulator 근거이고 phase executor·runtime에는 아직 연결하지 않았다.
+
 - [x] fake clock으로 lease exact-expiry boundary 재현
 - [x] 두 request/sweeper/cleanup의 concurrent claim winner 1명
 - [ ] recovery claim 대 `BeginCleanupTransition` 경계 경쟁에서 cleanup/recovery 중 허용된 winner만 1명
@@ -184,8 +186,8 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 - [x] mutation deadline·outcome persistence grace 분리, response-unverifiable 포함 durable `unknown` barrier
 - [x] raw known outcome→signed absence 뒤 manifest dispatch, raw/manifest unknown 뒤 후속 provider·audit 호출 0
 - [x] successful phase execution이 `ready_for_finalization`까지만 반환하고 receipt·attempt·index terminal write 0
-- [ ] atomic completed/expired/purge-eligibility finalization
-- [ ] `committed|not_committed|unverifiable` response-loss correlation
+- [x] atomic completed/expired/purge-eligibility finalization — attempt·receipt·두 index 한 commit, target 불변
+- [x] `committed|not_committed|unverifiable` response-loss correlation — read-only capability와 malformed terminal fail-closed
 - [ ] 복수 manifest generation은 bytes 동일 여부와 관계없이 자동 선택 0
 - [ ] post-expiry hold가 즉시 integrity cleanup 또는 incident escalation으로 연결
 - [ ] accepted deletion 중 replay-complete, rejected side cleanup 중 replay-rejected 유지
@@ -203,10 +205,11 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 - runtime 연결 전에는 Product Update를 만들지 않는다.
 - 사람용 리포트는 실제 구현·검증 결과만 쓰며 이 runbook의 계획을 성과로 표현하지 않는다.
 
-## 10. 연결 문서
+## 11. 연결 문서
 
 - [ADR-0017](../decisions/ADR-0017-fenced-ingest-recovery.md)
 - [ADR-0029](../decisions/ADR-0029-durable-artifact-phase-cleanup-execution.md)
+- [ADR-0030](../decisions/ADR-0030-atomic-cleanup-expiry-finalization.md)
 - [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - [Target Domain Model](../data/TARGET_DOMAIN_MODEL.md)
 - [Risk Register](../plans/RISK_REGISTER.md)

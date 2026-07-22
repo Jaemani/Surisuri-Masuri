@@ -163,6 +163,8 @@ Phase executor의 성공 종점은 `manifest_absence_confirmed/revision 7`과 `r
 - Nested attempt·target·finding과 receipt/index purge
 - Scheduler, startup, readiness, HTTP route와 staging/production GCS delete
 
+후속 [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md)은 위 첫 두 항목인 local success-only atomic finalizer와 read-only response-loss correlation을 구현했다. Retry·hold disposition, accepted/held/rejected cleanup, nested purge와 runtime·scheduler·staging/production 경계는 계속 닫혀 있다.
+
 ## 결과와 위험
 
 - Provider mutation 전에 exact dispatch가 durable해지고 replay caller는 zero grant를 받는다.
@@ -179,6 +181,7 @@ Phase executor의 성공 종점은 `manifest_absence_confirmed/revision 7`과 `r
 - 선행 결정: [ADR-0025](./ADR-0025-generation-pinned-cleanup-delete-and-audit.md), [ADR-0026](./ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md), [ADR-0027](./ADR-0027-paired-read-only-cleanup-absence-attestation.md), [ADR-0028](./ADR-0028-progress-aware-expired-cleanup-takeover.md)
 - 증거: [EVD-20260722-037](../evidence/2026-07.md#evd-20260722-037--durable-artifact-phase-cleanup-execution)
 - 사람 대상 리포트: [HR-20260722-28](../reports/human/HR-20260722-28-durable-cleanup-phase-execution.md)
+- 후속 finalization 결정·증거·리포트: [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md), [EVD-20260722-038](../evidence/2026-07.md#evd-20260722-038--atomic-cleanup-expiry-finalization과-response-loss-correlation), [HR-20260722-29](../reports/human/HR-20260722-29-atomic-cleanup-expiry-finalization.md)
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
 - 제품 업데이트: 해당 없음 — executable·scheduler·readiness·사용자·staging·production 경로 미연결

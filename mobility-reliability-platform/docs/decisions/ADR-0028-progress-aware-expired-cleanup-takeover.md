@@ -116,14 +116,15 @@ Ledger residue가 없는 pristine started attempt는 기존 R8a validator로 tak
 - New fence는 이전 outcome을 authority로 사용하지 않아 stale worker와 replay를 차단한다.
 - Historical builder가 live plan과 같은 concrete plan type을 반환하는 것은 현재 destructive grant separation 아래 안전하지만 future misuse 감시가 필요하다.
 - `verified_empty`, raw-only, manifest-only target의 full takeover matrix와 모든 phase의 Emulator serialization 확대는 후속 회귀 강화 항목이다.
-- 이 구현 자체는 phase executor, retry·hold, terminal `expired` finalizer나 runtime을 제공하지 않는다. 후속 [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md)이 local phase executor를 구현했지만 나머지 경계와 runtime은 계속 닫혀 있다.
+- 이 구현 자체는 phase executor, retry·hold, terminal `expired` finalizer나 runtime을 제공하지 않는다. 후속 [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md)이 local phase executor를, [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md)이 local success-only finalizer와 read-only response-loss correlation을 구현했다. Retry·hold disposition, accepted/held/rejected cleanup, nested purge와 runtime·scheduler·staging/production 경계는 계속 닫혀 있다.
 
 ## 연결 문서
 
 - 선행 결정: [ADR-0023](./ADR-0023-fenced-cleanup-lease-claim.md), [ADR-0026](./ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md), [ADR-0027](./ADR-0027-paired-read-only-cleanup-absence-attestation.md)
 - 증거: [EVD-20260722-036](../evidence/2026-07.md#evd-20260722-036--progress-aware-expired-cleanup-takeover)
 - 사람 대상 리포트: [HR-20260722-27](../reports/human/HR-20260722-27-progress-aware-cleanup-takeover.md)
-- 후속 결정·증거: [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md), [EVD-20260722-037](../evidence/2026-07.md#evd-20260722-037--durable-artifact-phase-cleanup-execution)
+- 후속 결정·증거: [ADR-0029](./ADR-0029-durable-artifact-phase-cleanup-execution.md), [EVD-20260722-037](../evidence/2026-07.md#evd-20260722-037--durable-artifact-phase-cleanup-execution), [ADR-0030](./ADR-0030-atomic-cleanup-expiry-finalization.md), [EVD-20260722-038](../evidence/2026-07.md#evd-20260722-038--atomic-cleanup-expiry-finalization과-response-loss-correlation)
+- 후속 finalization 사람 대상 리포트: [HR-20260722-29](../reports/human/HR-20260722-29-atomic-cleanup-expiry-finalization.md)
 - 실행계획: [Telemetry Recovery Plan](../plans/TELEMETRY_RECOVERY_PLAN.md)
 - 운영 절차: [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)
 - 제품 업데이트: 해당 없음 — runtime·scheduler·사용자·staging·production 경로 미연결
