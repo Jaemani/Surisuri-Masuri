@@ -103,3 +103,4 @@
 | [HR-20260723-30](./HR-20260723-30-cleanup-retry-hold-disposition.md) | phase-preserving cleanup retry·hold disposition | `draft` |
 | [HR-20260723-31](./HR-20260723-31-cleanup-terminal-orchestration.md) | bounded cleanup terminal orchestration | `draft` |
 | [HR-20260723-32](./HR-20260723-32-receipt-purge-admission.md) | receipt purge admission과 writer fence | `draft` |
+| [HR-20260723-33](./HR-20260723-33-nested-recovery-attempt-purge.md) | nested recovery-attempt bounded purge와 attempts phase 전환 | `draft` |

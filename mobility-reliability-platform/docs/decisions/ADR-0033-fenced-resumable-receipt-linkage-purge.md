@@ -259,11 +259,15 @@ R8k-c:
 
 각 gate는 별도 구현·증거·제품 업데이트를 가진다. R8k-a/b 완료만으로 receipt나 target·finding을 삭제 완료로 표현하지 않는다.
 
-### 10. 구현 상태 — R8k-a local gate 완료
+### 10. 구현 상태 — R8k-a/b local gate 완료
 
 2026-07-23 commit `7a1d3ed`에서 R8k-a의 pure job/admission/outcome contract, deterministic purge key·linkage hash, strict Firestore job codec, receipt purge fence, create-once admission과 read-only response-loss correlation을 구현했다. Concurrent admission은 Firebase demo Firestore Emulator에서 created 1/replayed 1로 수렴했고 job과 receipt fence만 같은 commit lineage로 바뀌며 두 uniqueness index는 write 0이었다. Full/partial fence 뒤 existing recovery/cleanup lease claim과 cleanup target create도 fail-closed한다. Commit `5374be6`에서는 R8k-b 진입 전 advisory page discovery를 `page_size+1`, ordered document ID, separate lookahead로 bounded했다. 이 observation은 transaction 내 exact reread·delete 권한이 아니다.
 
-이 구현은 [EVD-20260723-041](../evidence/2026-07.md#evd-20260723-041--fenced-receipt-purge-admission)의 local/synthetic/Emulator 범위다. R8k-b nested attempt paging과 R8k-c inverse-link registry·legacy backfill·final linkage delete·Rules/indexes가 남아 있으므로 ADR 상태는 계속 `proposed`이며 metadata purge 완료로 표현하지 않는다.
+2026-07-23 commit `24c0050`에서 R8k-b의 nested `recoveryAttempts` purge를 구현했다. Advisory `page_size+1` 결과는 transaction 안에서 current page와 lookahead로 다시 읽고, delete 대상은 exact document를 재조회해 raw Firestore map digest와 strict terminal union을 검증한다. Valid page의 attempt delete와 job cursor·deleted count·revision 전진은 같은 transaction이고, 같은 page 경쟁은 한 winner만 전진한다. Malformed·foreign·unsupported·nonterminal·post-fence child, receipt/job linkage·fence drift와 count overflow는 delete 0의 durable `hold`로 전환한다. Progress-aware cleanup takeover가 남긴 valid `failed/lease_expired` historical ledger는 7개 nonterminal phase shape를 검증한 뒤 삭제할 수 있다.
+
+`planned → attempts_purging`과 fresh exact-empty 확인 뒤 `attempts_purging → linked_documents_purging`도 job revision과 함께 원자 전환한다. Page·phase commit 응답 유실은 봉인된 pre/next state와 exact child presence를 fresh read로 비교하는 read-only correlation만 허용한다. Local contract·race와 Firebase demo Firestore Emulator 근거는 [EVD-20260723-042](../evidence/2026-07.md#evd-20260723-042--bounded-nested-recovery-attempt-purge)에 기록한다.
+
+R8k-a/b는 local/synthetic/Emulator 범위다. R8k-c inverse-link registry·legacy backfill, target/finding purge, fresh global empty verification, final receipt+index delete와 Rules/indexes가 남아 있으므로 ADR 상태는 계속 `proposed`다. Scheduler/startup/readiness와 staging·production에도 연결하지 않았으며 metadata purge 완료로 표현하지 않는다.
 
 ## 결과와 위험
 
@@ -284,5 +288,8 @@ R8k-c:
 - R8k-a 구현 증거: [EVD-20260723-041](../evidence/2026-07.md#evd-20260723-041--fenced-receipt-purge-admission)
 - R8k-a 제품 업데이트: [UPD-20260723-07](../product-updates/UPD-20260723-07-receipt-purge-admission.md)
 - R8k-a 사람 대상 리포트: [HR-20260723-32](../reports/human/HR-20260723-32-receipt-purge-admission.md)
-- R8k-b/c 구현 증거·업데이트·리포트: 구현 후 gate별 연결
+- R8k-b 구현 증거: [EVD-20260723-042](../evidence/2026-07.md#evd-20260723-042--bounded-nested-recovery-attempt-purge)
+- R8k-b 제품 업데이트: [UPD-20260723-08](../product-updates/UPD-20260723-08-nested-recovery-attempt-purge.md)
+- R8k-b 사람 대상 리포트: [HR-20260723-33](../reports/human/HR-20260723-33-nested-recovery-attempt-purge.md)
+- R8k-c 구현 증거·업데이트·리포트: 구현 후 연결
 - 인시던트: 해당 없음 — 설계 변경이며 production·staging·field 영향 없음

@@ -67,11 +67,15 @@
 - package-private sealed terminal intent만 success finalization 또는 retry·hold disposition으로 합성하고 두 mutation의 호출 합계를 invocation당 최대 1회로 제한하는 `TerminalOrchestrator`
 - durable `unknown` stored class 복원, outcome/audit persistence ambiguity·generic/internal/복수-class error의 terminal mutation 0과 incomplete inventory 전용 bounded sentinel
 - terminal commit 응답 유실 뒤 mutation 재호출 없이 parent cancellation과 분리한 최대 5초 read-only correlation, direct/correlated lineage 재검증과 민감 control object를 제외한 bounded terminal result
+- deterministic receipt-purge key/linkage hash, strict job/fence codec와 job+receipt create-once admission, full/partial fence 뒤 linked writer fail-closed
+- nested recovery-attempt `page_size+1` discovery와 transaction 내 current page·lookahead/exact raw document 재조회, delete+cursor/count/revision atomic commit
+- request/sweeper terminal union과 progress-aware cleanup takeover의 historical `failed/lease_expired` ledger 검증, malformed·foreign·unsupported·nonterminal·post-fence child의 delete-zero hold
+- `planned → attempts_purging → linked_documents_purging` fresh-empty phase 전환, same-page single winner와 page/phase commit-response-loss read-only correlation
 
 아직 구현하지 않은 production 운영 경계:
 
 - scheduler·startup composition과 실제 metrics exporter를 포함한 bounded sweeper runtime
-- [ADR-0032](../../docs/decisions/ADR-0032-bounded-cleanup-terminal-orchestration.md)까지 local component로 구현했지만 operator hold release와 nested ledger purge는 미구현
+- [ADR-0033](../../docs/decisions/ADR-0033-fenced-resumable-receipt-linkage-purge.md)의 R8k-a/b까지 local component로 구현했지만 operator hold release, R8k-c inverse-link registry·legacy backfill·target/finding/final linkage purge는 미구현
 - accepted deletion auditor, held/rejected cleanup과 auditor key rotation·cross-process lifecycle. Immutable target은 execution state로 갱신하지 않고 target 생성 뒤 renewal도 허용하지 않음
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 

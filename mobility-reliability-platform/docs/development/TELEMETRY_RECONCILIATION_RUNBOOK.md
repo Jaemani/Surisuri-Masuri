@@ -165,7 +165,9 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 
 [ADR-0032](../decisions/ADR-0032-bounded-cleanup-terminal-orchestration.md)의 R8j local orchestrator는 `PhaseExecutor`가 만든 package-private sealed intent만 소비한다. Success와 failure terminal mutation 합계는 invocation당 최대 1회이며 public result, generic/internal error, conflicting `errors.Join`, outcome/audit persistence ambiguity와 unknown mutation status는 terminal 권한을 만들지 않는다. Durable phase 3/6 `unknown`은 저장된 class를 복원한다. Terminal commit 응답 유실은 valid pre-state query가 있을 때만 parent cancellation과 분리한 최대 5초 read-only correlation을 수행하고 mutation을 재호출하지 않는다. Direct·correlated result는 exact digest·revision·fence·cursor·purge·lease residue를 다시 검증하고 bounded `TerminalResult`만 반환한다. [EVD-20260723-040](../evidence/2026-07.md#evd-20260723-040--bounded-cleanup-terminal-orchestration)의 local unit/race와 terminal-store Firestore Emulator 경쟁 근거이며 `TerminalOrchestrator.Run` 전체 Firestore/GCS vertical slice, `cmd/server`·scheduler/startup/readiness와 staging/production에는 미연결이다.
 
-[ADR-0033](../decisions/ADR-0033-fenced-resumable-receipt-linkage-purge.md)의 R8k는 계속 `proposed`지만 R8k-a local job admission/fence는 구현됐다. 운영 규칙은 parent receipt·두 uniqueness index를 먼저 삭제하지 않는 것, purge fence 전에는 child delete를 시작하지 않는 것, query 결과만으로 delete하지 않고 exact child를 page transaction에서 다시 읽는 것, malformed child를 skip하지 않는 것이다. Top-level target/finding은 `receipt_id` query만 믿지 않고 receipt 하위 inverse `purgeLinks`와 같은 transaction으로 생성해야 한다. [EVD-20260723-041](../evidence/2026-07.md#evd-20260723-041--fenced-receipt-purge-admission)은 local job+receipt fence와 existing attempt/target writer 차단만 증명한다. Registry rollout 전 legacy child·out-of-band writer inventory와 R8k-b/c EVD 전에는 `purge_eligible_at` 또는 job admission을 metadata purge 완료로 해석하지 않는다.
+[ADR-0033](../decisions/ADR-0033-fenced-resumable-receipt-linkage-purge.md)의 R8k는 계속 `proposed`지만 R8k-a job admission/fence와 R8k-b nested attempt phase는 local 구현됐다. 운영 규칙은 parent receipt·두 uniqueness index를 먼저 삭제하지 않는 것, purge fence 전에는 child delete를 시작하지 않는 것, advisory query 결과만으로 delete하지 않고 current page·lookahead와 exact child를 transaction에서 다시 읽는 것, malformed·foreign·unsupported·nonterminal·post-fence child를 skip하지 않는 것이다. Valid page의 attempt delete와 cursor/count/revision은 같은 commit이고, empty 확인도 fresh exact read에서만 다음 phase로 전환한다. Page·phase commit 응답 유실 뒤 mutation을 추측해 반복하지 않고 봉인된 pre/next state를 read-only로 상관한다. [EVD-20260723-041](../evidence/2026-07.md#evd-20260723-041--fenced-receipt-purge-admission)과 [EVD-20260723-042](../evidence/2026-07.md#evd-20260723-042--bounded-nested-recovery-attempt-purge)의 local/synthetic/Emulator 범위다.
+
+Top-level target/finding은 `receipt_id` query만 믿지 않고 receipt 하위 inverse `purgeLinks`와 같은 transaction으로 생성해야 한다. Registry rollout 전 legacy child·out-of-band writer inventory, final linkage transaction과 R8k-c 증거가 없으므로 `purge_eligible_at`, job admission 또는 `linked_documents_purging` 진입을 metadata purge 완료로 해석하지 않는다.
 
 - [x] fake clock으로 lease exact-expiry boundary 재현
 - [x] 두 request/sweeper/cleanup의 concurrent claim winner 1명
@@ -203,7 +205,9 @@ R5 read-only classifier의 독립 완료 기준은 [ADR-0018](../decisions/ADR-0
 - [x] outcome·audit persistence ambiguity와 unknown mutation status에서 terminal intent·mutation 0
 - [x] deterministic purge job과 receipt fence의 create-once admission, two-index write 0과 concurrent created 1/replayed 1
 - [x] full/partial purge fence 뒤 existing recovery/cleanup attempt와 cleanup target create fail-closed
-- [ ] nested attempt `page_size+1` advisory query와 exact page delete+cursor/count/revision atomic commit
+- [x] nested attempt `page_size+1` advisory query와 transaction 내 current page·lookahead/exact child 재조회, page delete+cursor/count/revision atomic commit
+- [x] malformed·foreign·unsupported·nonterminal·post-fence attempt의 delete 0 hold와 progress-aware historical cleanup failure 검증
+- [x] fresh exact-empty 기반 attempt phase 전환과 page/phase response-loss read-only correlation
 - [ ] target·finding inverse-link registry/backfill과 final job+receipt+two-index linkage delete
 - [x] parent cancellation 뒤 최대 5초 detached read-only correlation과 mutation replay 0
 - [x] malformed direct/correlated terminal DTO와 full control-object 결과 surface 거부
