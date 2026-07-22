@@ -629,6 +629,7 @@ func forwardRecoveryClassificationRequest(receipt Receipt) (ArtifactClassificati
 		receipt.ObjectGeneration != 0 || receipt.ObjectMetageneration != 0 ||
 		receipt.ManifestGeneration != 0 || receipt.ManifestMetageneration != 0 ||
 		receipt.SampleCount != 0 || receipt.RejectionCode != "" ||
+		receipt.RecoveryHoldCode != "" || !receipt.RecoveryHoldReviewDueAt.IsZero() ||
 		receipt.LeaseOwnerKind != LeaseOwnerSweeper ||
 		receipt.LeaseAcquiredAt.IsZero() || receipt.LeaseHeartbeatAt.IsZero() ||
 		receipt.LeaseHeartbeatAt.Before(receipt.LeaseAcquiredAt) ||

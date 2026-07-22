@@ -546,6 +546,14 @@ describe('server-owned mutation boundary', () => {
       tenant_id: 'tenant-a',
       body_hash: 'sha256:receipt'
     });
+    await seedDocument(
+      'tenants/tenant-a/ingestReceipts/batch-1/recoveryAttempts/attempt-1',
+      {
+        tenant_id: 'tenant-a',
+        receipt_id: 'batch-1',
+        attempt_id: 'attempt-1'
+      }
+    );
     await seedDocument('tenants/tenant-a/ingestIdempotency/key-1', {
       tenant_id: 'tenant-a',
       body_hash: 'sha256:idempotency'
@@ -560,6 +568,14 @@ describe('server-owned mutation boundary', () => {
       getDoc(doc(db, 'tenants/tenant-a/ingestReceipts/batch-1'))
     );
     await assertFails(
+      getDoc(
+        doc(
+          db,
+          'tenants/tenant-a/ingestReceipts/batch-1/recoveryAttempts/attempt-1'
+        )
+      )
+    );
+    await assertFails(
       getDoc(doc(db, 'tenants/tenant-a/ingestIdempotency/key-1'))
     );
     await assertFails(
@@ -569,6 +585,19 @@ describe('server-owned mutation boundary', () => {
       setDoc(doc(db, 'tenants/tenant-a/ingestReceipts/batch-2'), {
         tenant_id: 'tenant-a'
       })
+    );
+    await assertFails(
+      setDoc(
+        doc(
+          db,
+          'tenants/tenant-a/ingestReceipts/batch-1/recoveryAttempts/attempt-1'
+        ),
+        {
+          tenant_id: 'tenant-a',
+          receipt_id: 'batch-1',
+          attempt_id: 'attempt-1'
+        }
+      )
     );
     await assertFails(
       setDoc(doc(db, 'tenants/tenant-a/ingestIdempotency/key-2'), {

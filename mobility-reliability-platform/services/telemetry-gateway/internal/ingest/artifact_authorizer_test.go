@@ -339,6 +339,12 @@ func TestSystemRecoveryAuthorizerTreatsMalformedTrustedSnapshotAsUnavailable(t *
 		{name: "partial receipt lease", mutate: func(snapshot *CurrentForwardRecoverySnapshot) {
 			snapshot.Receipt.LeaseOwnerID = ""
 		}},
+		{name: "reserved receipt has hold reason", mutate: func(snapshot *CurrentForwardRecoverySnapshot) {
+			snapshot.Receipt.RecoveryHoldCode = RecoveryHoldManifestOnly
+		}},
+		{name: "reserved receipt has hold review time", mutate: func(snapshot *CurrentForwardRecoverySnapshot) {
+			snapshot.Receipt.RecoveryHoldReviewDueAt = now.Add(time.Hour)
+		}},
 		{name: "duplicate role", mutate: func(snapshot *CurrentForwardRecoverySnapshot) {
 			snapshot.Membership.Roles = []string{"beneficiary", "beneficiary"}
 		}},

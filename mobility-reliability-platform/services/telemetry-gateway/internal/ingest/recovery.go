@@ -65,6 +65,30 @@ const (
 	RecoveryAttemptFailed    RecoveryAttemptStatus = "failed"
 )
 
+// RecoveryAttemptOutcome is the bounded terminal result written alongside a
+// completed recovery attempt. It intentionally describes the control-plane
+// mutation, not provider error details or user data.
+type RecoveryAttemptOutcome string
+
+const (
+	RecoveryAttemptOutcomeStored        RecoveryAttemptOutcome = "stored"
+	RecoveryAttemptOutcomeRejected      RecoveryAttemptOutcome = "rejected"
+	RecoveryAttemptOutcomeHold          RecoveryAttemptOutcome = "recovery_hold"
+	RecoveryAttemptOutcomeLeaseReleased RecoveryAttemptOutcome = "lease_released"
+)
+
+func ValidRecoveryAttemptOutcome(outcome RecoveryAttemptOutcome) bool {
+	switch outcome {
+	case RecoveryAttemptOutcomeStored,
+		RecoveryAttemptOutcomeRejected,
+		RecoveryAttemptOutcomeHold,
+		RecoveryAttemptOutcomeLeaseReleased:
+		return true
+	default:
+		return false
+	}
+}
+
 type LeaseStatus string
 
 const (
@@ -130,7 +154,8 @@ func ValidateLeaseProposal(proposal LeaseProposal) error {
 	if !telemetry.IsUUID(proposal.Owner.ID) ||
 		!validLeaseOwnerKind(proposal.Owner.Kind) ||
 		proposal.Duration < MinLeaseDuration || proposal.Duration > MaxLeaseDuration ||
-		(!emptyRecoveryAttemptProposal(proposal.Attempt) && ValidateRecoveryAttemptProposal(proposal.Attempt) != nil) {
+		(!emptyRecoveryAttemptProposal(proposal.Attempt) &&
+			(ValidateRecoveryAttemptProposal(proposal.Attempt) != nil || proposal.Attempt.ID != proposal.Owner.ID)) {
 		return ErrInvalidLease
 	}
 	return nil
