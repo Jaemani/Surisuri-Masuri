@@ -15,7 +15,9 @@ const (
 	LeaseRenewalWindow           = 45 * time.Second
 	InitialRecoveryBackoff       = 5 * time.Second
 	RecoveryWorkerVersion        = "telemetry-recovery.v1"
-	DefaultCleanupLateWriteGrace = 6 * time.Minute
+	CleanupWorkerVersion         = "telemetry-cleanup.v1"
+	CleanupTransitionPolicyV1    = "telemetry-cleanup-transition.v1"
+	DefaultCleanupLateWriteGrace = 11 * time.Minute
 )
 
 var ErrInvalidLease = errors.New("telemetry ingest lease is invalid")
@@ -53,6 +55,11 @@ type LeaseGrant struct {
 }
 
 type RecoveryAttemptProposal struct {
+	ID            string
+	WorkerVersion string
+}
+
+type CleanupAttemptProposal struct {
 	ID            string
 	WorkerVersion string
 }
@@ -103,6 +110,16 @@ type CleanupMode string
 
 const CleanupModeReservationExpiry CleanupMode = "reservation_expiry"
 
+type CleanupLeaseGrant struct {
+	Lease           LeaseGrant
+	ReceiptRevision int64
+	Mode            CleanupMode
+	OriginStatus    ReceiptState
+	PolicyVersion   string
+	TransitionedAt  time.Time
+	QuiescenceUntil time.Time
+}
+
 type TransitionStatus string
 
 const (
@@ -127,6 +144,18 @@ type RecoveryLeaseStore interface {
 
 type CleanupTransitionStore interface {
 	BeginCleanupTransition(context.Context, string, string, time.Time) (Receipt, TransitionStatus, error)
+}
+
+type CleanupLeaseStore interface {
+	ClaimCleanupLease(
+		context.Context,
+		string,
+		string,
+		LeaseOwner,
+		CleanupAttemptProposal,
+		time.Time,
+		time.Duration,
+	) (CleanupLeaseGrant, LeaseStatus, error)
 }
 
 type LeaseReleaseCode string
@@ -168,6 +197,22 @@ func ValidateRecoveryAttemptProposal(proposal RecoveryAttemptProposal) error {
 	return nil
 }
 
+func ValidateCleanupAttemptProposal(proposal CleanupAttemptProposal) error {
+	if !telemetry.IsUUID(proposal.ID) || proposal.WorkerVersion != CleanupWorkerVersion {
+		return ErrInvalidLease
+	}
+	return nil
+}
+
+func ValidateCleanupTimingPolicy() error {
+	if MaxArtifactOperationTimeout <= 0 || MaxLeaseDuration <= 0 ||
+		DefaultCleanupLateWriteGrace <= MaxLeaseDuration ||
+		DefaultCleanupLateWriteGrace-MaxLeaseDuration <= MaxArtifactOperationTimeout {
+		return ErrInvalidLease
+	}
+	return nil
+}
+
 func ValidateLeaseFence(fence LeaseFence) error {
 	if !telemetry.IsUUID(fence.OwnerID) || fence.Token <= 0 || fence.ExpiresAt.IsZero() {
 		return ErrInvalidLease
@@ -183,6 +228,19 @@ func ValidateLeaseGrant(grant LeaseGrant) error {
 		grant.HeartbeatAt.Before(grant.AcquiredAt) ||
 		!grant.HeartbeatAt.Before(grant.Fence.ExpiresAt) ||
 		duration < MinLeaseDuration || duration > MaxLeaseDuration {
+		return ErrInvalidLease
+	}
+	return nil
+}
+
+func ValidateCleanupLeaseGrant(grant CleanupLeaseGrant) error {
+	if ValidateLeaseGrant(grant.Lease) != nil || grant.Lease.OwnerKind != LeaseOwnerCleanup ||
+		grant.ReceiptRevision <= 0 || grant.Mode != CleanupModeReservationExpiry ||
+		grant.OriginStatus != ReceiptReserved || grant.PolicyVersion != CleanupTransitionPolicyV1 ||
+		grant.TransitionedAt.IsZero() || grant.QuiescenceUntil.IsZero() ||
+		grant.Lease.AcquiredAt.Before(grant.TransitionedAt) ||
+		!grant.QuiescenceUntil.Equal(grant.TransitionedAt.Add(DefaultCleanupLateWriteGrace)) ||
+		grant.Lease.AcquiredAt.Before(grant.QuiescenceUntil) {
 		return ErrInvalidLease
 	}
 	return nil

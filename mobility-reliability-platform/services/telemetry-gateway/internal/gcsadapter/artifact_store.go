@@ -480,6 +480,9 @@ func (s *ArtifactStore) StoreBatch(
 	if s == nil || s.backend == nil || ctx == nil {
 		return ingest.StoredBatchArtifacts{}, ingest.ErrArtifactUnavailable
 	}
+	if err := ctx.Err(); err != nil {
+		return ingest.StoredBatchArtifacts{}, err
+	}
 	if err := validateBatchWrite(write); err != nil {
 		return ingest.StoredBatchArtifacts{}, err
 	}
@@ -513,6 +516,9 @@ func (s *ArtifactStore) StoreBatch(
 
 	manifestBytes, manifestDigest, err := ingest.CanonicalTelemetryManifest(write.Manifest, object)
 	if err != nil {
+		return ingest.StoredBatchArtifacts{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return ingest.StoredBatchArtifacts{}, err
 	}
 	manifestMetadata := map[string]string{
@@ -551,12 +557,15 @@ func (s *ArtifactStore) writeImmutable(
 	spec objectWriteSpec,
 	readCompressed bool,
 ) (ingest.StoredArtifact, error) {
-	snapshot, err := s.backend.Create(ctx, path, content, digest, spec)
-	if err == nil {
-		return validateStoredSnapshot(snapshot, path, digest, spec, false)
+	if err := ctx.Err(); err != nil {
+		return ingest.StoredArtifact{}, err
 	}
+	snapshot, err := s.backend.Create(ctx, path, content, digest, spec)
 	if contextErr := contextError(ctx, err); contextErr != nil {
 		return ingest.StoredArtifact{}, contextErr
+	}
+	if err == nil {
+		return validateStoredSnapshot(snapshot, path, digest, spec, false)
 	}
 	if !isPreconditionFailure(err) {
 		return ingest.StoredArtifact{}, ingest.ErrArtifactUnavailable

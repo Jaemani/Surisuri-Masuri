@@ -773,7 +773,8 @@ func (s *FirestoreAdmissionStore) BeginCleanupTransition(
 	requestedAt time.Time,
 ) (ingest.Receipt, ingest.TransitionStatus, error) {
 	if s == nil || s.runTransaction == nil || ctx == nil ||
-		!telemetry.IsUUID(tenantID) || !lowerHexDigest(reservationKey) || requestedAt.IsZero() {
+		!telemetry.IsUUID(tenantID) || !lowerHexDigest(reservationKey) || requestedAt.IsZero() ||
+		ingest.ValidateCleanupTimingPolicy() != nil {
 		return ingest.Receipt{}, "", ingest.ErrAdmissionUnavailable
 	}
 	var resultReceipt ingest.Receipt
@@ -854,9 +855,11 @@ func (s *FirestoreAdmissionStore) BeginCleanupTransition(
 			{Path: "lease_heartbeat_at", Value: firestore.Delete},
 			{Path: "lease_expires_at", Value: firestore.Delete},
 			{Path: "next_recovery_at", Value: firestore.Delete},
+			{Path: "cleanup_transitioned_at", Value: cleanupAt},
 			{Path: "cleanup_quiescence_until", Value: quiescenceUntil},
 			{Path: "cleanup_mode", Value: string(ingest.CleanupModeReservationExpiry)},
 			{Path: "cleanup_origin_status", Value: string(ingest.ReceiptReserved)},
+			{Path: "cleanup_policy_version", Value: ingest.CleanupTransitionPolicyV1},
 			{Path: "revision", Value: nextRevision},
 			{Path: "updated_at", Value: cleanupAt},
 		}); updateErr != nil {
@@ -865,9 +868,11 @@ func (s *FirestoreAdmissionStore) BeginCleanupTransition(
 		receipt.State = ingest.ReceiptCleanupPending
 		receipt.FencingToken = nextToken
 		receipt.clearLease()
+		receipt.CleanupTransitionedAt = cleanupAt
 		receipt.CleanupQuiescenceUntil = quiescenceUntil
 		receipt.CleanupMode = ingest.CleanupModeReservationExpiry
 		receipt.CleanupOriginStatus = ingest.ReceiptReserved
+		receipt.CleanupPolicyVersion = ingest.CleanupTransitionPolicyV1
 		receipt.Revision = nextRevision
 		receipt.UpdatedAt = cleanupAt
 		if validateReceiptState(receipt) != nil {
@@ -1225,9 +1230,11 @@ type firestoreIngestReceipt struct {
 	LastRecoveryCode        string                  `firestore:"last_recovery_code,omitempty"`
 	RecoveryHoldCode        ingest.RecoveryHoldCode `firestore:"hold_reason,omitempty"`
 	RecoveryHoldReviewDueAt time.Time               `firestore:"hold_review_due_at,omitempty"`
+	CleanupTransitionedAt   time.Time               `firestore:"cleanup_transitioned_at,omitempty"`
 	CleanupQuiescenceUntil  time.Time               `firestore:"cleanup_quiescence_until,omitempty"`
 	CleanupMode             ingest.CleanupMode      `firestore:"cleanup_mode,omitempty"`
 	CleanupOriginStatus     ingest.ReceiptState     `firestore:"cleanup_origin_status,omitempty"`
+	CleanupPolicyVersion    string                  `firestore:"cleanup_policy_version,omitempty"`
 	Revision                int64                   `firestore:"revision"`
 	CreatedAt               time.Time               `firestore:"created_at"`
 	UpdatedAt               time.Time               `firestore:"updated_at"`
@@ -1378,9 +1385,11 @@ func (receipt firestoreIngestReceipt) toDomain() ingest.Receipt {
 		LastRecoveryCode:        receipt.LastRecoveryCode,
 		RecoveryHoldCode:        receipt.RecoveryHoldCode,
 		RecoveryHoldReviewDueAt: receipt.RecoveryHoldReviewDueAt,
+		CleanupTransitionedAt:   receipt.CleanupTransitionedAt,
 		CleanupQuiescenceUntil:  receipt.CleanupQuiescenceUntil,
 		CleanupMode:             receipt.CleanupMode,
 		CleanupOriginStatus:     receipt.CleanupOriginStatus,
+		CleanupPolicyVersion:    receipt.CleanupPolicyVersion,
 		Revision:                receipt.Revision,
 		CreatedAt:               receipt.CreatedAt,
 		UpdatedAt:               receipt.UpdatedAt,
@@ -1731,23 +1740,16 @@ func validateReceiptState(receipt firestoreIngestReceipt) error {
 			return ingest.ErrAdmissionUnavailable
 		}
 	case ingest.ReceiptCleanupPending:
-		if receipt.RejectionCode != "" || validateNoReceiptLease(receipt) != nil ||
+		if receipt.RejectionCode != "" ||
 			hasStoredArtifactData(receipt) || receipt.SampleCount != 0 ||
-			validateNoRecoveryHold(receipt) != nil ||
-			receipt.CleanupMode != ingest.CleanupModeReservationExpiry ||
-			receipt.CleanupOriginStatus != ingest.ReceiptReserved ||
-			receipt.CleanupQuiescenceUntil.IsZero() ||
-			!receipt.CleanupQuiescenceUntil.After(receipt.UpdatedAt) ||
-			receipt.UpdatedAt.Before(receipt.ReservationDeadline) {
+			validateNoRecoveryHold(receipt) != nil || validateCleanupTransition(receipt) != nil ||
+			validateCleanupPendingLease(receipt) != nil {
 			return ingest.ErrAdmissionUnavailable
 		}
 	case ingest.ReceiptExpired:
 		if receipt.RejectionCode != "" || validateNoReceiptLease(receipt) != nil ||
 			hasStoredArtifactData(receipt) || receipt.SampleCount != 0 ||
-			validateNoRecoveryHold(receipt) != nil ||
-			receipt.CleanupMode != ingest.CleanupModeReservationExpiry ||
-			receipt.CleanupOriginStatus != ingest.ReceiptReserved ||
-			receipt.CleanupQuiescenceUntil.IsZero() ||
+			validateNoRecoveryHold(receipt) != nil || validateCleanupTransition(receipt) != nil ||
 			receipt.UpdatedAt.Before(receipt.CleanupQuiescenceUntil) {
 			return ingest.ErrAdmissionUnavailable
 		}
@@ -1775,8 +1777,41 @@ func validateNoRecoveryHold(receipt firestoreIngestReceipt) error {
 	return nil
 }
 
+func validateCleanupTransition(receipt firestoreIngestReceipt) error {
+	if receipt.CleanupMode != ingest.CleanupModeReservationExpiry ||
+		receipt.CleanupOriginStatus != ingest.ReceiptReserved ||
+		receipt.CleanupPolicyVersion != ingest.CleanupTransitionPolicyV1 ||
+		receipt.CleanupTransitionedAt.IsZero() ||
+		receipt.CleanupTransitionedAt.Before(receipt.ReservationDeadline) ||
+		!receipt.CleanupQuiescenceUntil.Equal(
+			receipt.CleanupTransitionedAt.Add(ingest.DefaultCleanupLateWriteGrace),
+		) || receipt.UpdatedAt.Before(receipt.CleanupTransitionedAt) {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
+func validateCleanupPendingLease(receipt firestoreIngestReceipt) error {
+	if !receiptHasLeaseFields(receipt) {
+		if validateNoReceiptLease(receipt) != nil || !receipt.UpdatedAt.Equal(receipt.CleanupTransitionedAt) {
+			return ingest.ErrAdmissionUnavailable
+		}
+		return nil
+	}
+	grant := receipt.leaseGrant()
+	if ingest.ValidateLeaseGrant(grant) != nil || grant.OwnerKind != ingest.LeaseOwnerCleanup ||
+		receipt.RecoveryAttemptCount <= 0 || !receipt.NextRecoveryAt.IsZero() ||
+		receipt.LastRecoveryCode != "" ||
+		receipt.LeaseAcquiredAt.Before(receipt.CleanupQuiescenceUntil) ||
+		!receipt.UpdatedAt.Equal(receipt.LeaseHeartbeatAt) {
+		return ingest.ErrAdmissionUnavailable
+	}
+	return nil
+}
+
 func validateNoCleanupTransition(receipt firestoreIngestReceipt) error {
-	if !receipt.CleanupQuiescenceUntil.IsZero() || receipt.CleanupMode != "" || receipt.CleanupOriginStatus != "" {
+	if !receipt.CleanupTransitionedAt.IsZero() || !receipt.CleanupQuiescenceUntil.IsZero() ||
+		receipt.CleanupMode != "" || receipt.CleanupOriginStatus != "" || receipt.CleanupPolicyVersion != "" {
 		return ingest.ErrAdmissionUnavailable
 	}
 	return nil

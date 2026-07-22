@@ -530,6 +530,8 @@ func TestFirestoreAdmissionStoreBeginCleanupTransitionAtDeadline(t *testing.T) {
 		receipt.LeaseOwnerID != "" || !receipt.LeaseExpiresAt.IsZero() ||
 		receipt.CleanupMode != ingest.CleanupModeReservationExpiry ||
 		receipt.CleanupOriginStatus != ingest.ReceiptReserved ||
+		receipt.CleanupPolicyVersion != ingest.CleanupTransitionPolicyV1 ||
+		!receipt.CleanupTransitionedAt.Equal(cleanupAt) ||
 		!receipt.CleanupQuiescenceUntil.Equal(cleanupAt.Add(ingest.DefaultCleanupLateWriteGrace)) {
 		t.Fatalf("cleanup transition receipt = %#v", receipt)
 	}
@@ -767,6 +769,8 @@ func TestFirestoreAdmissionStoreBeginCleanupTransitionReadOnlyStatuses(t *testin
 				receipt.clearLease()
 				receipt.CleanupMode = ingest.CleanupModeReservationExpiry
 				receipt.CleanupOriginStatus = ingest.ReceiptReserved
+				receipt.CleanupPolicyVersion = ingest.CleanupTransitionPolicyV1
+				receipt.CleanupTransitionedAt = reservation.ReservationDeadline
 				receipt.UpdatedAt = reservation.ReservationDeadline
 				receipt.CleanupQuiescenceUntil = reservation.ReservationDeadline.Add(ingest.DefaultCleanupLateWriteGrace)
 				receipt.FencingToken = 2
@@ -808,6 +812,8 @@ func TestFirestoreAdmissionStoreCleanupTransitionFencesStaleFinalizer(t *testing
 	receipt.clearLease()
 	receipt.CleanupMode = ingest.CleanupModeReservationExpiry
 	receipt.CleanupOriginStatus = ingest.ReceiptReserved
+	receipt.CleanupPolicyVersion = ingest.CleanupTransitionPolicyV1
+	receipt.CleanupTransitionedAt = reservation.ReservationDeadline
 	receipt.UpdatedAt = reservation.ReservationDeadline
 	receipt.CleanupQuiescenceUntil = reservation.ReservationDeadline.Add(ingest.DefaultCleanupLateWriteGrace)
 	receipt.FencingToken = 2
@@ -1000,10 +1006,22 @@ func TestValidateReservedOriginCleanupReceiptState(t *testing.T) {
 	pending.clearLease()
 	pending.CleanupMode = ingest.CleanupModeReservationExpiry
 	pending.CleanupOriginStatus = ingest.ReceiptReserved
+	pending.CleanupPolicyVersion = ingest.CleanupTransitionPolicyV1
+	pending.CleanupTransitionedAt = transitionAt
 	pending.CleanupQuiescenceUntil = quiescenceUntil
 	pending.UpdatedAt = transitionAt
 	if err := validateReceiptState(pending); err != nil {
 		t.Fatalf("valid cleanup_pending rejected: %v", err)
+	}
+	missingTransition := pending
+	missingTransition.CleanupTransitionedAt = time.Time{}
+	if err := validateReceiptState(missingTransition); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatal("cleanup_pending without transition time was accepted")
+	}
+	wrongPolicy := pending
+	wrongPolicy.CleanupPolicyVersion = "telemetry-cleanup-transition.v2"
+	if err := validateReceiptState(wrongPolicy); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatal("cleanup_pending with unknown policy was accepted")
 	}
 	withArtifact := pending
 	withArtifact.ObjectPath = expectedObjectPath(withArtifact)
@@ -1019,6 +1037,17 @@ func TestValidateReservedOriginCleanupReceiptState(t *testing.T) {
 	expired.UpdatedAt = quiescenceUntil.Add(-time.Nanosecond)
 	if err := validateReceiptState(expired); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
 		t.Fatal("expired receipt completed before quiescence was accepted")
+	}
+	forwardLease := pending
+	forwardLease.LeaseOwnerID = admissionLeaseOwnerID
+	forwardLease.LeaseOwnerKind = ingest.LeaseOwnerSweeper
+	forwardLease.LeaseAcquiredAt = quiescenceUntil
+	forwardLease.LeaseHeartbeatAt = quiescenceUntil
+	forwardLease.LeaseExpiresAt = quiescenceUntil.Add(ingest.DefaultRequestLeaseDuration)
+	forwardLease.RecoveryAttemptCount = 1
+	forwardLease.UpdatedAt = quiescenceUntil
+	if err := validateReceiptState(forwardLease); !errors.Is(err, ingest.ErrAdmissionUnavailable) {
+		t.Fatal("cleanup_pending with forward owner lease was accepted")
 	}
 }
 
@@ -2179,9 +2208,11 @@ func admissionTestReceiptDTO(receipt ingest.Receipt) firestoreIngestReceipt {
 		LastRecoveryCode:        receipt.LastRecoveryCode,
 		RecoveryHoldCode:        receipt.RecoveryHoldCode,
 		RecoveryHoldReviewDueAt: receipt.RecoveryHoldReviewDueAt,
+		CleanupTransitionedAt:   receipt.CleanupTransitionedAt,
 		CleanupQuiescenceUntil:  receipt.CleanupQuiescenceUntil,
 		CleanupMode:             receipt.CleanupMode,
 		CleanupOriginStatus:     receipt.CleanupOriginStatus,
+		CleanupPolicyVersion:    receipt.CleanupPolicyVersion,
 		Revision:                receipt.Revision,
 		CreatedAt:               receipt.CreatedAt,
 		UpdatedAt:               receipt.UpdatedAt,

@@ -636,8 +636,8 @@ func forwardRecoveryClassificationRequest(receipt Receipt) (ArtifactClassificati
 		!receipt.UpdatedAt.Equal(receipt.LeaseHeartbeatAt) ||
 		!receipt.NextRecoveryAt.Equal(receipt.LeaseExpiresAt) ||
 		receipt.RecoveryAttemptCount <= 0 || receipt.LastRecoveryCode != "" ||
-		!receipt.CleanupQuiescenceUntil.IsZero() ||
-		receipt.CleanupMode != "" || receipt.CleanupOriginStatus != "" ||
+		!receipt.CleanupTransitionedAt.IsZero() || !receipt.CleanupQuiescenceUntil.IsZero() ||
+		receipt.CleanupMode != "" || receipt.CleanupOriginStatus != "" || receipt.CleanupPolicyVersion != "" ||
 		ValidateArtifactClassificationRequest(request) != nil {
 		return ArtifactClassificationRequest{}, ErrForwardRecoveryAuthorizationUnavailable
 	}

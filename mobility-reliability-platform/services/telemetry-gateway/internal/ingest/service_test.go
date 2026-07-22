@@ -207,6 +207,48 @@ func TestServiceUsesFreshCompletionTimeAfterObjectStorage(t *testing.T) {
 	}
 }
 
+func TestServiceBoundsCompleteArtifactOperation(t *testing.T) {
+	batch, raw := validBatch(t)
+	receipts := newMemoryReceiptStore()
+	artifacts := &deadlineProbeArtifactStore{}
+	service := mustService(t, receipts, artifacts, nil)
+
+	_, err := service.Ingest(context.Background(), matchingPrincipal(batch), batch, raw)
+	if !errors.Is(err, ErrArtifactUnavailable) {
+		t.Fatalf("Ingest() error = %v, want artifact unavailable", err)
+	}
+	if !artifacts.hasDeadline {
+		t.Fatal("StoreBatch() context has no deadline")
+	}
+	remaining := artifacts.deadline.Sub(artifacts.observedAt)
+	if remaining <= MaxArtifactOperationTimeout-time.Second || remaining > MaxArtifactOperationTimeout {
+		t.Fatalf("StoreBatch() deadline remaining = %v, want within one second of %v", remaining, MaxArtifactOperationTimeout)
+	}
+	if receipts.releaseCalls != 1 {
+		t.Fatalf("release calls = %d, want 1", receipts.releaseCalls)
+	}
+}
+
+func TestServiceCancelsDelayedArtifactStoreWithoutLateMutation(t *testing.T) {
+	batch, raw := validBatch(t)
+	receipts := newMemoryReceiptStore()
+	artifacts := &cancellationAwareArtifactStore{}
+	service := mustService(t, receipts, artifacts, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	_, err := service.Ingest(ctx, matchingPrincipal(batch), batch, raw)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Ingest() error = %v, want deadline exceeded", err)
+	}
+	if !artifacts.cancellationObserved {
+		t.Fatal("StoreBatch() did not observe context cancellation")
+	}
+	if artifacts.mutations != 0 {
+		t.Fatalf("artifact mutations after cancellation = %d, want 0", artifacts.mutations)
+	}
+}
+
 func TestNewServiceRequiresEveryDependency(t *testing.T) {
 	admissions := newMemoryReceiptStore()
 	objects := newMemoryArtifactStore()
@@ -808,6 +850,40 @@ func clearReceiptLease(receipt *Receipt) {
 type memoryStoredArtifact struct {
 	content  []byte
 	artifact StoredArtifact
+}
+
+type deadlineProbeArtifactStore struct {
+	deadline    time.Time
+	observedAt  time.Time
+	hasDeadline bool
+}
+
+func (s *deadlineProbeArtifactStore) StoreBatch(
+	ctx context.Context,
+	_ BatchArtifactWrite,
+) (StoredBatchArtifacts, error) {
+	s.deadline, s.hasDeadline = ctx.Deadline()
+	s.observedAt = time.Now()
+	return StoredBatchArtifacts{}, ErrArtifactUnavailable
+}
+
+type cancellationAwareArtifactStore struct {
+	cancellationObserved bool
+	mutations            int
+}
+
+func (s *cancellationAwareArtifactStore) StoreBatch(
+	ctx context.Context,
+	_ BatchArtifactWrite,
+) (StoredBatchArtifacts, error) {
+	select {
+	case <-ctx.Done():
+		s.cancellationObserved = true
+		return StoredBatchArtifacts{}, ctx.Err()
+	case <-time.After(time.Second):
+		s.mutations++
+		return StoredBatchArtifacts{}, nil
+	}
 }
 
 type memoryArtifactStore struct {

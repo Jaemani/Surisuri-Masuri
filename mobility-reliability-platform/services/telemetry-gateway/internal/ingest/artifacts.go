@@ -18,6 +18,10 @@ const (
 	TelemetryManifestVersion = 1
 	TelemetryCompression     = "gzip"
 	TelemetryContentType     = "application/json"
+	// MaxArtifactOperationTimeout bounds one complete StoreBatch operation,
+	// including both the immutable raw object and manifest. Cleanup quiescence
+	// relies on every implementation honoring this context boundary.
+	MaxArtifactOperationTimeout = 5 * time.Minute
 )
 
 var ErrInvalidArtifactManifest = errors.New("telemetry artifact manifest is invalid")
@@ -36,6 +40,9 @@ var (
 //
 // The interface replaces the path-only ObjectStore so the Cloud Storage
 // adapter and Firestore finalizer exchange one complete artifact lineage.
+// Implementations must propagate cancellation to in-flight provider calls,
+// must not initiate another provider mutation after context completion, and
+// must not detach writes into background work that can outlive the call.
 type TelemetryArtifactStore interface {
 	StoreBatch(context.Context, BatchArtifactWrite) (StoredBatchArtifacts, error)
 }

@@ -56,6 +56,63 @@ func TestArtifactStoreWritesRawThenCanonicalManifest(t *testing.T) {
 	}
 }
 
+func TestArtifactStoreBatchPreservesCallerCancellationBoundaries(t *testing.T) {
+	t.Run("before provider call", func(t *testing.T) {
+		backend := newMemoryBackend()
+		store := &ArtifactStore{backend: backend}
+		write := artifactWriteFixture(t, []byte(`{"schemaVersion":"telemetry-batch.v2","samples":[1,2]}`))
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		stored, err := store.StoreBatch(ctx, write)
+		if !errors.Is(err, context.Canceled) || stored != (ingest.StoredBatchArtifacts{}) {
+			t.Fatalf("StoreBatch() = %#v, %v, want cancelled without lineage", stored, err)
+		}
+		if len(backend.createOrder) != 0 || len(backend.objects) != 0 {
+			t.Fatalf("pre-cancelled StoreBatch reached provider: creates=%#v objects=%d", backend.createOrder, len(backend.objects))
+		}
+	})
+
+	for _, test := range []struct {
+		name             string
+		cancelAtManifest bool
+		wantCreates      int
+		wantObjects      int
+	}{
+		{name: "after raw commit", wantCreates: 1, wantObjects: 1},
+		{name: "after manifest commit", cancelAtManifest: true, wantCreates: 2, wantObjects: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := newMemoryBackend()
+			write := artifactWriteFixture(t, []byte(`{"schemaVersion":"telemetry-batch.v2","samples":[1,2]}`))
+			ctx, cancel := context.WithCancel(context.Background())
+			cancelPath := write.ObjectPath
+			if test.cancelAtManifest {
+				cancelPath = write.ManifestPath
+			}
+			store := &ArtifactStore{backend: &cancelAfterCommitBackend{
+				memoryBackend: backend,
+				cancel:        cancel,
+				cancelPath:    cancelPath,
+			}}
+
+			stored, err := store.StoreBatch(ctx, write)
+			if !errors.Is(err, context.Canceled) || stored != (ingest.StoredBatchArtifacts{}) {
+				t.Fatalf("StoreBatch() = %#v, %v, want cancelled without trusted lineage", stored, err)
+			}
+			if len(backend.createOrder) != test.wantCreates || len(backend.objects) != test.wantObjects {
+				t.Fatalf(
+					"late success provider work = creates:%#v objects:%d, want %d/%d",
+					backend.createOrder,
+					len(backend.objects),
+					test.wantCreates,
+					test.wantObjects,
+				)
+			}
+		})
+	}
+}
+
 func TestNewArtifactStoreRejectsNilBucket(t *testing.T) {
 	store, err := NewArtifactStore(nil)
 	if err == nil || store != nil {
@@ -674,6 +731,12 @@ type cancelingCreateBackend struct {
 	cancel context.CancelFunc
 }
 
+type cancelAfterCommitBackend struct {
+	*memoryBackend
+	cancel     context.CancelFunc
+	cancelPath string
+}
+
 type inventoryOverrideReader struct {
 	*memoryBackend
 	mutate func(int, ingest.GenerationInventory) ingest.GenerationInventory
@@ -717,6 +780,20 @@ func (b *cancelingCreateBackend) Create(
 ) (objectSnapshot, error) {
 	b.cancel()
 	return objectSnapshot{}, context.Canceled
+}
+
+func (b *cancelAfterCommitBackend) Create(
+	ctx context.Context,
+	path string,
+	content []byte,
+	digest ingest.ArtifactDigest,
+	spec objectWriteSpec,
+) (objectSnapshot, error) {
+	snapshot, err := b.memoryBackend.Create(ctx, path, content, digest, spec)
+	if path == b.cancelPath {
+		b.cancel()
+	}
+	return snapshot, err
 }
 
 func (b *metagenerationDriftBackend) ReadGeneration(

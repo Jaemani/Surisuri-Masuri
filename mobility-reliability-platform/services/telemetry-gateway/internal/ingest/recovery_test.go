@@ -104,3 +104,63 @@ func TestValidateRecoveryAttemptProposal(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupLeaseContracts(t *testing.T) {
+	transitionedAt := time.Date(2026, time.July, 22, 12, 0, 0, 0, time.UTC)
+	acquiredAt := transitionedAt.Add(DefaultCleanupLateWriteGrace)
+	ownerID := "01982015-4400-7000-8000-000000000004"
+	proposal := CleanupAttemptProposal{ID: ownerID, WorkerVersion: CleanupWorkerVersion}
+	if err := ValidateCleanupAttemptProposal(proposal); err != nil {
+		t.Fatalf("ValidateCleanupAttemptProposal() error = %v", err)
+	}
+	for _, invalid := range []CleanupAttemptProposal{
+		{ID: "not-a-uuid", WorkerVersion: CleanupWorkerVersion},
+		{ID: ownerID, WorkerVersion: RecoveryWorkerVersion},
+		{ID: ownerID, WorkerVersion: "telemetry-cleanup.v2"},
+	} {
+		if !errors.Is(ValidateCleanupAttemptProposal(invalid), ErrInvalidLease) {
+			t.Fatalf("ValidateCleanupAttemptProposal(%#v) accepted invalid input", invalid)
+		}
+	}
+	grant := CleanupLeaseGrant{
+		Lease: LeaseGrant{
+			Fence: LeaseFence{
+				OwnerID: ownerID, Token: 3, ExpiresAt: acquiredAt.Add(DefaultRequestLeaseDuration),
+			},
+			OwnerKind: LeaseOwnerCleanup, AcquiredAt: acquiredAt, HeartbeatAt: acquiredAt,
+		},
+		ReceiptRevision: 3,
+		Mode:            CleanupModeReservationExpiry,
+		OriginStatus:    ReceiptReserved,
+		PolicyVersion:   CleanupTransitionPolicyV1,
+		TransitionedAt:  transitionedAt,
+		QuiescenceUntil: acquiredAt,
+	}
+	if err := ValidateCleanupLeaseGrant(grant); err != nil {
+		t.Fatalf("ValidateCleanupLeaseGrant() error = %v", err)
+	}
+	invalidGrant := grant
+	invalidGrant.Lease.OwnerKind = LeaseOwnerSweeper
+	if !errors.Is(ValidateCleanupLeaseGrant(invalidGrant), ErrInvalidLease) {
+		t.Fatal("ValidateCleanupLeaseGrant() accepted sweeper owner")
+	}
+	invalidGrant = grant
+	invalidGrant.QuiescenceUntil = acquiredAt.Add(time.Nanosecond)
+	if !errors.Is(ValidateCleanupLeaseGrant(invalidGrant), ErrInvalidLease) {
+		t.Fatal("ValidateCleanupLeaseGrant() accepted lease before quiescence")
+	}
+}
+
+func TestCleanupTimingPolicyStrictlyCoversLeaseAndArtifactOperation(t *testing.T) {
+	if err := ValidateCleanupTimingPolicy(); err != nil {
+		t.Fatalf("ValidateCleanupTimingPolicy() error = %v", err)
+	}
+	if DefaultCleanupLateWriteGrace <= MaxLeaseDuration+MaxArtifactOperationTimeout {
+		t.Fatalf(
+			"cleanup grace = %v, want > lease %v + artifact operation %v",
+			DefaultCleanupLateWriteGrace,
+			MaxLeaseDuration,
+			MaxArtifactOperationTimeout,
+		)
+	}
+}

@@ -113,9 +113,11 @@ type Receipt struct {
 	LastRecoveryCode        string
 	RecoveryHoldCode        RecoveryHoldCode
 	RecoveryHoldReviewDueAt time.Time
+	CleanupTransitionedAt   time.Time
 	CleanupQuiescenceUntil  time.Time
 	CleanupMode             CleanupMode
 	CleanupOriginStatus     ReceiptState
+	CleanupPolicyVersion    string
 	Revision                int64
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -367,12 +369,14 @@ func (s *Service) Ingest(
 	}
 	objectPath := ExpectedTelemetryObjectPath(manifestInput)
 	manifestPath := ExpectedTelemetryManifestPath(manifestInput)
-	storedArtifacts, err := s.artifacts.StoreBatch(ctx, BatchArtifactWrite{
+	artifactCtx, cancelArtifactOperation := context.WithTimeout(ctx, MaxArtifactOperationTimeout)
+	storedArtifacts, err := s.artifacts.StoreBatch(artifactCtx, BatchArtifactWrite{
 		ObjectPath:     objectPath,
 		ManifestPath:   manifestPath,
 		CompressedBody: compressed,
 		Manifest:       manifestInput,
 	})
+	cancelArtifactOperation()
 	if err != nil {
 		if errors.Is(err, ErrRawArtifactConflict) {
 			if _, rejectErr := s.admissions.MarkRejected(

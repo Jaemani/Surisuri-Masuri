@@ -672,6 +672,8 @@ func TestFirestoreAdmissionStoreEmulatorCleanupTransitionWinsDeadlineRaces(t *te
 				stored.RecoveryAttemptCount != 0 || receiptHasLeaseFields(stored) ||
 				stored.CleanupMode != ingest.CleanupModeReservationExpiry ||
 				stored.CleanupOriginStatus != ingest.ReceiptReserved ||
+				stored.CleanupPolicyVersion != ingest.CleanupTransitionPolicyV1 ||
+				!stored.CleanupTransitionedAt.Equal(now) ||
 				!stored.CleanupQuiescenceUntil.Equal(now.Add(ingest.DefaultCleanupLateWriteGrace)) ||
 				hasStoredArtifactData(stored) || stored.RejectionCode != "" {
 				t.Fatalf("receipt after deadline race = %#v", stored)
@@ -704,6 +706,8 @@ func TestFirestoreAdmissionStoreEmulatorCleanupTransitionClosesExpiredStartedAtt
 		stored.Revision != persisted.Revision+1 || stored.RecoveryAttemptCount != persisted.RecoveryAttemptCount ||
 		receiptHasLeaseFields(stored) || stored.CleanupMode != ingest.CleanupModeReservationExpiry ||
 		stored.CleanupOriginStatus != ingest.ReceiptReserved ||
+		stored.CleanupPolicyVersion != ingest.CleanupTransitionPolicyV1 ||
+		!stored.CleanupTransitionedAt.Equal(now) ||
 		!stored.CleanupQuiescenceUntil.Equal(now.Add(ingest.DefaultCleanupLateWriteGrace)) {
 		t.Fatalf("stored cleanup transition = %#v", stored)
 	}
@@ -749,7 +753,8 @@ func TestFirestoreAdmissionStoreEmulatorCleanupTransitionRejectsMissingPriorAtte
 		!stored.LeaseHeartbeatAt.Equal(persisted.LeaseHeartbeatAt) ||
 		!stored.LeaseExpiresAt.Equal(persisted.LeaseExpiresAt) ||
 		!stored.NextRecoveryAt.Equal(persisted.NextRecoveryAt) || stored.CleanupMode != "" ||
-		!stored.CleanupQuiescenceUntil.IsZero() {
+		!stored.CleanupTransitionedAt.IsZero() || !stored.CleanupQuiescenceUntil.IsZero() ||
+		stored.CleanupPolicyVersion != "" {
 		t.Fatalf("receipt changed after missing attempt rollback: before=%#v after=%#v", persisted, stored)
 	}
 }
