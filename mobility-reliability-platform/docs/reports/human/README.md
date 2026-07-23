@@ -110,3 +110,4 @@
 | [HR-20260723-37](./HR-20260723-37-mobile-upload-ledger.md) | 모바일 SQLite upload ledger v2 | `draft` |
 | [HR-20260723-38](./HR-20260723-38-mobile-upload-materializer.md) | 모바일 upload materializer와 SQLite v3 | `draft` |
 | [HR-20260723-39](./HR-20260723-39-android-foreground-smoke.md) | Android foreground GPS·SQLite 재시작 복구 smoke | `draft` |
+| [HR-20260723-40](./HR-20260723-40-mobile-upload-lease.md) | 모바일 exact-body upload lease와 control-metadata hold | `draft` |
