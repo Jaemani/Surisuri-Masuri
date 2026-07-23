@@ -65,7 +65,7 @@ jobs:
       - name: Run tests
         run: pnpm test
 
-      - name: Test Firestore admission transactions
+      - name: Test Firestore admission and purge transactions
         run: >-
           pnpm --filter @mobility-reliability/firebase-rules exec firebase emulators:exec
           --config ../../firebase.json
@@ -73,7 +73,7 @@ jobs:
           --only firestore
           "cd ../../services/telemetry-gateway &&
           go test -mod=readonly -count=1 -race -timeout 60s ./internal/firebaseadapter -run FirestoreAdmissionStoreEmulator -v &&
-          go test -mod=readonly -count=1 -race -timeout 60s ./internal/firebaseadapter -run 'FirestoreEmulatorReceiptPurge(Attempt|LegacyInventory)' -v"
+          go test -mod=readonly -count=1 -race -timeout 120s ./internal/firebaseadapter -run 'FirestoreEmulatorReceiptPurge(Attempt|LegacyInventory|Linked)' -v"
 
       - name: Test Cloud Storage artifact lineage
         working-directory: mobility-reliability-platform/services/telemetry-gateway

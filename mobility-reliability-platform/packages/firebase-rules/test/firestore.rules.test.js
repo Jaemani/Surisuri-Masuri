@@ -541,7 +541,7 @@ describe('server-owned mutation boundary', () => {
     );
   });
 
-  test('ingest receipts and idempotency records deny client reads and writes', async () => {
+  test('ingest internals deny client reads, lists, and writes', async () => {
     await seedMembership('tenant-a', 'member-a');
     await seedDocument('tenants/tenant-a/ingestReceipts/batch-1', {
       tenant_id: 'tenant-a',
@@ -555,6 +555,14 @@ describe('server-owned mutation boundary', () => {
         attempt_id: 'attempt-1'
       }
     );
+    await seedDocument(
+      'tenants/tenant-a/ingestReceipts/batch-1/purgeLinks/link-1',
+      {
+        tenant_id: 'tenant-a',
+        receipt_id: 'batch-1',
+        link_id: 'link-1'
+      }
+    );
     await seedDocument('tenants/tenant-a/ingestIdempotency/key-1', {
       tenant_id: 'tenant-a',
       body_hash: 'sha256:idempotency'
@@ -563,6 +571,11 @@ describe('server-owned mutation boundary', () => {
       tenant_id: 'tenant-a',
       receipt_id: 'batch-1',
       cleanup_id: 'cleanup-1'
+    });
+    await seedDocument('tenants/tenant-a/ingestIntegrityFindings/finding-1', {
+      tenant_id: 'tenant-a',
+      receipt_id: 'batch-1',
+      finding_id: 'finding-1'
     });
     await seedDocument('tenants/tenant-a/ingestClientBatches/key-1', {
       tenant_id: 'tenant-a',
@@ -582,10 +595,32 @@ describe('server-owned mutation boundary', () => {
       )
     );
     await assertFails(
+      getDoc(
+        doc(
+          db,
+          'tenants/tenant-a/ingestReceipts/batch-1/purgeLinks/link-1'
+        )
+      )
+    );
+    await assertFails(
+      getDocs(
+        collection(
+          db,
+          'tenants/tenant-a/ingestReceipts/batch-1/purgeLinks'
+        )
+      )
+    );
+    await assertFails(
       getDoc(doc(db, 'tenants/tenant-a/ingestIdempotency/key-1'))
     );
     await assertFails(
       getDoc(doc(db, 'tenants/tenant-a/ingestCleanupTargets/cleanup-1'))
+    );
+    await assertFails(
+      getDoc(doc(db, 'tenants/tenant-a/ingestIntegrityFindings/finding-1'))
+    );
+    await assertFails(
+      getDocs(collection(db, 'tenants/tenant-a/ingestIntegrityFindings'))
     );
     await assertFails(
       getDoc(doc(db, 'tenants/tenant-a/ingestClientBatches/key-1'))
@@ -609,12 +644,31 @@ describe('server-owned mutation boundary', () => {
       )
     );
     await assertFails(
+      setDoc(
+        doc(
+          db,
+          'tenants/tenant-a/ingestReceipts/batch-1/purgeLinks/link-2'
+        ),
+        {
+          tenant_id: 'tenant-a',
+          receipt_id: 'batch-1',
+          link_id: 'link-2'
+        }
+      )
+    );
+    await assertFails(
       setDoc(doc(db, 'tenants/tenant-a/ingestIdempotency/key-2'), {
         tenant_id: 'tenant-a'
       })
     );
     await assertFails(
       setDoc(doc(db, 'tenants/tenant-a/ingestCleanupTargets/cleanup-2'), {
+        tenant_id: 'tenant-a',
+        receipt_id: 'batch-1'
+      })
+    );
+    await assertFails(
+      setDoc(doc(db, 'tenants/tenant-a/ingestIntegrityFindings/finding-2'), {
         tenant_id: 'tenant-a',
         receipt_id: 'batch-1'
       })

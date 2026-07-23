@@ -1089,7 +1089,7 @@ func receiptPurgeMutationResult(
 
 func writeReceiptPurgeJobMutation(
 	ctx context.Context,
-	transaction receiptPurgeAttemptTransaction,
+	transaction receiptPurgeJobMutationTransaction,
 	preJob ingest.ReceiptPurgeJob,
 	nextJob ingest.ReceiptPurgeJob,
 ) error {
@@ -1110,6 +1110,19 @@ func writeReceiptPurgeJobMutation(
 			Path: "attempt_deleted_count", Value: nextJob.AttemptDeletedCount,
 		})
 	}
+	if nextJob.LinkCursor != preJob.LinkCursor {
+		updates = append(updates, firestore.Update{Path: "link_cursor", Value: nextJob.LinkCursor})
+	}
+	if nextJob.TargetDeletedCount != preJob.TargetDeletedCount {
+		updates = append(updates, firestore.Update{
+			Path: "target_deleted_count", Value: nextJob.TargetDeletedCount,
+		})
+	}
+	if nextJob.FindingDeletedCount != preJob.FindingDeletedCount {
+		updates = append(updates, firestore.Update{
+			Path: "finding_deleted_count", Value: nextJob.FindingDeletedCount,
+		})
+	}
 	if nextJob.Status == ingest.ReceiptPurgeJobHold {
 		updates = append(updates,
 			firestore.Update{Path: "held_from_status", Value: string(nextJob.HeldFromStatus)},
@@ -1122,6 +1135,10 @@ func writeReceiptPurgeJobMutation(
 		return normalizeAdmissionError(ctx, updateErr)
 	}
 	return nil
+}
+
+type receiptPurgeJobMutationTransaction interface {
+	Update(context.Context, string, []firestore.Update) error
 }
 
 func validReceiptPurgeAttemptPhaseCommandIdentity(command ingest.ReceiptPurgeAttemptPhaseCommand) bool {
