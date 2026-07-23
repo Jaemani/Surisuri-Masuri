@@ -13,6 +13,10 @@ import {
   materializeNextUploadBatchCore,
   type UploadBatchMaterializationResult,
 } from './uploadMaterializer';
+import {
+  leaseNextUploadBatchCore,
+  type UploadLeaseResult,
+} from './uploadLease';
 
 const DATABASE_NAME = 'mobility-telemetry-v1.sqlite';
 
@@ -63,6 +67,7 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
   await database.execAsync(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
+    PRAGMA busy_timeout = 5000;
   `);
 
   const versionRow = await database.getFirstAsync<{ user_version: number }>(
@@ -451,7 +456,7 @@ export async function materializeNextUploadBatch(): Promise<UploadBatchMateriali
     useNewConnection: true,
   });
   try {
-    await connection.execAsync('PRAGMA foreign_keys = ON;');
+    await connection.execAsync('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const foreignKeys = await connection.getFirstAsync<{ foreign_keys: number }>(
       'PRAGMA foreign_keys',
     );
@@ -475,6 +480,47 @@ export async function materializeNextUploadBatch(): Promise<UploadBatchMateriali
       {
         createClientBatchId: () => Crypto.randomUUID(),
         now: () => new Date().toISOString(),
+        sha256: (body) =>
+          Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, body),
+      },
+    );
+  } finally {
+    await connection.closeAsync();
+  }
+}
+
+export async function leaseNextUploadBatch(): Promise<UploadLeaseResult> {
+  await getTelemetryDatabase();
+  const connection = await SQLite.openDatabaseAsync(DATABASE_NAME, {
+    useNewConnection: true,
+  });
+  try {
+    await connection.execAsync('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+    const foreignKeys = await connection.getFirstAsync<{ foreign_keys: number }>(
+      'PRAGMA foreign_keys',
+    );
+    if (foreignKeys?.foreign_keys !== 1) {
+      throw new Error('UPLOAD_DATABASE_FOREIGN_KEYS_DISABLED');
+    }
+
+    return await leaseNextUploadBatchCore(
+      {
+        withExclusiveTransactionAsync: async (task) => {
+          await connection.execAsync('BEGIN IMMEDIATE;');
+          try {
+            await task(connection);
+            await connection.execAsync('COMMIT;');
+          } catch (error) {
+            await connection.execAsync('ROLLBACK;').catch(() => undefined);
+            throw error;
+          }
+        },
+      },
+      {
+        createLeaseOwnerId: () => Crypto.randomUUID(),
+        now: () => new Date().toISOString(),
+        leaseExpiresAt: (now) =>
+          new Date(Date.parse(now) + 2 * 60 * 1_000).toISOString(),
         sha256: (body) =>
           Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, body),
       },

@@ -2,6 +2,7 @@ import {
   buildImmutableTelemetryBatch,
   MAX_TELEMETRY_BATCH_SAMPLES,
 } from './syncProtocol';
+import { requireLowercaseSha256 } from './uploadDigest';
 
 type SqlValue = string | number | null;
 
@@ -78,12 +79,6 @@ function readMockLocation(value: number | null): boolean | null {
   if (value === 0) return false;
   if (value === 1) return true;
   throw new Error('UPLOAD_SAMPLE_MOCK_LOCATION_INVALID');
-}
-
-function requireLowercaseSha256(value: string): void {
-  if (!/^[0-9a-f]{64}$/.test(value)) {
-    throw new Error('UPLOAD_BATCH_DIGEST_INVALID');
-  }
 }
 
 /**
