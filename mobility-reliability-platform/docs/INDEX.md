@@ -54,6 +54,7 @@
 - 신규 monorepo, 문서 스트림, 계약·Firebase Rules 테스트 기반
 - React Native 앱의 foreground 위치 수집 코드와 SQLite outbox 구현, JS 정적 export·순수 policy 검증. native SQLite/GPS callback과 실기기 동작은 미검증
 - [ADR-0034](./decisions/ADR-0034-immutable-mobile-upload-body.md)에 따라 모바일 `telemetry-batch.v2` canonical body와 strict ACK·retry·hold 판정 protocol을 local pure component로 구현했다. 입력 key 순서·extra field가 wire bytes를 바꾸지 않으며 정확한 ID·count·state가 일치한 응답만 ACK한다. [EVD-20260723-045](./evidence/2026-07.md#evd-20260723-045--모바일-immutable-telemetry-upload-protocol)의 unit·typecheck 근거이며 SQLite batch 영속화, Firebase token, HTTP transport와 실기기·server E2E는 미구현이다.
+- 같은 ADR의 후속 local 증분으로 SQLite v2와 v1→v2 atomic migration, non-promotable local scope, append-only event, immutable batch body/item과 retry·ACK state invariant를 구현했다. Canonical JSON의 각 sample은 같은 position의 event ID·sequence·시간·좌표·sensor와 결합된다. [EVD-20260723-046](./evidence/2026-07.md#evd-20260723-046--모바일-sqlite-upload-ledger-v2)의 Node SQLite·local bundle 근거이며 materializer·digest runtime·Firebase token·HTTP·Expo native migration과 실기기 E2E는 미구현이다.
 - `telemetry-batch.v2` 계약과 raw telemetry에서 Firebase UID를 분리한 identity 경계
 - Go telemetry ingest kernel의 strict decode, 멱등성·receipt·object 저장 인터페이스, fail-closed HTTP 경계
 - Firebase Admin SDK dual-token verifier·App ID allowlist·production emulator guard factory의 local synthetic 검증. executable에는 미연결

@@ -23,7 +23,7 @@
 - wire builder는 허용된 field만 고정 순서로 명시 투영한다. 객체 spread, runtime extra field와 호출자 property 순서는 wire bytes에 영향을 주지 않는다.
 - optional sensor field는 canonical representation으로 정규화한다. `activityHint` 기본값은 `unknown`, nullable sensor 값은 `null`이다.
 - builder의 전송 산출물은 `clientBatchId`, `sampleCount`, exact JSON `body`다. 수정 가능한 typed batch를 재시도 경계에 노출하지 않는다.
-- 후속 SQLite store는 exact `body`와 digest를 ACK 전까지 보존한다. 앱 재시작과 lease 만료 뒤에도 body를 재생성하지 않는다.
+- SQLite schema는 exact `body`와 digest, 구성 event를 ACK 전까지 보존한다. 앱 재시작과 lease 만료 뒤에도 body를 재생성하지 않는다.
 - `200` 또는 `202`라도 response의 `clientBatchId`, `sampleCount`, receipt·server batch ID와 허용 state가 모두 일치할 때만 ACK한다. 불완전한 성공 응답은 같은 body로 재조회한다.
 - `409`는 서버의 bounded error code를 읽어 idempotency, client-batch, object conflict를 구분하고 자동 재시도하지 않는다. 오류 detail과 원본 좌표는 복사하지 않는다.
 - `401`은 token 갱신 경계, `403`과 계약 위반 4xx는 hold, `408`·`429`·5xx와 transport failure는 동일 body retry로 분류한다.
@@ -32,6 +32,8 @@
 ## 결과
 
 - 모바일 재시도와 서버 raw-body 멱등성 정의가 일치한다.
-- exact body의 SQLite migration, digest 검증, lease/backoff/ACK 전이는 후속 구현 gate다.
-- 현재 구현은 pure protocol이며 네트워크 전송, Firebase token, 실기기 재시작, 서버 ACK를 증명하지 않는다.
+- SQLite v2와 v1→v2 migration, local/server-bound 불변 scope, append-only event, immutable batch/body/item과 pending·lease·retry·ACK 상태 제약을 구현했다.
+- 기존 v1 행은 session·event를 보존하되 모두 `development_local_only`와 `local_only/not_applicable`로 migration하며 server-bound로 승격할 수 없다.
+- 실제 body를 생성해 저장하는 materializer, SHA-256 계산·재검증, backoff runner와 ACK transaction 호출 코드는 후속 구현 gate다.
+- 현재 구현은 pure protocol과 Node SQLite schema 경계이며 네트워크 전송, Firebase token, Expo native migration, 실기기 재시작과 서버 ACK를 증명하지 않는다.
 - 서버가 응답 계약을 바꾸면 모바일이 성공으로 추정하지 않고 같은 body 재시도 상태에 머문다.
