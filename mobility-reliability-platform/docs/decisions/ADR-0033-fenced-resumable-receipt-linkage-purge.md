@@ -259,7 +259,7 @@ R8k-c:
 
 각 gate는 별도 구현·증거·제품 업데이트를 가진다. R8k-a/b 완료만으로 receipt나 target·finding을 삭제 완료로 표현하지 않는다.
 
-### 10. 구현 상태 — R8k-a/b local gate 완료
+### 10. 구현 상태 — R8k-a/b 완료, R8k-c registry/backfill 부분 구현
 
 2026-07-23 commit `7a1d3ed`에서 R8k-a의 pure job/admission/outcome contract, deterministic purge key·linkage hash, strict Firestore job codec, receipt purge fence, create-once admission과 read-only response-loss correlation을 구현했다. Concurrent admission은 Firebase demo Firestore Emulator에서 created 1/replayed 1로 수렴했고 job과 receipt fence만 같은 commit lineage로 바뀌며 두 uniqueness index는 write 0이었다. Full/partial fence 뒤 existing recovery/cleanup lease claim과 cleanup target create도 fail-closed한다. Commit `5374be6`에서는 R8k-b 진입 전 advisory page discovery를 `page_size+1`, ordered document ID, separate lookahead로 bounded했다. 이 observation은 transaction 내 exact reread·delete 권한이 아니다.
 
@@ -267,7 +267,9 @@ R8k-c:
 
 `planned → attempts_purging`과 fresh exact-empty 확인 뒤 `attempts_purging → linked_documents_purging`도 job revision과 함께 원자 전환한다. Page·phase commit 응답 유실은 봉인된 pre/next state와 exact child presence를 fresh read로 비교하는 read-only correlation만 허용한다. Local contract·race와 Firebase demo Firestore Emulator 근거는 [EVD-20260723-042](../evidence/2026-07.md#evd-20260723-042--bounded-nested-recovery-attempt-purge)에 기록한다.
 
-R8k-a/b는 local/synthetic/Emulator 범위다. R8k-c inverse-link registry·legacy backfill, target/finding purge, fresh global empty verification, final receipt+index delete와 Rules/indexes가 남아 있으므로 ADR 상태는 계속 `proposed`다. Scheduler/startup/readiness와 staging·production에도 연결하지 않았으며 metadata purge 완료로 표현하지 않는다.
+2026-07-23 commits `bf5b95f`, `9f768d9`, `49e402c`, `0a2fad4`에서 R8k-c의 첫 부분인 inverse-link registry와 cleanup-target legacy backfill을 구현했다. 새 cleanup target과 deterministic receipt 하위 link는 같은 transaction에서 create되고 exact pair replay는 write 0이다. Legacy inventory는 tenant-wide `__name__` page 25+lookahead를 사용해 `receipt_id`가 누락된 문서도 관측하며, commit transaction은 current page·target·strict parent receipt·existing link를 다시 검증한 뒤 missing link만 생성한다. Poison 한 건은 whole-page write 0/cursor hold이고, integrity finding collection이 nonempty이면 strict finding codec/writer가 없으므로 unsupported로 중단한다. 근거는 [EVD-20260723-043](../evidence/2026-07.md#evd-20260723-043--cleanup-target-inverse-registry와-legacy-backfill)에 기록한다.
+
+R8k-a/b와 위 R8k-c 부분은 local/synthetic/Emulator 범위다. Integrity finding registry/backfill, bounded target/finding+link purge, fresh global empty/unregistered verification, final receipt+index delete와 Rules/indexes가 남아 있으므로 ADR 상태는 계속 `proposed`다. Scheduler/startup/readiness와 staging·production에도 연결하지 않았으며 metadata purge 완료로 표현하지 않는다.
 
 ## 결과와 위험
 
@@ -276,7 +278,8 @@ R8k-a/b는 local/synthetic/Emulator 범위다. R8k-c inverse-link registry·lega
 - Purge job은 최소 control evidence를 자체 retention까지 남기므로 삭제가 실제로 어디까지 진행됐는지 설명할 수 있다.
 - Query는 transaction 밖 advisory read이므로 모든 exact child를 transaction에서 다시 읽어야 한다. 이 규칙을 생략하면 stale page가 foreign document를 삭제할 수 있다.
 - Application fence는 out-of-band Admin SDK/IAM writer를 막지 못한다. Staging writer inventory와 least-privilege 검증 전에는 production purge를 활성화하지 않는다.
-- Integrity finding과 inverse-link schema가 아직 local code에 없으므로 R8k-c 전에는 full linkage purge가 완성되지 않는다. Registry rollout 전 legacy child와 out-of-band malformed writer는 별도 inventory gate가 필요하다.
+- Cleanup-target inverse-link schema와 legacy backfill은 local code에 있지만 integrity finding strict DTO/writer/backfill은 없다. Finding document 하나가 관측되면 backfill은 unsupported로 write 0 중단하며 full linkage purge는 아직 완성되지 않는다.
+- Legacy page의 `ObservedExhausted`는 순차 관측일 뿐 global orphan-zero가 아니다. Registry rollout 전 fresh cursorless inventory와 out-of-band Admin/IAM writer exclusion gate가 필요하다.
 - Operator hold release, held/accepted/rejected-origin cleanup, actual Storage deletion, scheduler/startup/readiness와 staging/production runtime은 이 결정의 구현 완료와 별개다.
 
 ## 연결 문서
@@ -291,5 +294,7 @@ R8k-a/b는 local/synthetic/Emulator 범위다. R8k-c inverse-link registry·lega
 - R8k-b 구현 증거: [EVD-20260723-042](../evidence/2026-07.md#evd-20260723-042--bounded-nested-recovery-attempt-purge)
 - R8k-b 제품 업데이트: [UPD-20260723-08](../product-updates/UPD-20260723-08-nested-recovery-attempt-purge.md)
 - R8k-b 사람 대상 리포트: [HR-20260723-33](../reports/human/HR-20260723-33-nested-recovery-attempt-purge.md)
-- R8k-c 구현 증거·업데이트·리포트: 구현 후 연결
+- R8k-c registry/backfill 부분 구현 증거: [EVD-20260723-043](../evidence/2026-07.md#evd-20260723-043--cleanup-target-inverse-registry와-legacy-backfill)
+- R8k-c registry/backfill 제품 업데이트: [UPD-20260723-09](../product-updates/UPD-20260723-09-legacy-purge-link-backfill.md)
+- R8k-c registry/backfill 사람 대상 리포트: [HR-20260723-34](../reports/human/HR-20260723-34-legacy-purge-link-backfill.md)
 - 인시던트: 해당 없음 — 설계 변경이며 production·staging·field 영향 없음
