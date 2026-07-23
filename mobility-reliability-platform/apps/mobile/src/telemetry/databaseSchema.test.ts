@@ -4,9 +4,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 
 import {
-  CREATE_TELEMETRY_SCHEMA_V2_SQL,
+  CREATE_TELEMETRY_SCHEMA_V3_SQL,
   CURRENT_TELEMETRY_SCHEMA_VERSION,
+  FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL,
   MIGRATE_TELEMETRY_V1_TO_V2_SQL,
+  MIGRATE_TELEMETRY_V2_TO_V3_SQL,
 } from './databaseSchema';
 import { buildImmutableTelemetryBatch } from './syncProtocol';
 
@@ -118,7 +120,9 @@ function createV1Database(database: InstanceType<typeof DatabaseSync>): void {
 function migrateV1LikeRuntime(database: InstanceType<typeof DatabaseSync>): void {
   database.exec('PRAGMA foreign_keys = OFF;');
   try {
-    database.exec(`BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}`);
+    database.exec(
+      `BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}${MIGRATE_TELEMETRY_V2_TO_V3_SQL}`,
+    );
     if (database.prepare('PRAGMA foreign_key_check').all().length > 0) {
       throw new Error('DATABASE_FOREIGN_KEY_CHECK_FAILED');
     }
@@ -216,10 +220,125 @@ function insertUploadBatch(
     );
 }
 
-describe('telemetry SQLite schema v2', () => {
+describe('telemetry SQLite schema v3', () => {
+  it('detects a malformed batch already stored by the v2 NULL-logic gap', () => {
+    const database = openDatabase();
+    createV1Database(database);
+    database.exec('PRAGMA foreign_keys = OFF;');
+    database.exec(`BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}COMMIT;`);
+    database.exec('PRAGMA foreign_keys = ON;');
+    insertSession(database, 'server_bound');
+    const body = JSON.parse(buildBatchBody()) as Record<string, unknown>;
+    body.tenantId = null;
+    database
+      .prepare(
+        `INSERT INTO telemetry_upload_batch (
+          client_batch_id, session_id, installation_id, tenant_id, device_id,
+          server_trip_id, consent_revision_id, body_json, body_sha256,
+          sample_count, state, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?, ?)`,
+      )
+      .run(
+        ids.batch,
+        ids.session,
+        ids.installation,
+        ids.tenant,
+        ids.device,
+        ids.trip,
+        ids.consent,
+        JSON.stringify(body),
+        'a'.repeat(64),
+        now,
+        now,
+      );
+
+    expect(database.prepare(FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL).get()).toEqual({
+      invalid: 1,
+    });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+
+    database.close();
+  });
+
+  it('upgrades an existing v2 trigger to the fail-closed v3 definition', () => {
+    const database = openDatabase();
+    createV1Database(database);
+    database.exec('PRAGMA foreign_keys = OFF;');
+    database.exec(`BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}COMMIT;`);
+    database.exec('PRAGMA foreign_keys = ON;');
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+
+    database.exec(`BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V2_TO_V3_SQL}COMMIT;`);
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({
+      user_version: CURRENT_TELEMETRY_SCHEMA_VERSION,
+    });
+    insertSession(database, 'server_bound');
+    const body = JSON.parse(buildBatchBody()) as Record<string, unknown>;
+    body.tenantId = null;
+    expect(() =>
+      database
+        .prepare(
+          `INSERT INTO telemetry_upload_batch (
+            client_batch_id, session_id, installation_id, tenant_id, device_id,
+            server_trip_id, consent_revision_id, body_json, body_sha256,
+            sample_count, state, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?, ?)`,
+        )
+        .run(
+          ids.batch,
+          ids.session,
+          ids.installation,
+          ids.tenant,
+          ids.device,
+          ids.trip,
+          ids.consent,
+          JSON.stringify(body),
+          'a'.repeat(64),
+          now,
+          now,
+        ),
+    ).toThrow(/UPLOAD_BATCH_INITIAL_STATE_INVALID/);
+
+    database.close();
+  });
+
+  it('rejects NULL canonical scope fields instead of bypassing the batch trigger', () => {
+    const database = openDatabase();
+    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+    insertSession(database, 'server_bound');
+    const body = JSON.parse(buildBatchBody()) as Record<string, unknown>;
+    body.tenantId = null;
+
+    expect(() =>
+      database
+        .prepare(
+          `INSERT INTO telemetry_upload_batch (
+            client_batch_id, session_id, installation_id, tenant_id, device_id,
+            server_trip_id, consent_revision_id, body_json, body_sha256,
+            sample_count, state, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?, ?)`,
+        )
+        .run(
+          ids.batch,
+          ids.session,
+          ids.installation,
+          ids.tenant,
+          ids.device,
+          ids.trip,
+          ids.consent,
+          JSON.stringify(body),
+          'a'.repeat(64),
+          now,
+          now,
+        ),
+    ).toThrow(/UPLOAD_BATCH_INITIAL_STATE_INVALID/);
+
+    database.close();
+  });
+
   it('creates upload tables and enforces the server-bound scope union', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V2_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
 
     expect(
       database.prepare('PRAGMA user_version').get() as { user_version: number },
@@ -232,7 +351,7 @@ describe('telemetry SQLite schema v2', () => {
     ).toThrow(/SESSION_UPLOAD_SCOPE_IMMUTABLE/);
 
     const missingScope = openDatabase();
-    missingScope.exec(CREATE_TELEMETRY_SCHEMA_V2_SQL);
+    missingScope.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
     expect(() =>
       missingScope
         .prepare(
@@ -249,7 +368,7 @@ describe('telemetry SQLite schema v2', () => {
 
   it('rejects invalid delivery-state and batch-ack unions', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V2_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
     insertSession(database, 'server_bound');
     database
       .prepare(
@@ -334,7 +453,7 @@ describe('telemetry SQLite schema v2', () => {
 
   it('never allows a local-only session to be promoted or batched', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V2_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
     insertSession(database, 'development_local_only');
     insertLocationEvent(database, 'local_only');
     database
@@ -380,7 +499,7 @@ describe('telemetry SQLite schema v2', () => {
 
   it('atomically binds only pending server-scoped samples to an immutable batch', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V2_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
     insertSession(database, 'server_bound');
     insertLocationEvent(database, 'telemetry_upload');
     database
@@ -520,7 +639,7 @@ describe('telemetry SQLite schema v2', () => {
 
   it('refuses to lease a batch whose item cardinality is incomplete', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V2_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
     insertSession(database, 'server_bound');
     insertLocationEvent(database, 'telemetry_upload');
     insertUploadBatch(database, 2);
@@ -633,7 +752,7 @@ describe('telemetry SQLite schema v2', () => {
       database.prepare('PRAGMA user_version').get() as { user_version: number },
     ).toEqual({ user_version: CURRENT_TELEMETRY_SCHEMA_VERSION });
     const freshDatabase = openDatabase();
-    freshDatabase.exec(CREATE_TELEMETRY_SCHEMA_V2_SQL);
+    freshDatabase.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
     expect(
       database.prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name`).all(),
     ).toEqual(

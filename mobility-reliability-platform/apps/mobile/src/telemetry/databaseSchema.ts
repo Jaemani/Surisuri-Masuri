@@ -1,6 +1,41 @@
-export const CURRENT_TELEMETRY_SCHEMA_VERSION = 2;
+export const CURRENT_TELEMETRY_SCHEMA_VERSION = 3;
 
-export const CREATE_TELEMETRY_SCHEMA_V2_SQL = `
+// Uses a safe JSON substitute so malformed JSON is reported as an invalid row
+// instead of making the migration audit itself throw a value-bearing error.
+export const FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL = `
+  WITH candidate AS (
+    SELECT
+      batch.*,
+      CASE WHEN json_valid(batch.body_json) = 1 THEN batch.body_json ELSE '{}' END
+        AS safe_body_json
+    FROM telemetry_upload_batch AS batch
+  )
+  SELECT 1 AS invalid
+  FROM candidate
+  WHERE NOT COALESCE((
+    json_valid(candidate.body_json) = 1
+    AND (SELECT COUNT(*) FROM json_each(candidate.safe_body_json)) = 10
+    AND json_extract(candidate.safe_body_json, '$.schemaVersion') = 'telemetry-batch.v2'
+    AND json_extract(candidate.safe_body_json, '$.clientBatchId') = candidate.client_batch_id
+    AND json_extract(candidate.safe_body_json, '$.tenantId') = candidate.tenant_id
+    AND json_extract(candidate.safe_body_json, '$.deviceId') = candidate.device_id
+    AND json_extract(candidate.safe_body_json, '$.tripId') = candidate.server_trip_id
+    AND json_extract(candidate.safe_body_json, '$.clientSessionId') = candidate.session_id
+    AND json_extract(candidate.safe_body_json, '$.installationId') = candidate.installation_id
+    AND json_extract(candidate.safe_body_json, '$.consentRevisionId') = candidate.consent_revision_id
+    AND json_type(candidate.safe_body_json, '$.sentAt') = 'text'
+    AND json_type(candidate.safe_body_json, '$.samples') = 'array'
+    AND json_array_length(candidate.safe_body_json, '$.samples') = candidate.sample_count
+    AND NOT EXISTS (
+      SELECT 1 FROM json_each(candidate.safe_body_json, '$.samples') AS sample
+      WHERE json_type(sample.value) != 'object'
+        OR (SELECT COUNT(*) FROM json_each(sample.value)) != 12
+    )
+  ), 0)
+  LIMIT 1
+`;
+
+export const CREATE_TELEMETRY_SCHEMA_V3_SQL = `
   CREATE TABLE IF NOT EXISTS trip_session_projection (
     session_id TEXT PRIMARY KEY NOT NULL,
     installation_id TEXT NOT NULL,
@@ -133,7 +168,7 @@ export const CREATE_TELEMETRY_SCHEMA_V2_SQL = `
 
   CREATE TRIGGER IF NOT EXISTS validate_initial_outbox_state
     BEFORE INSERT ON outbox_delivery
-    WHEN NOT (
+    WHEN NOT COALESCE((
       NEW.attempt_count = 0
       AND NEW.next_attempt_at IS NULL
       AND NEW.acknowledged_at IS NULL
@@ -143,7 +178,7 @@ export const CREATE_TELEMETRY_SCHEMA_V2_SQL = `
         OR
         (NEW.delivery_scope = 'telemetry_upload' AND NEW.state = 'pending')
       )
-    )
+    ), 0)
     BEGIN
       SELECT RAISE(ABORT, 'OUTBOX_INITIAL_STATE_INVALID');
     END;
@@ -257,7 +292,7 @@ export const CREATE_TELEMETRY_SCHEMA_V2_SQL = `
 
   CREATE TRIGGER IF NOT EXISTS validate_initial_upload_batch_state
     BEFORE INSERT ON telemetry_upload_batch
-    WHEN NOT (
+    WHEN NOT COALESCE((
       NEW.state = 'pending'
       AND NEW.attempt_count = 0
       AND NEW.lease_owner_id IS NULL
@@ -287,7 +322,7 @@ export const CREATE_TELEMETRY_SCHEMA_V2_SQL = `
         WHERE json_type(sample.value) != 'object'
           OR (SELECT COUNT(*) FROM json_each(sample.value)) != 12
       )
-    )
+    ), 0)
     BEGIN
       SELECT RAISE(ABORT, 'UPLOAD_BATCH_INITIAL_STATE_INVALID');
     END;
@@ -537,7 +572,7 @@ export const CREATE_TELEMETRY_SCHEMA_V2_SQL = `
     value TEXT NOT NULL
   );
 
-  PRAGMA user_version = 2;
+  PRAGMA user_version = 3;
 `;
 
 // The caller must disable foreign_keys before beginning this transaction,
@@ -1079,4 +1114,50 @@ export const MIGRATE_TELEMETRY_V1_TO_V2_SQL = `
     END;
 
   PRAGMA user_version = 2;
+`;
+
+// Schema v2 accepted a NULL body scope because `WHEN NOT (...)` evaluates to
+// NULL, not true, when one of the JSON comparisons is NULL. Recreate the
+// trigger with an explicit fail-closed COALESCE before enabling v3.
+export const MIGRATE_TELEMETRY_V2_TO_V3_SQL = `
+  DROP TRIGGER IF EXISTS validate_initial_upload_batch_state;
+
+  CREATE TRIGGER validate_initial_upload_batch_state
+    BEFORE INSERT ON telemetry_upload_batch
+    WHEN NOT COALESCE((
+      NEW.state = 'pending'
+      AND NEW.attempt_count = 0
+      AND NEW.lease_owner_id IS NULL
+      AND NEW.lease_expires_at IS NULL
+      AND NEW.next_attempt_at IS NULL
+      AND NEW.receipt_id IS NULL
+      AND NEW.server_batch_id IS NULL
+      AND NEW.server_state IS NULL
+      AND NEW.replay IS NULL
+      AND NEW.acknowledged_at IS NULL
+      AND NEW.last_error_code IS NULL
+      AND json_valid(NEW.body_json) = 1
+      AND (SELECT COUNT(*) FROM json_each(NEW.body_json)) = 10
+      AND json_extract(NEW.body_json, '$.schemaVersion') = 'telemetry-batch.v2'
+      AND json_extract(NEW.body_json, '$.clientBatchId') = NEW.client_batch_id
+      AND json_extract(NEW.body_json, '$.tenantId') = NEW.tenant_id
+      AND json_extract(NEW.body_json, '$.deviceId') = NEW.device_id
+      AND json_extract(NEW.body_json, '$.tripId') = NEW.server_trip_id
+      AND json_extract(NEW.body_json, '$.clientSessionId') = NEW.session_id
+      AND json_extract(NEW.body_json, '$.installationId') = NEW.installation_id
+      AND json_extract(NEW.body_json, '$.consentRevisionId') = NEW.consent_revision_id
+      AND json_type(NEW.body_json, '$.sentAt') = 'text'
+      AND json_type(NEW.body_json, '$.samples') = 'array'
+      AND json_array_length(NEW.body_json, '$.samples') = NEW.sample_count
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(NEW.body_json, '$.samples') AS sample
+        WHERE json_type(sample.value) != 'object'
+          OR (SELECT COUNT(*) FROM json_each(sample.value)) != 12
+      )
+    ), 0)
+    BEGIN
+      SELECT RAISE(ABORT, 'UPLOAD_BATCH_INITIAL_STATE_INVALID');
+    END;
+
+  PRAGMA user_version = 3;
 `;

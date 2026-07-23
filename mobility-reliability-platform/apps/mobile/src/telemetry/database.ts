@@ -2,11 +2,17 @@ import * as Crypto from 'expo-crypto';
 import * as SQLite from 'expo-sqlite';
 
 import {
-  CREATE_TELEMETRY_SCHEMA_V2_SQL,
+  CREATE_TELEMETRY_SCHEMA_V3_SQL,
   CURRENT_TELEMETRY_SCHEMA_VERSION,
+  FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL,
   MIGRATE_TELEMETRY_V1_TO_V2_SQL,
+  MIGRATE_TELEMETRY_V2_TO_V3_SQL,
 } from './databaseSchema';
 import type { NormalizedLocationSample, SampleRejectionReason } from './samplePolicy';
+import {
+  materializeNextUploadBatchCore,
+  type UploadBatchMaterializationResult,
+} from './uploadMaterializer';
 
 const DATABASE_NAME = 'mobility-telemetry-v1.sqlite';
 
@@ -78,7 +84,7 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
 
   if (schemaVersion === 0) {
     try {
-      await database.execAsync(`BEGIN IMMEDIATE;${CREATE_TELEMETRY_SCHEMA_V2_SQL}`);
+      await database.execAsync(`BEGIN IMMEDIATE;${CREATE_TELEMETRY_SCHEMA_V3_SQL}`);
       const foreignKeyViolations = await database.getAllAsync('PRAGMA foreign_key_check');
       if (foreignKeyViolations.length > 0) {
         throw new Error('DATABASE_FOREIGN_KEY_CHECK_FAILED');
@@ -91,13 +97,25 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
     return;
   }
 
-  if (schemaVersion !== 1) {
+  if (schemaVersion !== 1 && schemaVersion !== 2) {
     throw new Error('DATABASE_SCHEMA_MIGRATION_UNAVAILABLE');
+  }
+  if (schemaVersion === 2) {
+    const invalidBatch = await database.getFirstAsync<{ invalid: number }>(
+      FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL,
+    );
+    if (invalidBatch) {
+      throw new Error('DATABASE_UPLOAD_BATCH_BODY_INVALID');
+    }
   }
 
   await database.execAsync('PRAGMA foreign_keys = OFF;');
   try {
-    await database.execAsync(`BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}`);
+    await database.execAsync(
+      `BEGIN IMMEDIATE;
+       ${schemaVersion === 1 ? MIGRATE_TELEMETRY_V1_TO_V2_SQL : ''}
+       ${MIGRATE_TELEMETRY_V2_TO_V3_SQL}`,
+    );
     const foreignKeyViolations = await database.getAllAsync('PRAGMA foreign_key_check');
     if (foreignKeyViolations.length > 0) {
       throw new Error('DATABASE_FOREIGN_KEY_CHECK_FAILED');
@@ -417,8 +435,51 @@ export async function getActiveTripSession(): Promise<TripSessionSummary | null>
 export async function getPendingUploadCount(): Promise<number> {
   const database = await getTelemetryDatabase();
   const row = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM outbox_delivery
-     WHERE delivery_scope = 'telemetry_upload' AND state = 'pending'`,
+    `SELECT
+       (SELECT COUNT(*) FROM outbox_delivery
+        WHERE delivery_scope = 'telemetry_upload' AND state = 'pending')
+       +
+       (SELECT COALESCE(SUM(sample_count), 0) FROM telemetry_upload_batch
+        WHERE state IN ('pending', 'leased')) AS count`,
   );
   return row?.count ?? 0;
+}
+
+export async function materializeNextUploadBatch(): Promise<UploadBatchMaterializationResult> {
+  await getTelemetryDatabase();
+  const connection = await SQLite.openDatabaseAsync(DATABASE_NAME, {
+    useNewConnection: true,
+  });
+  try {
+    await connection.execAsync('PRAGMA foreign_keys = ON;');
+    const foreignKeys = await connection.getFirstAsync<{ foreign_keys: number }>(
+      'PRAGMA foreign_keys',
+    );
+    if (foreignKeys?.foreign_keys !== 1) {
+      throw new Error('UPLOAD_DATABASE_FOREIGN_KEYS_DISABLED');
+    }
+
+    return await materializeNextUploadBatchCore(
+      {
+        withExclusiveTransactionAsync: async (task) => {
+          await connection.execAsync('BEGIN IMMEDIATE;');
+          try {
+            await task(connection);
+            await connection.execAsync('COMMIT;');
+          } catch (error) {
+            await connection.execAsync('ROLLBACK;').catch(() => undefined);
+            throw error;
+          }
+        },
+      },
+      {
+        createClientBatchId: () => Crypto.randomUUID(),
+        now: () => new Date().toISOString(),
+        sha256: (body) =>
+          Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, body),
+      },
+    );
+  } finally {
+    await connection.closeAsync();
+  }
 }
