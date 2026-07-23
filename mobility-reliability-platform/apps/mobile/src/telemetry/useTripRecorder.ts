@@ -5,6 +5,7 @@ import { AppState } from 'react-native';
 import {
   isBackgroundLocationAvailable,
   isBackgroundLocationRunning,
+  restartBackgroundLocation,
   startBackgroundLocation,
   stopBackgroundLocation,
 } from './backgroundLocationRuntime';
@@ -75,7 +76,7 @@ export function useTripRecorder() {
   const captureGuardRef = useRef(new CaptureGuard());
   const lastAcceptedTimestampRef = useRef<number | null>(null);
 
-  const refreshRuntimeState = useCallback(async () => {
+  const refreshRuntimeState = useCallback(async (recoverColdLaunch = false) => {
     const [
       permissionResponse,
       activeSession,
@@ -100,6 +101,23 @@ export function useTripRecorder() {
       ? toPermissionState(backgroundPermissionResponse)
       : 'checking';
     let backgroundRunning = detectedBackgroundRunning;
+    let backgroundRecoveryFailed = false;
+
+    if (
+      recoverColdLaunch &&
+      backgroundRunning &&
+      activeSession &&
+      normalizedBackgroundPermission === 'granted' &&
+      !backgroundTaskFailed
+    ) {
+      try {
+        await restartBackgroundLocation();
+        backgroundRunning = true;
+      } catch {
+        backgroundRunning = false;
+        backgroundRecoveryFailed = true;
+      }
+    }
 
     if (
       backgroundRunning &&
@@ -133,7 +151,8 @@ export function useTripRecorder() {
         captureMode,
         activeSession,
         pendingUploadCount,
-        errorCode: backgroundTaskFailed ? 'capture_failed' : null,
+        errorCode:
+          backgroundTaskFailed || backgroundRecoveryFailed ? 'capture_failed' : null,
       };
     });
   }, []);
@@ -150,7 +169,7 @@ export function useTripRecorder() {
       try {
         await getTelemetryDatabase();
         if (cancelled) return;
-        await refreshRuntimeState();
+        await refreshRuntimeState(true);
       } catch {
         if (!cancelled) {
           setState((current) => ({

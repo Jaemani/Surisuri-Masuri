@@ -21,6 +21,7 @@ import {
   BACKGROUND_LOCATION_TASK_NAME,
   isBackgroundLocationAvailable,
   isBackgroundLocationRunning,
+  restartBackgroundLocation,
   startBackgroundLocation,
   stopBackgroundLocation,
 } from './backgroundLocationRuntime';
@@ -93,5 +94,16 @@ describe('background location runtime', () => {
     expect(location.stopLocationUpdatesAsync).toHaveBeenCalledWith(
       BACKGROUND_LOCATION_TASK_NAME,
     );
+  });
+
+  it('re-registers a persisted task so a cold launch recreates the native service', async () => {
+    location.hasStartedLocationUpdatesAsync.mockResolvedValue(true);
+
+    await restartBackgroundLocation();
+
+    expect(location.stopLocationUpdatesAsync).toHaveBeenCalledWith(
+      BACKGROUND_LOCATION_TASK_NAME,
+    );
+    expect(location.startLocationUpdatesAsync).toHaveBeenCalledTimes(1);
   });
 });

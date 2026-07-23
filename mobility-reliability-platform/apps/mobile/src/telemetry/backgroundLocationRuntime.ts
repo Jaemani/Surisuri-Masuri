@@ -21,16 +21,7 @@ const BACKGROUND_LOCATION_OPTIONS: Location.LocationTaskOptions = {
   },
 };
 
-export async function isBackgroundLocationAvailable(): Promise<boolean> {
-  return TaskManager.isAvailableAsync();
-}
-
-export async function isBackgroundLocationRunning(): Promise<boolean> {
-  if (!(await isBackgroundLocationAvailable())) return false;
-  return Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK_NAME);
-}
-
-export async function startBackgroundLocation(): Promise<void> {
+async function assertBackgroundTaskCanStart(): Promise<void> {
   let available: boolean;
   try {
     available = await TaskManager.isAvailableAsync();
@@ -43,7 +34,29 @@ export async function startBackgroundLocation(): Promise<void> {
   if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK_NAME)) {
     throw new Error('BACKGROUND_TASK_UNDEFINED');
   }
+}
+
+export async function isBackgroundLocationAvailable(): Promise<boolean> {
+  return TaskManager.isAvailableAsync();
+}
+
+export async function isBackgroundLocationRunning(): Promise<boolean> {
+  if (!(await isBackgroundLocationAvailable())) return false;
+  return Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK_NAME);
+}
+
+export async function startBackgroundLocation(): Promise<void> {
+  await assertBackgroundTaskCanStart();
   if (await isBackgroundLocationRunning()) return;
+  await Location.startLocationUpdatesAsync(
+    BACKGROUND_LOCATION_TASK_NAME,
+    BACKGROUND_LOCATION_OPTIONS,
+  );
+}
+
+export async function restartBackgroundLocation(): Promise<void> {
+  await stopBackgroundLocation();
+  await assertBackgroundTaskCanStart();
   await Location.startLocationUpdatesAsync(
     BACKGROUND_LOCATION_TASK_NAME,
     BACKGROUND_LOCATION_OPTIONS,
