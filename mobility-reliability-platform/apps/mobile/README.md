@@ -13,6 +13,8 @@ React Native와 Expo 기반의 사용자·수리사 모바일 앱입니다. Andr
 - 앱 재시작 시 종료되지 않은 주행을 찾아 사용자가 재개·종료 가능
 - Auth·기기·동의가 없는 현재 세션은 `development_local_only`로 저장해 후속 업로드 대상에서 제외
 - Android application backup 비활성화
+- Android 11 emulator에서 Expo Go 57로 권한 요청, 합성 foreground GPS 4건 저장,
+  강제종료 뒤 active session·sample count 복구를 실제 확인
 - lease·backoff·ACK store, HTTP transport와 background 위치 수집은 미착수
 
 화면에는 원본 좌표를 표시하지 않고 저장된 sample 수와 **실제 server-bound upload 대기 수**만 보여줍니다. 현재 UI는 local-only session만 만들므로 이 값은 0이며, 개발 로그에도 좌표를 출력하지 않습니다.
@@ -40,5 +42,13 @@ pnpm test
 ```
 
 현재 정적 검사와 Node SQLite schema 테스트는 Expo native SQLite나 실기기 GPS 동작을 증명하지 않습니다. Android는 WSL2와 Windows ADB를 연결하고, iPhone background 기능은 EAS development build에서 별도로 검증합니다.
+
+WSL 저장소와 Windows Android emulator를 연결하는 재현 절차와 화면 근거는
+[WSL Runbook](../../docs/development/WSL_RUNBOOK.md#android-에뮬레이터-빠른-데모)과
+[EVD-20260723-048](../../docs/evidence/2026-07.md#evd-20260723-048--android-foreground-gps와-sqlite-재시작-복구-smoke)에 있습니다.
+
+이 native smoke는 fresh SQLite v3 open과 현재 local-only foreground 흐름을
+검증합니다. 기존 v1/v2 실제 파일 migration, background 수집, offline HTTP
+reconnect, server ACK와 iPhone 동작은 검증하지 않습니다.
 
 커밋 전의 unversioned SQLite prototype을 실기기에서 실행한 적이 있다면 현재 앱은 이를 자동 변환하지 않고 안전하게 중단합니다. Version 1 database는 v2를 거쳐 v3로 transaction migration하며 session·event·installation metadata를 보존하고 기존 delivery metadata는 non-deliverable state로 대체합니다. V2 batch body에 canonical scope 결함이 있으면 자동 수정·삭제하지 않고 migration을 중단합니다. Android/iPhone의 실제 v1/v2 파일 migration과 앱 재시작은 아직 별도 검증이 필요합니다.

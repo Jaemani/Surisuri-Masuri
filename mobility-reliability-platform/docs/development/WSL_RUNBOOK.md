@@ -7,7 +7,11 @@
 - Node.js: `v22.14.0`
 - pnpm: `11.8.0`
 - Java: OpenJDK 21 — Firebase Emulator 실행 가능
-- `adb`, `adb.exe`: 현재 WSL PATH에서 확인되지 않음
+- Windows Android SDK: `C:\Users\Jaeman\AppData\Local\Android\Sdk`
+- Windows platform-tools: 설치·ADB 연결 확인
+- Windows emulator: `36.6.11.0`, WHPX 사용 가능
+- Local AVD: `Surisuri_API_30` — Android 11 / Google Play / x86
+- `adb.exe`: WSL PATH에는 없으므로 아래 절대 경로로 실행
 - Go: 현재 WSL PATH에서 확인되지 않음
 
 환경이 바뀔 때 다음을 실행한다.
@@ -23,6 +27,76 @@ rtk pnpm doctor
 3. Git 줄바꿈은 저장소 `.gitattributes`의 LF를 따른다.
 4. WSL의 `localhost`, Windows host, Android/iPhone의 `localhost`는 서로 같은 주소가 아니다.
 5. 원본 GPS와 실제 사용자 데이터는 디버그 로그, Metro console, Crashlytics에 출력하지 않는다.
+
+## Android 에뮬레이터 빠른 데모
+
+2026-07-23에 WSL 저장소, Windows emulator와 Expo Go 57 조합으로 현재
+foreground vertical slice를 실제 실행했다. 저장소를 Windows로 복제하지 않는다.
+
+### 1. AVD 실행
+
+PowerShell에서 실행하거나 WSL에서 다음 명령을 호출한다.
+
+```bash
+rtk proxy powershell.exe -NoProfile -Command \
+  "Start-Process -FilePath 'C:\Users\Jaeman\AppData\Local\Android\Sdk\emulator\emulator.exe' \
+  -ArgumentList '-avd','Surisuri_API_30','-gpu','auto'"
+```
+
+부팅 확인:
+
+```bash
+rtk proxy /mnt/c/Users/Jaeman/AppData/Local/Android/Sdk/platform-tools/adb.exe \
+  -s emulator-5554 shell getprop sys.boot_completed
+```
+
+결과가 `1`이어야 한다. ADB 목록에 emulator가 보이지 않지만 `5554/5555`가
+listen 중이면 한 번 `adb.exe connect 127.0.0.1:5555`로 등록을 유도하고, 중복
+transport가 생기면 `adb.exe disconnect 127.0.0.1:5555`로 정리한다.
+
+### 2. Metro와 reverse 연결
+
+WSL에서:
+
+```bash
+rtk pnpm --filter @mobility-reliability/mobile exec expo start --go --localhost
+
+rtk proxy /mnt/c/Users/Jaeman/AppData/Local/Android/Sdk/platform-tools/adb.exe \
+  -s emulator-5554 reverse tcp:8081 tcp:8081
+```
+
+Expo Go 57이 설치된 emulator에서 프로젝트 URL을 연다.
+
+```bash
+rtk proxy /mnt/c/Users/Jaeman/AppData/Local/Android/Sdk/platform-tools/adb.exe \
+  -s emulator-5554 shell am start \
+  -a android.intent.action.VIEW \
+  -d 'exp://127.0.0.1:8081'
+```
+
+SDK 57용 Expo Go APK의 공식 release는
+`https://github.com/expo/expo-go-releases/releases/download/Expo-Go-57.0.2/Expo-Go-57.0.2.apk`다.
+다운로드한 파일은 설치 전 크기 `208277642` bytes인지 확인한다. 이 APK와 Expo
+Go는 현재 foreground smoke에만 사용한다.
+
+### 3. 현재 확인 가능한 데모
+
+- 초기 SQLite open과 `기록 대기` 화면
+- Android foreground 위치 권한 요청
+- 합성 emulator 위치 sample의 SQLite append와 저장 수 증가
+- `development_local_only`이므로 server upload 대기 수 0 유지
+- Expo Go 강제종료 뒤 active session과 sample count 복구
+- 복구된 session의 기록 재개 또는 명시적 종료
+
+화면 근거는 [EVD-20260723-048](../evidence/2026-07.md#evd-20260723-048--android-foreground-gps와-sqlite-재시작-복구-smoke)에 있다.
+
+### 이 데모가 증명하지 않는 것
+
+- Expo Go는 background GPS, foreground service나 독립 native build를 증명하지 않는다.
+- 현재 AVD는 Android 11 x86의 한 환경일 뿐 Android/iPhone 호환성 전체가 아니다.
+- 합성 GPS는 실제 야외 정확도, 배터리, OEM process kill을 증명하지 않는다.
+- Server-bound session, Firebase Auth/App Check, HTTP upload와 ACK는 아직 없다.
+- Background 게이트부터는 Expo development build와 Android/iPhone 실기기를 사용한다.
 
 ## Android 실기기
 
