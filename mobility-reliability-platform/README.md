@@ -12,7 +12,9 @@
 
 - 2026년 5월 1일 ~ 2026년 12월 31일
 - 기술 정기리포트: 매월 2회, 총 16회
-- 현재 상태: 신규 코드베이스 및 운영 문서 기반 구축
+- 현재 상태: 신규 코드베이스에서 foreground GPS native smoke, background GPS
+  source/static gate와 local telemetry 원장·수집 경계를 구현 중. Store·staging 배포와
+  background 실기기 수명주기는 미검증
 
 ## 목표 제품
 

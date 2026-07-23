@@ -148,7 +148,12 @@ PostgreSQL/PostGIS, Kafka, Kubernetes는 필요성이 측정되기 전에는 초
 
 ## 11. 현재 실제 상태
 
-2026-07-23 기준 신규 저장소 기반, Firebase Rules, foreground GPS/SQLite outbox 코드와 정적·순수 policy 검사, telemetry v2 계약, fail-closed Go ingest kernel까지 로컬·클린 러너 증거가 있다. 그 뒤의 telemetry authorization, atomic admission, immutable artifact 계보도 다음 범위에서만 검증됐다.
+2026-07-23 기준 신규 저장소 기반, Firebase Rules, foreground GPS native smoke,
+background GPS source/static gate, SQLite outbox와 telemetry v2 계약, fail-closed Go
+ingest kernel까지 범위별 로컬 증거가 있다. Background는 전역 task·명시적 권한,
+bounded callback과 DB timestamp 단조성 코드만 검증했고 Android/iPhone native
+lifecycle 증거는 없다. 그 뒤의 telemetry authorization, atomic admission,
+immutable artifact 계보도 다음 범위에서만 검증됐다.
 
 - active tenant·beneficiary·installation·trip·assignment·현재 동의를 함께 검사하는 authorization policy와 Firestore exact-read adapter는 [EVD-20260721-012](./evidence/2026-07.md#evd-20260721-012--firestore-텔레메트리-권한-snapshot)의 local synthetic test 범위에서 확인됐다. client용 Firestore read matrix는 [EVD-20260721-013](./evidence/2026-07.md#evd-20260721-013--firestore-client-최소권한-read-matrix)의 Rules Emulator에서 확인됐지만 production Rules 배포와 실제 앱 query는 미검증이다.
 - authorization 재평가와 두 uniqueness index·최초 receipt 생성을 한 Firestore transaction에 묶은 admission adapter는 [EVD-20260721-014](./evidence/2026-07.md#evd-20260721-014--원자적-telemetry-admission과-receipt-lineage)의 local fake seam과 [EVD-20260721-015](./evidence/2026-07.md#evd-20260721-015--firestore-admission-transaction-emulator-integration)의 concurrent same-batch에서 확인됐다. production ADC/IAM과 실제 철회 transaction 경쟁은 미검증이다.
@@ -178,11 +183,15 @@ PostgreSQL/PostGIS, Kafka, Kubernetes는 필요성이 측정되기 전에는 초
 - R6 component를 이미 claim된 receipt 하나에 대해 bounded 순서로 실행하는 `ForwardRecoveryReconciler`도 `main`에 구현됐다. Production constructor는 private classifier·validator·authorizer를 내부 합성하고 Storage에는 manifest-only port만 허용한다. Complete/raw-only 2-pass, renewal hard epoch, operational/finalizer budget 분리, exact outcome과 attempt-failure barrier, late-commit old-query 재확인, caller cancellation failure/disposition을 12개 orchestration test로 고정했다. [EVD-20260722-028](./evidence/2026-07.md#evd-20260722-028--bounded-forward-reconciler-composition)의 local/Emulator/testbench/clean CI 근거이며 candidate query·claim outer worker, startup·scheduler·staging 증거는 아니다.
 - R7의 bounded outer worker component도 `main`에 구현됐다. Tenant별 `reserved + next_recovery_at <= fixed cutoff` query를 `next_recovery_at, document ID` 순서로 page하고, advisory checkpoint에 cursor와 같은 scan cutoff를 CAS 저장한다. Candidate/checkpoint는 권한이 아니며 fresh `ClaimRecoveryLease`가 검증된 `Acquired`를 반환한 항목만 R6에 전달한다. Malformed advisory item, claim 응답 불명확, item 오류·panic은 다음 후보와 격리하고 page/item/run budget과 low-cardinality observation으로 닫는다. [ADR-0021](./decisions/ADR-0021-bounded-forward-recovery-worker.md)과 [EVD-20260722-029](./evidence/2026-07.md#evd-20260722-029--bounded-forward-recovery-worker와-cross-run-checkpoint)의 local/Firestore Emulator 범위이며 executable startup·scheduler·metrics exporter·staging index/IAM은 아직 연결·검증하지 않았다.
 
-native SQLite/GPS callback과 실기기 동작은 아직 검증하지 않았고, production adapter가 executable에 연결되지 않아 gateway는 의도적으로 ingest를 받지 않는다. 현재 `/healthz` 외 readiness와 ingest는 계속 fail-closed여야 한다.
+Foreground Android emulator smoke 외 background native SQLite/GPS callback과
+Android/iPhone 실기기 동작은 아직 검증하지 않았다. Production adapter도
+executable에 연결되지 않아 gateway는 의도적으로 ingest를 받지 않는다. 현재
+`/healthz` 외 readiness와 ingest는 계속 fail-closed여야 한다.
 
 현재 상태를 다음 단계로 과장하지 않는다.
 
-- background GPS와 Android/iPhone 실기기 결과는 아직 별도 증거가 필요하다.
+- background GPS 코드·정적 설정은 구현됐지만 Android/iPhone 실기기 lifecycle
+  결과는 아직 별도 증거가 필요하다.
 - Firebase verifier 구현은 runtime wiring·실제 token 검증·Cloud Run 배포 전에는 운영 인증 완료가 아니다.
 - recovery attempt의 started·completed·failed protocol, stale closure, authorization disposition과 이를 호출하는 bounded candidate worker component는 local/Emulator에서 구현됐다. Cleanup-only claim, reservation-expiry dry-run target, generation-pinned delete/audit, cleanup progress persistence, paired signed read-only absence persistence, progress-bearing expired takeover, artifact별 durable phase executor, success-only atomic finalizer, retry·hold failure terminal과 sealed terminal orchestrator도 local component로 구현됐다. Takeover는 old ledger를 마지막 persisted phase time에서 검증하고 prior progress를 보존한 채 새 fence의 pristine attempt를 원자 생성하며 old target·outcome·absence를 상속하지 않는다. Phase executor는 exact durable dispatch winner만 single-artifact mutation을 실행하고 `unknown` 뒤 audit·counterpart 호출을 차단한다. Terminal orchestrator는 sealed intent만 success finalizer 또는 failure disposition 하나에 전달하고 response loss는 read-only로 상관한다. Scheduler·startup·metrics exporter가 없어 실행 중인 background worker는 아니다. `BeginHeldCleanup`, `BeginAcceptedDeletion`, `BeginRejectedArtifactCleanup`, operator hold release와 nested purge 구현은 아직 남아 있다. GCS regular/soft-deleted sequential listing은 staging IAM writer-exclusion 검증 전에는 원자적 부재 증명이 아니다.
 - generation-pinned classifier, current system forward recovery authorizer, denied/unavailable disposition, single-receipt reconciler와 bounded outer worker는 local/Emulator 범위에서 구현·검증됐다. 그러나 accepted-integrity authorizer와 production startup composition은 없다. `ClaimRecoveryLease`만 control-plane 처리 소유권을 부여하며 candidate query와 checkpoint는 권한이 아니다. Current authorizer 성공 없이 artifact read/write grant를 얻지 못한다. Staging에서 version·soft-delete·IAM·retention, composite index `READY`와 실제 authorization→Storage race를 검증하기 전에는 scheduler에 연결하거나 readiness를 열지 않는다.

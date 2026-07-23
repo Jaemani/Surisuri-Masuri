@@ -17,16 +17,20 @@ React Native와 Expo 기반의 사용자·수리사 모바일 앱입니다. Andr
   강제종료 뒤 active session·sample count 복구를 실제 확인
 - Stored body exact SHA 재검증, canonical retry/lease metadata와 safe attempt gate,
   pending·expired lease 및 corruption parent/child hold 구현
-- Retry·ACK terminal store, HTTP transport와 background 위치 수집은 미착수
+- 전역 TaskManager, 2단계 위치 권한, foreground fallback, bounded callback queue와
+  SQLite 단조 timestamp gate를 포함한 background 위치 수집 코드를 development
+  build용으로 구현. Android/iPhone native lifecycle은 미검증
+- Retry·ACK terminal store와 HTTP transport는 미착수
 
 화면에는 원본 좌표를 표시하지 않고 저장된 sample 수와 **실제 server-bound upload 대기 수**만 보여줍니다. 현재 UI는 local-only session만 만들므로 이 값은 0이며, 개발 로그에도 좌표를 출력하지 않습니다.
 
-## 첫 vertical slice
+## 모바일 수집 게이트
 
-현재 구현은 foreground vertical slice입니다. 다음 게이트에서 실제 장비와 server sync를 아래 시나리오로 검증합니다.
+Foreground native smoke와 background source/static gate까지 진행했습니다. 다음
+게이트에서 development build와 실제 장비로 아래 시나리오를 검증합니다.
 
 - Android/iOS foreground 위치 권한
-- background 위치 권한과 OS 설정 안내(후속 개발 빌드)
+- background 위치 권한과 OS 설정 안내
 - 화면 잠금, 앱 background, 프로세스 종료
 - 네트워크 단절과 재연결
 - GPS가 부정확하거나 권한이 철회된 상태
@@ -43,15 +47,24 @@ pnpm check
 pnpm test
 ```
 
-현재 정적 검사와 Node SQLite schema 테스트는 Expo native SQLite나 실기기 GPS 동작을 증명하지 않습니다. Android는 WSL2와 Windows ADB를 연결하고, iPhone background 기능은 EAS development build에서 별도로 검증합니다.
+정적 검사와 Node SQLite schema 테스트는 Expo native SQLite나 실기기 background
+GPS 동작을 증명하지 않습니다. `pnpm android`는 native development build이므로
+Android SDK·ADB가 필요합니다. iOS native build는 macOS/Xcode 또는 승인된 EAS
+development build에서 별도로 검증합니다.
 
 WSL 저장소와 Windows Android emulator를 연결하는 재현 절차와 화면 근거는
 [WSL Runbook](../../docs/development/WSL_RUNBOOK.md#android-에뮬레이터-빠른-데모)과
 [EVD-20260723-048](../../docs/evidence/2026-07.md#evd-20260723-048--android-foreground-gps와-sqlite-재시작-복구-smoke)에 있습니다.
 
 이 native smoke는 fresh SQLite v3 open과 현재 local-only foreground 흐름을
-검증합니다. 기존 v1/v2 실제 파일 migration, background 수집, offline HTTP
+검증합니다. 기존 v1/v2 실제 파일 migration, background lifecycle, offline HTTP
 reconnect, server ACK와 iPhone 동작은 검증하지 않습니다.
+
+Background source gate는 global task 등록, Android foreground-service 권한, iOS
+`UIBackgroundModes=location`, callback 직렬화·최대 100개, session 전 cached fix
+차단, DB transaction의 timestamp 단조 증가와 좌표 없는 durable failure marker를
+검증합니다. 이는 화면 잠금·앱 종료 뒤 native callback이나 배터리 결과가 아닙니다.
+자세한 경계는 [EVD-20260723-050](../../docs/evidence/2026-07.md#evd-20260723-050--백그라운드-gps-정적-구현-경계)에 있습니다.
 
 Upload lease는 현재 UI에서 호출되지 않습니다. Node SQLite test는 exact-body
 SHA, pending·expired lease와 fail-closed hold를 검증하지만, 실제 두 Expo native

@@ -53,6 +53,14 @@
 
 - 신규 monorepo, 문서 스트림, 계약·Firebase Rules 테스트 기반
 - React Native 앱의 foreground 위치 수집 코드와 SQLite outbox를 구현했다. Android 11 local emulator와 Expo Go 57에서 foreground 권한, synthetic GPS 4건의 native SQLite 저장과 process 재시작 뒤 active session·count 복구를 [EVD-20260723-048](./evidence/2026-07.md#evd-20260723-048--android-foreground-gps와-sqlite-재시작-복구-smoke)로 확인했다. 이는 Android/iPhone 실제 장치, background, 기존 DB migration이나 server sync 증거가 아니다.
+- [ADR-0037](./decisions/ADR-0037-fail-closed-background-gps-capture.md)에 따라 전역
+  TaskManager, 명시적 2단계 권한, foreground fallback, bounded callback queue,
+  SQLite transaction의 timestamp 단조 증가와 좌표 없는 durable failure marker를
+  구현했다. Android foreground-service와 iOS background-location 설정을
+  [EVD-20260723-050](./evidence/2026-07.md#evd-20260723-050--백그라운드-gps-정적-구현-경계)의
+  unit·typecheck·static export·config introspection으로 확인했지만 Android/iPhone
+  native background lifecycle, 배터리, 앱 종료·재시작과 multi-runtime contention은
+  미검증이다.
 - [ADR-0034](./decisions/ADR-0034-immutable-mobile-upload-body.md)에 따라 모바일 `telemetry-batch.v2` canonical body와 strict ACK·retry·hold 판정 protocol을 local pure component로 구현했다. 입력 key 순서·extra field가 wire bytes를 바꾸지 않으며 정확한 ID·count·state가 일치한 응답만 ACK한다. [EVD-20260723-045](./evidence/2026-07.md#evd-20260723-045--모바일-immutable-telemetry-upload-protocol)의 unit·typecheck 근거이며 SQLite batch 영속화, Firebase token, HTTP transport와 실기기·server E2E는 미구현이다.
 - 같은 ADR의 후속 local 증분으로 SQLite v2와 v1→v2 atomic migration, non-promotable local scope, append-only event, immutable batch body/item과 retry·ACK state invariant를 구현했다. Canonical JSON의 각 sample은 같은 position의 event ID·sequence·시간·좌표·sensor와 결합된다. [EVD-20260723-046](./evidence/2026-07.md#evd-20260723-046--모바일-sqlite-upload-ledger-v2)의 Node SQLite·local bundle 근거이며 materializer·digest runtime·Firebase token·HTTP·Expo native migration과 실기기 E2E는 미구현이다.
 - [ADR-0035](./decisions/ADR-0035-single-flight-mobile-batch-materialization.md)에 따라 한 server-bound session의 pending GPS를 최대 500개 canonical body로 만들고 exact SHA-256, batch와 item을 원자 저장하는 single-flight materializer와 SQLite v3 fail-closed migration을 구현했다. 기존 active batch는 body 재생성 없이 reference로 재발견한다. [EVD-20260723-047](./evidence/2026-07.md#evd-20260723-047--모바일-single-flight-upload-materializer와-sqlite-v3)의 Node SQLite·static bundle 근거이며 current flow는 local-only다. Firebase scope 발급, lease·HTTP·ACK, Expo native migration과 실기기 E2E는 미구현이다.
