@@ -100,6 +100,71 @@ Go는 현재 foreground smoke에만 사용한다.
 
 ## Android 실기기
 
+## Android development-client 빠른 데모
+
+Expo Go는 background location service를 실행할 수 없으므로 background GPS 화면은
+development client로 본다. 현재 검증된 앱은 React Native 공통 코드이며 Flutter 또는
+Android 전용 UI가 아니다.
+
+### WSL에서 빌드하고 Windows emulator에서 보기
+
+```bash
+rtk pnpm --filter @mobility-reliability/mobile exec expo prebuild --platform android
+
+rtk proxy env \
+  ANDROID_HOME=/home/jaeman/Codes/android-sdk-linux \
+  ANDROID_SDK_ROOT=/home/jaeman/Codes/android-sdk-linux \
+  bash -lc 'cd apps/mobile/android && ./gradlew assembleDebug'
+
+rtk proxy /mnt/c/Users/Jaeman/AppData/Local/Android/Sdk/platform-tools/adb.exe \
+  -s emulator-5554 install -r \
+  apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+
+rtk proxy /mnt/c/Users/Jaeman/AppData/Local/Android/Sdk/platform-tools/adb.exe \
+  -s emulator-5554 reverse tcp:8081 tcp:8081
+
+rtk pnpm --filter @mobility-reliability/mobile exec expo start --dev-client --localhost
+```
+
+`apps/mobile/android`는 prebuild 생성물이어서 Git에 커밋하지 않는다. 새 checkout에서는
+첫 명령으로 다시 만든다. 2026-07-23 local APK의 경로는
+`apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`, SHA-256은
+`368717c8e8ed69d3ced17b69699de020c9af653af4ba577cebb1f20a3274ff20`이었다. 이 hash는
+당시 local build 식별자이며 향후 source 변경 뒤에는 새로 계산한다.
+
+권한이 다른 오래된 development APK 위에 replace install하면 manifest 변경 검증이
+왜곡될 수 있다. Local synthetic data만 있고 clean install을 의도한 경우에만 정확한
+package ID를 확인한 뒤 uninstall한다. 실제 장치 데이터가 있을 때는 자동 uninstall하지
+않고 migration·backup 계획부터 확인한다.
+
+### Windows에서 직접 clone하고 Android Studio로 보기
+
+1. Windows에 Node 22, pnpm, Android Studio SDK 36과 JDK 21을 설치한다.
+2. 저장소를 Windows 경로에 별도 clone하고 `mobility-reliability-platform`에서
+   `pnpm install --frozen-lockfile`을 실행한다.
+3. `pnpm --filter @mobility-reliability/mobile exec expo prebuild --platform android`로
+   native project를 생성한다.
+4. Android Studio에서 `apps/mobile/android`를 열고 package
+   `com.jaemani.mobilityreliability.dev`의 debug variant를 실행한다.
+5. 별도 terminal에서 `pnpm --filter @mobility-reliability/mobile exec expo start
+   --dev-client`를 실행한다.
+
+Windows clone과 WSL clone을 같은 Git worktree처럼 동시에 수정하지 않는다. Source는 한
+쪽에서 commit/push하고 다른 쪽은 clean pull로 맞춘다.
+
+### 현재 데모 체크리스트
+
+- [x] Android foreground와 background 위치 권한
+- [x] Background foreground-service notification
+- [x] Launcher가 foreground인 동안 synthetic callback의 SQLite count 증가
+- [x] Active session에서 process force-stop 후 app-open service 복구
+- [x] 명시적 종료 후 notification 제거
+- [ ] Android 실제 장치의 화면 잠금·recent-app swipe·OEM 제한·30분 수집
+- [ ] iPhone development build lifecycle
+- [ ] Offline→reconnect HTTP와 server ACK
+
+화면과 runtime 증거는 [EVD-20260723-051](../evidence/2026-07.md#evd-20260723-051--android-background-gps-native-lifecycle-smoke와-cold-launch-복구)에 있다.
+
 ### 권장 경로: Windows ADB + USB + reverse
 
 1. Windows Android Studio 또는 Android platform-tools를 설치한다.

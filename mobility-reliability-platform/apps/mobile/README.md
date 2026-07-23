@@ -19,15 +19,19 @@ React Native와 Expo 기반의 사용자·수리사 모바일 앱입니다. Andr
   pending·expired lease 및 corruption parent/child hold 구현
 - 전역 TaskManager, 2단계 위치 권한, foreground fallback, bounded callback queue와
   SQLite 단조 timestamp gate를 포함한 background 위치 수집 코드를 development
-  build용으로 구현. Android/iPhone native lifecycle은 미검증
+  build용으로 구현
+- Android 11 emulator의 native development client에서 foreground service·notification,
+  화면 밖 synthetic callback 저장, process force-stop 뒤 cold-launch service 복구와
+  명시적 종료를 확인. Android 실기기와 iPhone lifecycle은 미검증
 - Retry·ACK terminal store와 HTTP transport는 미착수
 
 화면에는 원본 좌표를 표시하지 않고 저장된 sample 수와 **실제 server-bound upload 대기 수**만 보여줍니다. 현재 UI는 local-only session만 만들므로 이 값은 0이며, 개발 로그에도 좌표를 출력하지 않습니다.
 
 ## 모바일 수집 게이트
 
-Foreground native smoke와 background source/static gate까지 진행했습니다. 다음
-게이트에서 development build와 실제 장비로 아래 시나리오를 검증합니다.
+Foreground native smoke, background source/static gate와 Android emulator의 background
+native lifecycle smoke까지 진행했습니다. 다음 gate에서 실제 장비로 아래 시나리오를
+검증합니다.
 
 - Android/iOS foreground 위치 권한
 - background 위치 권한과 OS 설정 안내
@@ -65,6 +69,12 @@ Background source gate는 global task 등록, Android foreground-service 권한,
 차단, DB transaction의 timestamp 단조 증가와 좌표 없는 durable failure marker를
 검증합니다. 이는 화면 잠금·앱 종료 뒤 native callback이나 배터리 결과가 아닙니다.
 자세한 경계는 [EVD-20260723-050](../../docs/evidence/2026-07.md#evd-20260723-050--백그라운드-gps-정적-구현-경계)에 있습니다.
+
+Android background native smoke는 WSL2의 React Native source와 Windows Android 11
+emulator를 연결한 development client에서 수행했습니다. 화면 밖 저장, foreground
+service notification, process force-stop 뒤 cold-launch 재등록과 명시적 종료의 화면·runtime
+근거는 [EVD-20260723-051](../../docs/evidence/2026-07.md#evd-20260723-051--android-background-gps-native-lifecycle-smoke와-cold-launch-복구)에 있습니다.
+Android 실기기·OEM 정책·재부팅·iPhone·배터리 결과는 포함하지 않습니다.
 
 Upload lease는 현재 UI에서 호출되지 않습니다. Node SQLite test는 exact-body
 SHA, pending·expired lease와 fail-closed hold를 검증하지만, 실제 두 Expo native
