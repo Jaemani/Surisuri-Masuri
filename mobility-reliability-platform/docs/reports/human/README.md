@@ -105,3 +105,4 @@
 | [HR-20260723-32](./HR-20260723-32-receipt-purge-admission.md) | receipt purge admission과 writer fence | `draft` |
 | [HR-20260723-33](./HR-20260723-33-nested-recovery-attempt-purge.md) | nested recovery-attempt bounded purge와 attempts phase 전환 | `draft` |
 | [HR-20260723-34](./HR-20260723-34-legacy-purge-link-backfill.md) | cleanup target inverse registry와 legacy backfill | `draft` |
+| [HR-20260723-35](./HR-20260723-35-linked-cleanup-target-purge.md) | cleanup target와 inverse link의 bounded atomic purge | `draft` |

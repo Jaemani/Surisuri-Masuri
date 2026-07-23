@@ -75,7 +75,7 @@
 아직 구현하지 않은 production 운영 경계:
 
 - scheduler·startup composition과 실제 metrics exporter를 포함한 bounded sweeper runtime
-- [ADR-0033](../../docs/decisions/ADR-0033-fenced-resumable-receipt-linkage-purge.md)의 R8k-a/b와 R8k-c 중 cleanup-target inverse registry·legacy create-only backfill은 local component로 구현했다. Operator hold release, integrity finding schema/writer/backfill, bounded target/finding+link delete, fresh final verification, receipt·두 uniqueness index final delete는 미구현
+- [ADR-0033](../../docs/decisions/ADR-0033-fenced-resumable-receipt-linkage-purge.md)의 R8k-a/b와 R8k-c 중 cleanup-target inverse registry·legacy create-only backfill·cleanup-target-only bounded target+link delete는 local component로 구현했다. Operator hold release, integrity finding schema/writer/backfill/delete, fresh final verification, `ready`, receipt·두 uniqueness index final delete는 미구현
 - accepted deletion auditor, held/rejected cleanup과 auditor key rotation·cross-process lifecycle. Immutable target은 execution state로 갱신하지 않고 target 생성 뒤 renewal도 허용하지 않음
 - staging bucket IAM·lifecycle·retention·soft-delete policy와 실제 삭제 drill
 

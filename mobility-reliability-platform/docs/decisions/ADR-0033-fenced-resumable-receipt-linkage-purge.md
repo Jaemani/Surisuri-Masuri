@@ -259,7 +259,7 @@ R8k-c:
 
 각 gate는 별도 구현·증거·제품 업데이트를 가진다. R8k-a/b 완료만으로 receipt나 target·finding을 삭제 완료로 표현하지 않는다.
 
-### 10. 구현 상태 — R8k-a/b 완료, R8k-c registry/backfill 부분 구현
+### 10. 구현 상태 — R8k-a/b 완료, R8k-c cleanup-target linked purge까지 부분 구현
 
 2026-07-23 commit `7a1d3ed`에서 R8k-a의 pure job/admission/outcome contract, deterministic purge key·linkage hash, strict Firestore job codec, receipt purge fence, create-once admission과 read-only response-loss correlation을 구현했다. Concurrent admission은 Firebase demo Firestore Emulator에서 created 1/replayed 1로 수렴했고 job과 receipt fence만 같은 commit lineage로 바뀌며 두 uniqueness index는 write 0이었다. Full/partial fence 뒤 existing recovery/cleanup lease claim과 cleanup target create도 fail-closed한다. Commit `5374be6`에서는 R8k-b 진입 전 advisory page discovery를 `page_size+1`, ordered document ID, separate lookahead로 bounded했다. 이 observation은 transaction 내 exact reread·delete 권한이 아니다.
 
@@ -269,7 +269,9 @@ R8k-c:
 
 2026-07-23 commits `bf5b95f`, `9f768d9`, `49e402c`, `0a2fad4`에서 R8k-c의 첫 부분인 inverse-link registry와 cleanup-target legacy backfill을 구현했다. 새 cleanup target과 deterministic receipt 하위 link는 같은 transaction에서 create되고 exact pair replay는 write 0이다. Legacy inventory는 tenant-wide `__name__` page 25+lookahead를 사용해 `receipt_id`가 누락된 문서도 관측하며, commit transaction은 current page·target·strict parent receipt·existing link를 다시 검증한 뒤 missing link만 생성한다. Poison 한 건은 whole-page write 0/cursor hold이고, integrity finding collection이 nonempty이면 strict finding codec/writer가 없으므로 unsupported로 중단한다. 근거는 [EVD-20260723-043](../evidence/2026-07.md#evd-20260723-043--cleanup-target-inverse-registry와-legacy-backfill)에 기록한다.
 
-R8k-a/b와 위 R8k-c 부분은 local/synthetic/Emulator 범위다. Integrity finding registry/backfill, bounded target/finding+link purge, fresh global empty/unregistered verification, final receipt+index delete와 Rules/indexes가 남아 있으므로 ADR 상태는 계속 `proposed`다. Scheduler/startup/readiness와 staging·production에도 연결하지 않았으며 metadata purge 완료로 표현하지 않는다.
+2026-07-23 commit `3bfa29c`에서 registry에 이미 연결된 cleanup target과 inverse link의 bounded page purge를 구현했다. Advisory link page는 transaction 안에서 current job·receipt fence, page·lookahead와 exact link·target body로 다시 구성한다. 모든 read와 strict pair 검증이 끝난 뒤 target+link delete와 `link_cursor`, `target_deleted_count`, job revision을 같은 transaction에서 commit한다. Poison 한 건은 정상 target을 포함한 page 전체 delete를 0으로 만들고 durable hold만 남긴다. 동시 worker는 한 winner만 전진하며 commit response loss는 mutation 재호출 없이 exact pre/next state의 fresh read로만 상관한다. `integrity_finding`은 strict codec/writer가 없어 unsupported hold이며 `finding_deleted_count`를 전진시키지 않는다. 근거는 [EVD-20260723-044](../evidence/2026-07.md#evd-20260723-044--bounded-linked-cleanup-target-purge)에 기록한다.
+
+R8k-a/b와 위 R8k-c 부분은 local/synthetic/Emulator 범위다. Integrity finding registry/backfill/delete, fresh global empty/unregistered verification, `ready`, final receipt+index delete와 필요한 indexes가 남아 있으므로 ADR 상태는 계속 `proposed`다. Client Rules의 nested link와 finding direct get/list/write deny는 추가했지만 Admin SDK/IAM writer exclusion을 증명하지 않는다. Scheduler/startup/readiness와 staging·production에도 연결하지 않았으며 metadata purge 완료로 표현하지 않는다.
 
 ## 결과와 위험
 
@@ -278,7 +280,7 @@ R8k-a/b와 위 R8k-c 부분은 local/synthetic/Emulator 범위다. Integrity fin
 - Purge job은 최소 control evidence를 자체 retention까지 남기므로 삭제가 실제로 어디까지 진행됐는지 설명할 수 있다.
 - Query는 transaction 밖 advisory read이므로 모든 exact child를 transaction에서 다시 읽어야 한다. 이 규칙을 생략하면 stale page가 foreign document를 삭제할 수 있다.
 - Application fence는 out-of-band Admin SDK/IAM writer를 막지 못한다. Staging writer inventory와 least-privilege 검증 전에는 production purge를 활성화하지 않는다.
-- Cleanup-target inverse-link schema와 legacy backfill은 local code에 있지만 integrity finding strict DTO/writer/backfill은 없다. Finding document 하나가 관측되면 backfill은 unsupported로 write 0 중단하며 full linkage purge는 아직 완성되지 않는다.
+- Cleanup-target inverse-link schema, legacy backfill과 registered cleanup-target page delete는 local code에 있지만 integrity finding strict DTO/writer/backfill/delete는 없다. Finding document 또는 finding link 하나가 관측되면 unsupported로 write 0/hold하며 full linkage purge는 아직 완성되지 않는다.
 - Legacy page의 `ObservedExhausted`는 순차 관측일 뿐 global orphan-zero가 아니다. Registry rollout 전 fresh cursorless inventory와 out-of-band Admin/IAM writer exclusion gate가 필요하다.
 - Operator hold release, held/accepted/rejected-origin cleanup, actual Storage deletion, scheduler/startup/readiness와 staging/production runtime은 이 결정의 구현 완료와 별개다.
 
@@ -297,4 +299,7 @@ R8k-a/b와 위 R8k-c 부분은 local/synthetic/Emulator 범위다. Integrity fin
 - R8k-c registry/backfill 부분 구현 증거: [EVD-20260723-043](../evidence/2026-07.md#evd-20260723-043--cleanup-target-inverse-registry와-legacy-backfill)
 - R8k-c registry/backfill 제품 업데이트: [UPD-20260723-09](../product-updates/UPD-20260723-09-legacy-purge-link-backfill.md)
 - R8k-c registry/backfill 사람 대상 리포트: [HR-20260723-34](../reports/human/HR-20260723-34-legacy-purge-link-backfill.md)
+- R8k-c cleanup-target linked purge 증거: [EVD-20260723-044](../evidence/2026-07.md#evd-20260723-044--bounded-linked-cleanup-target-purge)
+- R8k-c cleanup-target linked purge 제품 업데이트: [UPD-20260723-10](../product-updates/UPD-20260723-10-linked-cleanup-target-purge.md)
+- R8k-c cleanup-target linked purge 사람 대상 리포트: [HR-20260723-35](../reports/human/HR-20260723-35-linked-cleanup-target-purge.md)
 - 인시던트: 해당 없음 — 설계 변경이며 production·staging·field 영향 없음
