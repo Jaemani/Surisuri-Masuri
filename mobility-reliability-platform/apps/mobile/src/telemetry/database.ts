@@ -19,6 +19,13 @@ import {
 } from './uploadLease';
 
 const DATABASE_NAME = 'mobility-telemetry-v1.sqlite';
+const BACKGROUND_TASK_FAILURE_METADATA_KEY = 'background_task_failure_v1';
+
+export type BackgroundTaskFailureCode =
+  | 'native_task_error'
+  | 'payload_invalid'
+  | 'batch_too_large'
+  | 'batch_processing_failed';
 
 export type TripSessionSummary = {
   sessionId: string;
@@ -275,6 +282,15 @@ export async function appendLocationSample(
       throw new Error('SESSION_NOT_RECORDING');
     }
 
+    const persistedBoundary = Date.parse(row.last_sample_at ?? row.started_at);
+    if (
+      !Number.isFinite(persistedBoundary) ||
+      !Number.isFinite(sample.timestamp) ||
+      sample.timestamp <= persistedBoundary
+    ) {
+      throw new Error('SAMPLE_TIMESTAMP_NOT_MONOTONIC');
+    }
+
     const eventId = Crypto.randomUUID();
     const occurredAt = new Date(sample.timestamp).toISOString();
     await insertOutboxEvent(transaction, {
@@ -435,6 +451,40 @@ export async function getActiveTripSession(): Promise<TripSessionSummary | null>
      LIMIT 1`,
   );
   return row ? toSummary(row) : null;
+}
+
+export async function hasBackgroundTaskFailure(): Promise<boolean> {
+  const database = await getTelemetryDatabase();
+  const row = await database.getFirstAsync<{ present: number }>(
+    `SELECT 1 AS present FROM app_metadata WHERE key = ?`,
+    BACKGROUND_TASK_FAILURE_METADATA_KEY,
+  );
+  return row?.present === 1;
+}
+
+export async function recordBackgroundTaskFailure(
+  code: BackgroundTaskFailureCode,
+): Promise<void> {
+  const database = await getTelemetryDatabase();
+  const value = JSON.stringify({
+    schemaVersion: 1,
+    code,
+    occurredAt: new Date().toISOString(),
+  });
+  await database.runAsync(
+    `INSERT INTO app_metadata (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    BACKGROUND_TASK_FAILURE_METADATA_KEY,
+    value,
+  );
+}
+
+export async function clearBackgroundTaskFailure(): Promise<void> {
+  const database = await getTelemetryDatabase();
+  await database.runAsync(
+    `DELETE FROM app_metadata WHERE key = ?`,
+    BACKGROUND_TASK_FAILURE_METADATA_KEY,
+  );
 }
 
 export async function getPendingUploadCount(): Promise<number> {

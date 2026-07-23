@@ -6,3 +6,9 @@ allowBuilds:
   "@firebase/util": true
   protobufjs: true
   re2: false
+
+minimumReleaseAgeExclude:
+  - expo-dev-client@57.0.8
+  - expo-dev-launcher@57.0.8
+  - expo-dev-menu@57.0.8
+  - expo-task-manager@57.0.6

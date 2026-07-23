@@ -62,8 +62,9 @@ function permissionCopy(permission: ReturnType<typeof useTripRecorder>['state'][
 }
 
 export default function App() {
-  const { state, start, resume, stop } = useTripRecorder();
+  const { state, start, resume, stop, enableBackground } = useTripRecorder();
   const permission = permissionCopy(state.permission);
+  const backgroundPermission = permissionCopy(state.backgroundPermission);
   const isBusy = state.phase === 'busy' || state.phase === 'initializing';
   const startedAt = useMemo(() => {
     if (!state.activeSession) return null;
@@ -84,14 +85,20 @@ export default function App() {
       >
         <View style={styles.hero}>
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>FOREGROUND GPS · V0</Text>
+            <Text style={styles.badgeText}>
+              {state.captureMode === 'background'
+                ? 'BACKGROUND GPS · DEV BUILD'
+                : state.captureMode === 'foreground'
+                  ? 'FOREGROUND GPS · ACTIVE'
+                  : 'PHONE GPS · OFFLINE FIRST'}
+            </Text>
           </View>
           <Text accessibilityRole="header" style={styles.title}>
             오늘의 이동을{`\n`}안전하게 기록해요
           </Text>
           <Text style={styles.introduction}>
-            앱을 화면에 열어 둔 상태에서 주행 시작을 누른 동안만 휴대폰 위치를 기기 안에
-            저장합니다.
+            주행 시작을 누른 동안 휴대폰 위치를 먼저 기기 안에 저장합니다.
+            백그라운드 권한은 사용자가 따로 허용한 경우에만 사용합니다.
           </Text>
         </View>
 
@@ -158,6 +165,30 @@ export default function App() {
                 </View>
               </View>
 
+              <View style={styles.statusRowSpaced}>
+                <View
+                  style={[
+                    styles.statusDot,
+                    state.backgroundPermission === 'granted' && styles.statusDotPositive,
+                    state.backgroundAvailable &&
+                      state.backgroundPermission !== 'granted' &&
+                      styles.statusDotWarning,
+                  ]}
+                />
+                <View style={styles.statusCopy}>
+                  <Text style={styles.statusLabel}>화면 밖 기록</Text>
+                  <Text style={styles.statusDetail}>
+                    {!state.backgroundAvailable
+                      ? 'Android/iPhone development build에서 확인할 수 있어요.'
+                      : state.backgroundPermission === 'granted'
+                        ? state.captureMode === 'background'
+                          ? '화면이 꺼져도 현재 주행을 기록해요.'
+                          : '필요한 권한이 준비되었어요.'
+                        : backgroundPermission.label}
+                  </Text>
+                </View>
+              </View>
+
               {state.errorCode ? (
                 <View accessibilityRole="alert" style={styles.alert}>
                   <Text style={styles.alertTitle}>확인이 필요합니다</Text>
@@ -207,6 +238,28 @@ export default function App() {
                     variant="secondary"
                   />
                 ) : null}
+
+                {state.backgroundAvailable &&
+                state.backgroundPermission !== 'granted' ? (
+                  <ActionButton
+                    disabled={isBusy}
+                    label="화면 밖에서도 기록 허용"
+                    onPress={() => void enableBackground()}
+                    variant="secondary"
+                  />
+                ) : null}
+
+                {state.backgroundAvailable &&
+                state.backgroundPermission === 'granted' &&
+                state.activeSession &&
+                state.captureMode !== 'background' ? (
+                  <ActionButton
+                    disabled={isBusy}
+                    label="백그라운드 기록으로 전환"
+                    onPress={() => void enableBackground()}
+                    variant="secondary"
+                  />
+                ) : null}
               </View>
             </>
           )}
@@ -216,8 +269,9 @@ export default function App() {
           <Text style={styles.privacyTitle}>지금 지키는 원칙</Text>
           <Text style={styles.privacyText}>
             원본 좌표는 이 화면이나 개발 로그에 표시하지 않습니다. 서버 동기화는 아직 켜지지
-            않았으며, 이벤트는 SQLite에 서버 전송 대상이 아닌 개발 데이터로 남습니다. 화면을
-            잠그거나 다른 앱으로 이동하면 현재 버전에서는 수집이 계속되지 않을 수 있습니다.
+            않았으며, 이벤트는 SQLite에 서버 전송 대상이 아닌 개발 데이터로 남습니다.
+            Expo Go에서는 화면 안 기록만 사용할 수 있습니다. 백그라운드 기록 코드는
+            development build용이며 Android/iPhone 실기기 수명주기 검증 전입니다.
           </Text>
         </View>
       </ScrollView>
@@ -267,6 +321,12 @@ const styles = StyleSheet.create({
   sessionNote: { color: '#66736F', fontSize: 13, lineHeight: 20, marginTop: 12 },
   divider: { backgroundColor: '#D9DEDA', height: 1, marginVertical: 22 },
   statusRow: { alignItems: 'flex-start', flexDirection: 'row', gap: 12 },
+  statusRowSpaced: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
   statusDot: { backgroundColor: '#9AA5A3', borderRadius: 6, height: 12, marginTop: 5, width: 12 },
   statusDotPositive: { backgroundColor: '#2D8A69' },
   statusDotWarning: { backgroundColor: '#BD762C' },

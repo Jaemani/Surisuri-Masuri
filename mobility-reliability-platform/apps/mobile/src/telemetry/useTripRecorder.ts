@@ -1,17 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
+import { AppState } from 'react-native';
 
 import {
+  isBackgroundLocationAvailable,
+  isBackgroundLocationRunning,
+  startBackgroundLocation,
+  stopBackgroundLocation,
+} from './backgroundLocationRuntime';
+import { CaptureGuard } from './captureGuard';
+import {
   appendLocationSample,
+  clearBackgroundTaskFailure,
   getActiveTripSession,
   getPendingUploadCount,
   getTelemetryDatabase,
+  hasBackgroundTaskFailure,
   recordRejectedSample,
   startTripSession,
   stopTripSession,
   type TripSessionSummary,
 } from './database';
-import { CaptureGuard } from './captureGuard';
 import {
   toPermissionState,
   type LocationPermissionState,
@@ -29,9 +38,14 @@ type RecorderPhase =
   | 'busy'
   | 'error';
 
+export type CaptureMode = 'foreground' | 'background';
+
 export type TripRecorderState = {
   phase: RecorderPhase;
   permission: LocationPermissionState;
+  backgroundPermission: LocationPermissionState;
+  backgroundAvailable: boolean;
+  captureMode: CaptureMode | null;
   activeSession: TripSessionSummary | null;
   pendingUploadCount: number;
   errorCode: 'database_unavailable' | 'location_services_disabled' | 'capture_failed' | null;
@@ -40,6 +54,9 @@ export type TripRecorderState = {
 const initialState: TripRecorderState = {
   phase: 'initializing',
   permission: 'checking',
+  backgroundPermission: 'checking',
+  backgroundAvailable: false,
+  captureMode: null,
   activeSession: null,
   pendingUploadCount: 0,
   errorCode: null,
@@ -58,6 +75,69 @@ export function useTripRecorder() {
   const captureGuardRef = useRef(new CaptureGuard());
   const lastAcceptedTimestampRef = useRef<number | null>(null);
 
+  const refreshRuntimeState = useCallback(async () => {
+    const [
+      permissionResponse,
+      activeSession,
+      pendingUploadCount,
+      backgroundAvailable,
+      backgroundTaskFailed,
+    ] =
+      await Promise.all([
+        Location.getForegroundPermissionsAsync(),
+        getActiveTripSession(),
+        getPendingUploadCount(),
+        isBackgroundLocationAvailable(),
+        hasBackgroundTaskFailure(),
+      ]);
+    const [backgroundPermissionResponse, detectedBackgroundRunning] = backgroundAvailable
+      ? await Promise.all([
+          Location.getBackgroundPermissionsAsync(),
+          isBackgroundLocationRunning(),
+        ])
+      : [null, false] as const;
+    const normalizedBackgroundPermission = backgroundAvailable
+      ? toPermissionState(backgroundPermissionResponse)
+      : 'checking';
+    let backgroundRunning = detectedBackgroundRunning;
+
+    if (
+      backgroundRunning &&
+      (!activeSession ||
+        normalizedBackgroundPermission !== 'granted' ||
+        backgroundTaskFailed)
+    ) {
+      await stopBackgroundLocation();
+      backgroundRunning = false;
+    }
+
+    setState((current) => {
+      const foregroundRunning = subscriptionRef.current !== null;
+      const captureMode = activeSession
+        ? backgroundRunning
+          ? 'background'
+          : foregroundRunning
+            ? 'foreground'
+            : null
+        : null;
+      return {
+        ...current,
+        phase: activeSession
+          ? captureMode
+            ? 'recording'
+            : 'ready_to_resume'
+          : 'idle',
+        permission: toPermissionState(permissionResponse),
+        backgroundPermission: normalizedBackgroundPermission,
+        backgroundAvailable,
+        captureMode,
+        activeSession,
+        pendingUploadCount,
+        errorCode: backgroundTaskFailed ? 'capture_failed' : null,
+      };
+    });
+  }, []);
+
   const refreshPendingCount = useCallback(async () => {
     const pendingUploadCount = await getPendingUploadCount();
     setState((current) => ({ ...current, pendingUploadCount }));
@@ -69,20 +149,8 @@ export function useTripRecorder() {
     async function initialize() {
       try {
         await getTelemetryDatabase();
-        const [permissionResponse, activeSession, pendingUploadCount] = await Promise.all([
-          Location.getForegroundPermissionsAsync(),
-          getActiveTripSession(),
-          getPendingUploadCount(),
-        ]);
         if (cancelled) return;
-
-        setState({
-          phase: activeSession ? 'ready_to_resume' : 'idle',
-          permission: toPermissionState(permissionResponse),
-          activeSession,
-          pendingUploadCount,
-          errorCode: null,
-        });
+        await refreshRuntimeState();
       } catch {
         if (!cancelled) {
           setState((current) => ({
@@ -95,13 +163,21 @@ export function useTripRecorder() {
     }
 
     void initialize();
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') return;
+      void refreshRuntimeState().catch(() => {
+        setState((current) => ({ ...current, errorCode: 'capture_failed' }));
+      });
+    });
+
     return () => {
       cancelled = true;
+      appStateSubscription.remove();
       captureGuardRef.current.closeCapture();
       subscriptionRef.current?.remove();
       subscriptionRef.current = null;
     };
-  }, []);
+  }, [refreshRuntimeState]);
 
   const requestPermission = useCallback(async (): Promise<boolean> => {
     try {
@@ -123,24 +199,16 @@ export function useTripRecorder() {
     }
   }, []);
 
-  const beginWatching = useCallback(
+  const beginForegroundCapture = useCallback(
     async (session: TripSessionSummary) => {
       if (subscriptionRef.current) {
         throw new Error('CAPTURE_ALREADY_RUNNING');
-      }
-      if (!(await Location.hasServicesEnabledAsync())) {
-        setState((current) => ({
-          ...current,
-          phase: current.activeSession ? 'ready_to_resume' : 'idle',
-          errorCode: 'location_services_disabled',
-        }));
-        throw new Error('LOCATION_SERVICES_DISABLED');
       }
 
       const captureGeneration = captureGuardRef.current.openCapture();
       lastAcceptedTimestampRef.current = session.lastSampleAt
         ? Date.parse(session.lastSampleAt)
-        : Date.parse(session.startedAt) - 30_000;
+        : Date.parse(session.startedAt);
       let runtimeFailed = false;
       let subscription: Location.LocationSubscription;
       try {
@@ -148,19 +216,25 @@ export function useTripRecorder() {
           FOREGROUND_LOCATION_OPTIONS,
           (location) => {
             if (!captureGuardRef.current.acceptsCallback(captureGeneration)) return;
-            const evaluation = evaluateLocationSample({
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-              timestamp: location.timestamp,
-              accuracy: location.coords.accuracy,
-              altitude: location.coords.altitude,
-              speed: location.coords.speed,
-              heading: location.coords.heading,
-              isMockLocation: location.mocked ?? null,
-            }, {
-              minimumTimestamp: lastAcceptedTimestampRef.current ?? undefined,
-              maximumTimestamp: Date.now() + MAX_FUTURE_CLOCK_SKEW_MILLISECONDS,
-            });
+            const evaluation = evaluateLocationSample(
+              {
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                timestamp: location.timestamp,
+                accuracy: location.coords.accuracy,
+                altitude: location.coords.altitude,
+                speed: location.coords.speed,
+                heading: location.coords.heading,
+                isMockLocation: location.mocked ?? null,
+              },
+              {
+                minimumTimestamp:
+                  lastAcceptedTimestampRef.current === null
+                    ? undefined
+                    : lastAcceptedTimestampRef.current + 1,
+                maximumTimestamp: Date.now() + MAX_FUTURE_CLOCK_SKEW_MILLISECONDS,
+              },
+            );
 
             if (evaluation.accepted) {
               lastAcceptedTimestampRef.current = evaluation.sample.timestamp;
@@ -191,6 +265,7 @@ export function useTripRecorder() {
                 setState((current) => ({
                   ...current,
                   phase: 'error',
+                  captureMode: null,
                   errorCode: 'capture_failed',
                 }));
               });
@@ -204,6 +279,7 @@ export function useTripRecorder() {
             setState((current) => ({
               ...current,
               phase: current.activeSession ? 'ready_to_resume' : 'error',
+              captureMode: null,
               errorCode: 'capture_failed',
             }));
           },
@@ -222,12 +298,103 @@ export function useTripRecorder() {
       setState((current) => ({
         ...current,
         phase: 'recording',
+        captureMode: 'foreground',
         activeSession: session,
         errorCode: null,
       }));
     },
     [],
   );
+
+  const beginCapture = useCallback(
+    async (session: TripSessionSummary) => {
+      if (!(await Location.hasServicesEnabledAsync())) {
+        setState((current) => ({
+          ...current,
+          phase: current.activeSession ? 'ready_to_resume' : 'idle',
+          captureMode: null,
+          errorCode: 'location_services_disabled',
+        }));
+        throw new Error('LOCATION_SERVICES_DISABLED');
+      }
+
+      const backgroundAvailable = await isBackgroundLocationAvailable();
+      const backgroundPermission = backgroundAvailable
+        ? toPermissionState(await Location.getBackgroundPermissionsAsync())
+        : 'checking';
+      setState((current) => ({
+        ...current,
+        backgroundAvailable,
+        backgroundPermission,
+      }));
+
+      if (backgroundAvailable && backgroundPermission === 'granted') {
+        await clearBackgroundTaskFailure();
+        await startBackgroundLocation();
+        setState((current) => ({
+          ...current,
+          phase: 'recording',
+          captureMode: 'background',
+          activeSession: session,
+          errorCode: null,
+        }));
+        return;
+      }
+
+      await beginForegroundCapture(session);
+    },
+    [beginForegroundCapture],
+  );
+
+  const enableBackground = useCallback(async () => {
+    if (state.phase === 'busy') return;
+    if (!captureGuardRef.current.tryBeginOperation()) return;
+    setState((current) => ({ ...current, phase: 'busy', errorCode: null }));
+
+    try {
+      if (!(await requestPermission())) {
+        await refreshRuntimeState();
+        return;
+      }
+      if (!(await isBackgroundLocationAvailable())) {
+        await refreshRuntimeState();
+        return;
+      }
+
+      const current = await Location.getBackgroundPermissionsAsync();
+      const response = current.granted
+        ? current
+        : await Location.requestBackgroundPermissionsAsync();
+      const backgroundPermission = toPermissionState(response);
+      setState((beforeRequest) => ({
+        ...beforeRequest,
+        backgroundAvailable: true,
+        backgroundPermission,
+      }));
+
+      if (backgroundPermission !== 'granted' || !state.activeSession) {
+        await refreshRuntimeState();
+        return;
+      }
+
+      captureGuardRef.current.closeCapture();
+      subscriptionRef.current?.remove();
+      subscriptionRef.current = null;
+      await writeQueueRef.current;
+      await clearBackgroundTaskFailure();
+      await startBackgroundLocation();
+      await refreshRuntimeState();
+    } catch {
+      setState((currentState) => ({
+        ...currentState,
+        phase: currentState.activeSession ? 'ready_to_resume' : 'idle',
+        captureMode: null,
+        errorCode: 'capture_failed',
+      }));
+    } finally {
+      captureGuardRef.current.endOperation();
+    }
+  }, [refreshRuntimeState, requestPermission, state.activeSession, state.phase]);
 
   const start = useCallback(async () => {
     if (state.phase === 'busy' || state.phase === 'recording') return;
@@ -243,7 +410,7 @@ export function useTripRecorder() {
 
       createdSession = await startTripSession();
       setState((current) => ({ ...current, activeSession: createdSession }));
-      await beginWatching(createdSession);
+      await beginCapture(createdSession);
       await refreshPendingCount();
     } catch (error) {
       let stoppedFailedSession = false;
@@ -258,6 +425,7 @@ export function useTripRecorder() {
         ...current,
         activeSession: stoppedFailedSession ? null : current.activeSession,
         phase: stoppedFailedSession ? 'error' : current.activeSession ? 'ready_to_resume' : 'error',
+        captureMode: null,
         errorCode:
           current.errorCode === 'location_services_disabled'
             ? 'location_services_disabled'
@@ -266,14 +434,10 @@ export function useTripRecorder() {
     } finally {
       captureGuardRef.current.endOperation();
     }
-  }, [beginWatching, refreshPendingCount, requestPermission, state.phase]);
+  }, [beginCapture, refreshPendingCount, requestPermission, state.phase]);
 
   const resume = useCallback(async () => {
-    if (
-      !state.activeSession ||
-      state.phase === 'busy' ||
-      state.phase === 'recording'
-    ) {
+    if (!state.activeSession || state.phase === 'busy' || state.phase === 'recording') {
       return;
     }
     if (!captureGuardRef.current.tryBeginOperation()) return;
@@ -284,11 +448,12 @@ export function useTripRecorder() {
         setState((current) => ({ ...current, phase: 'ready_to_resume' }));
         return;
       }
-      await beginWatching(state.activeSession);
+      await beginCapture(state.activeSession);
     } catch {
       setState((current) => ({
         ...current,
         phase: 'ready_to_resume',
+        captureMode: null,
         errorCode:
           current.errorCode === 'location_services_disabled'
             ? 'location_services_disabled'
@@ -297,15 +462,10 @@ export function useTripRecorder() {
     } finally {
       captureGuardRef.current.endOperation();
     }
-  }, [beginWatching, requestPermission, state.activeSession, state.phase]);
+  }, [beginCapture, requestPermission, state.activeSession, state.phase]);
 
   const stop = useCallback(async () => {
-    if (
-      !state.activeSession ||
-      state.phase === 'busy'
-    ) {
-      return;
-    }
+    if (!state.activeSession || state.phase === 'busy') return;
     if (!captureGuardRef.current.tryBeginOperation()) return;
     setState((current) => ({ ...current, phase: 'busy', errorCode: null }));
     captureGuardRef.current.closeCapture();
@@ -313,22 +473,29 @@ export function useTripRecorder() {
     subscriptionRef.current = null;
 
     try {
+      await stopBackgroundLocation();
       await writeQueueRef.current;
       await stopTripSession(state.activeSession.sessionId, 'user_stopped');
       const pendingUploadCount = await getPendingUploadCount();
       setState((current) => ({
         ...current,
         phase: 'idle',
+        captureMode: null,
         activeSession: null,
         pendingUploadCount,
         errorCode: null,
       }));
     } catch {
-      setState((current) => ({ ...current, phase: 'error', errorCode: 'capture_failed' }));
+      setState((current) => ({
+        ...current,
+        phase: 'error',
+        captureMode: null,
+        errorCode: 'capture_failed',
+      }));
     } finally {
       captureGuardRef.current.endOperation();
     }
   }, [state.activeSession, state.phase]);
 
-  return { state, start, resume, stop };
+  return { state, start, resume, stop, enableBackground, refresh: refreshRuntimeState };
 }

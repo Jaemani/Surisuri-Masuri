@@ -7,10 +7,12 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jaemani.mobilityreliability.dev"
     },
     "android": {
       "allowBackup": false,
+      "package": "com.jaemani.mobilityreliability.dev",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -27,7 +29,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "주행 중 이동 기록을 기기에 저장하기 위해 위치 권한이 필요합니다."
+          "locationWhenInUsePermission": "주행 중 이동 기록을 기기에 저장하기 위해 위치 권한이 필요합니다.",
+          "locationAlwaysAndWhenInUsePermission": "화면이 꺼져도 사용자가 시작한 주행 기록을 이어가기 위해 백그라운드 위치 권한이 필요합니다.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ]
     ]
