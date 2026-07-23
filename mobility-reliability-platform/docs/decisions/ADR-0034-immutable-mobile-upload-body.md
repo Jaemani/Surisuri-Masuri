@@ -34,6 +34,6 @@
 - 모바일 재시도와 서버 raw-body 멱등성 정의가 일치한다.
 - SQLite v2와 v1→v2 migration, local/server-bound 불변 scope, append-only event, immutable batch/body/item과 pending·lease·retry·ACK 상태 제약을 구현했다.
 - 기존 v1 행은 session·event를 보존하되 모두 `development_local_only`와 `local_only/not_applicable`로 migration하며 server-bound로 승격할 수 없다.
-- 실제 body를 생성해 저장하는 materializer, SHA-256 계산·재검증, backoff runner와 ACK transaction 호출 코드는 후속 구현 gate다.
+- 실제 body를 생성해 SHA-256과 함께 원자 저장하고 기존 active batch를 재발견하는 materializer는 [ADR-0035](./ADR-0035-single-flight-mobile-batch-materialization.md)에서 구현했다. Lease 전 digest 재검증, backoff runner와 ACK transaction은 후속 gate다.
 - 현재 구현은 pure protocol과 Node SQLite schema 경계이며 네트워크 전송, Firebase token, Expo native migration, 실기기 재시작과 서버 ACK를 증명하지 않는다.
 - 서버가 응답 계약을 바꾸면 모바일이 성공으로 추정하지 않고 같은 body 재시도 상태에 머문다.

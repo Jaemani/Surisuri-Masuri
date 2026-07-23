@@ -108,3 +108,4 @@
 | [HR-20260723-35](./HR-20260723-35-linked-cleanup-target-purge.md) | cleanup target와 inverse link의 bounded atomic purge | `draft` |
 | [HR-20260723-36](./HR-20260723-36-mobile-upload-protocol.md) | 모바일 immutable telemetry upload protocol | `draft` |
 | [HR-20260723-37](./HR-20260723-37-mobile-upload-ledger.md) | 모바일 SQLite upload ledger v2 | `draft` |
+| [HR-20260723-38](./HR-20260723-38-mobile-upload-materializer.md) | 모바일 upload materializer와 SQLite v3 | `draft` |
