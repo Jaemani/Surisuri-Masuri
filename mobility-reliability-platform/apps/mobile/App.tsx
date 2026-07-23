@@ -131,8 +131,8 @@ export default function App() {
                   <Text style={styles.metricLabel}>저장된 위치</Text>
                 </View>
                 <View style={styles.metric}>
-                  <Text style={styles.metricValue}>{state.pendingOutboxCount}</Text>
-                  <Text style={styles.metricLabel}>로컬 이벤트</Text>
+                  <Text style={styles.metricValue}>{state.pendingUploadCount}</Text>
+                  <Text style={styles.metricLabel}>서버 전송 대기</Text>
                 </View>
               </View>
 

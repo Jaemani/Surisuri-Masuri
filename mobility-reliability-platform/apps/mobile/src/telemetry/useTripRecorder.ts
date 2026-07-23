@@ -4,7 +4,7 @@ import * as Location from 'expo-location';
 import {
   appendLocationSample,
   getActiveTripSession,
-  getPendingOutboxCount,
+  getPendingUploadCount,
   getTelemetryDatabase,
   recordRejectedSample,
   startTripSession,
@@ -33,7 +33,7 @@ export type TripRecorderState = {
   phase: RecorderPhase;
   permission: LocationPermissionState;
   activeSession: TripSessionSummary | null;
-  pendingOutboxCount: number;
+  pendingUploadCount: number;
   errorCode: 'database_unavailable' | 'location_services_disabled' | 'capture_failed' | null;
 };
 
@@ -41,7 +41,7 @@ const initialState: TripRecorderState = {
   phase: 'initializing',
   permission: 'checking',
   activeSession: null,
-  pendingOutboxCount: 0,
+  pendingUploadCount: 0,
   errorCode: null,
 };
 
@@ -59,8 +59,8 @@ export function useTripRecorder() {
   const lastAcceptedTimestampRef = useRef<number | null>(null);
 
   const refreshPendingCount = useCallback(async () => {
-    const pendingOutboxCount = await getPendingOutboxCount();
-    setState((current) => ({ ...current, pendingOutboxCount }));
+    const pendingUploadCount = await getPendingUploadCount();
+    setState((current) => ({ ...current, pendingUploadCount }));
   }, []);
 
   useEffect(() => {
@@ -69,10 +69,10 @@ export function useTripRecorder() {
     async function initialize() {
       try {
         await getTelemetryDatabase();
-        const [permissionResponse, activeSession, pendingOutboxCount] = await Promise.all([
+        const [permissionResponse, activeSession, pendingUploadCount] = await Promise.all([
           Location.getForegroundPermissionsAsync(),
           getActiveTripSession(),
-          getPendingOutboxCount(),
+          getPendingUploadCount(),
         ]);
         if (cancelled) return;
 
@@ -80,7 +80,7 @@ export function useTripRecorder() {
           phase: activeSession ? 'ready_to_resume' : 'idle',
           permission: toPermissionState(permissionResponse),
           activeSession,
-          pendingOutboxCount,
+          pendingUploadCount,
           errorCode: null,
         });
       } catch {
@@ -173,15 +173,15 @@ export function useTripRecorder() {
                     session.sessionId,
                     evaluation.sample,
                   );
-                  const pendingOutboxCount = await getPendingOutboxCount();
-                  setState((current) => ({ ...current, activeSession, pendingOutboxCount }));
+                  const pendingUploadCount = await getPendingUploadCount();
+                  setState((current) => ({ ...current, activeSession, pendingUploadCount }));
                 } else {
                   const activeSession = await recordRejectedSample(
                     session.sessionId,
                     evaluation.reason,
                   );
-                  const pendingOutboxCount = await getPendingOutboxCount();
-                  setState((current) => ({ ...current, activeSession, pendingOutboxCount }));
+                  const pendingUploadCount = await getPendingUploadCount();
+                  setState((current) => ({ ...current, activeSession, pendingUploadCount }));
                 }
               })
               .catch(() => {
@@ -315,12 +315,12 @@ export function useTripRecorder() {
     try {
       await writeQueueRef.current;
       await stopTripSession(state.activeSession.sessionId, 'user_stopped');
-      const pendingOutboxCount = await getPendingOutboxCount();
+      const pendingUploadCount = await getPendingUploadCount();
       setState((current) => ({
         ...current,
         phase: 'idle',
         activeSession: null,
-        pendingOutboxCount,
+        pendingUploadCount,
         errorCode: null,
       }));
     } catch {

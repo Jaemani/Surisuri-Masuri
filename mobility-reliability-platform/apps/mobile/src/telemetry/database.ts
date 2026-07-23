@@ -1,10 +1,14 @@
 import * as Crypto from 'expo-crypto';
 import * as SQLite from 'expo-sqlite';
 
+import {
+  CREATE_TELEMETRY_SCHEMA_V2_SQL,
+  CURRENT_TELEMETRY_SCHEMA_VERSION,
+  MIGRATE_TELEMETRY_V1_TO_V2_SQL,
+} from './databaseSchema';
 import type { NormalizedLocationSample, SampleRejectionReason } from './samplePolicy';
 
 const DATABASE_NAME = 'mobility-telemetry-v1.sqlite';
-const CURRENT_SCHEMA_VERSION = 1;
 
 export type TripSessionSummary = {
   sessionId: string;
@@ -15,7 +19,7 @@ export type TripSessionSummary = {
   nextSampleSequence: number;
   acceptedSampleCount: number;
   rejectedSampleCount: number;
-  uploadEligibility: 'development_local_only';
+  uploadEligibility: 'development_local_only' | 'server_bound';
   lastSampleAt: string | null;
 };
 
@@ -28,7 +32,7 @@ type SessionRow = {
   next_sample_sequence: number;
   accepted_sample_count: number;
   rejected_sample_count: number;
-  upload_eligibility: 'development_local_only';
+  upload_eligibility: 'development_local_only' | 'server_bound';
   last_sample_at: string | null;
 };
 
@@ -59,86 +63,53 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
     'PRAGMA user_version',
   );
   const schemaVersion = versionRow?.user_version ?? 0;
-  if (schemaVersion > CURRENT_SCHEMA_VERSION) {
+  if (schemaVersion > CURRENT_TELEMETRY_SCHEMA_VERSION) {
     throw new Error('DATABASE_SCHEMA_NEWER_THAN_APP');
   }
-  if (schemaVersion === CURRENT_SCHEMA_VERSION) return;
+  if (schemaVersion === CURRENT_TELEMETRY_SCHEMA_VERSION) return;
 
   const existingV0Table = await database.getFirstAsync<{ name: string }>(
     `SELECT name FROM sqlite_master
      WHERE type = 'table' AND name = 'trip_session_projection'`,
   );
-  if (existingV0Table) {
+  if (schemaVersion === 0 && existingV0Table) {
     throw new Error('UNVERSIONED_DEVELOPMENT_DATABASE_REQUIRES_CLEAR');
   }
 
-  await database.execAsync(`
-    CREATE TABLE IF NOT EXISTS trip_session_projection (
-      session_id TEXT PRIMARY KEY NOT NULL,
-      installation_id TEXT NOT NULL,
-      tenant_id TEXT,
-      actor_id TEXT,
-      mobility_device_id TEXT,
-      consent_version TEXT,
-      upload_eligibility TEXT NOT NULL CHECK (upload_eligibility IN ('development_local_only')),
-      started_at TEXT NOT NULL,
-      ended_at TEXT,
-      state TEXT NOT NULL CHECK (state IN ('recording', 'stopped')),
-      next_event_sequence INTEGER NOT NULL DEFAULT 0,
-      next_sample_sequence INTEGER NOT NULL DEFAULT 0,
-      accepted_sample_count INTEGER NOT NULL DEFAULT 0,
-      rejected_sample_count INTEGER NOT NULL DEFAULT 0,
-      last_sample_at TEXT,
-      updated_at TEXT NOT NULL
-    );
+  if (schemaVersion === 0) {
+    try {
+      await database.execAsync(`BEGIN IMMEDIATE;${CREATE_TELEMETRY_SCHEMA_V2_SQL}`);
+      const foreignKeyViolations = await database.getAllAsync('PRAGMA foreign_key_check');
+      if (foreignKeyViolations.length > 0) {
+        throw new Error('DATABASE_FOREIGN_KEY_CHECK_FAILED');
+      }
+      await database.execAsync('COMMIT;');
+    } catch (error) {
+      await database.execAsync('ROLLBACK;').catch(() => undefined);
+      throw error;
+    }
+    return;
+  }
 
-    CREATE UNIQUE INDEX IF NOT EXISTS one_recording_session
-      ON trip_session_projection(state)
-      WHERE state = 'recording';
+  if (schemaVersion !== 1) {
+    throw new Error('DATABASE_SCHEMA_MIGRATION_UNAVAILABLE');
+  }
 
-    CREATE TABLE IF NOT EXISTS trip_event_log (
-      event_id TEXT PRIMARY KEY NOT NULL,
-      session_id TEXT NOT NULL,
-      event_sequence INTEGER NOT NULL,
-      sample_sequence INTEGER,
-      event_type TEXT NOT NULL CHECK (
-        event_type IN ('session_started', 'location_sample', 'sample_rejected', 'session_stopped')
-      ),
-      occurred_at TEXT NOT NULL,
-      latitude REAL,
-      longitude REAL,
-      horizontal_accuracy_m REAL,
-      altitude_m REAL,
-      speed_mps REAL,
-      heading_degrees REAL,
-      is_mock_location INTEGER,
-      payload_json TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES trip_session_projection(session_id),
-      UNIQUE (session_id, event_sequence),
-      UNIQUE (session_id, sample_sequence)
-    );
+  await database.execAsync('PRAGMA foreign_keys = OFF;');
+  try {
+    await database.execAsync(`BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}`);
+    const foreignKeyViolations = await database.getAllAsync('PRAGMA foreign_key_check');
+    if (foreignKeyViolations.length > 0) {
+      throw new Error('DATABASE_FOREIGN_KEY_CHECK_FAILED');
+    }
+    await database.execAsync('COMMIT;');
+  } catch (error) {
+    await database.execAsync('ROLLBACK;').catch(() => undefined);
+    throw error;
+  } finally {
+    await database.execAsync('PRAGMA foreign_keys = ON;');
+  }
 
-    CREATE TABLE IF NOT EXISTS outbox_delivery (
-      event_id TEXT PRIMARY KEY NOT NULL,
-      state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'sending', 'acknowledged')),
-      attempt_count INTEGER NOT NULL DEFAULT 0,
-      next_attempt_at TEXT,
-      acknowledged_at TEXT,
-      last_error_code TEXT,
-      FOREIGN KEY (event_id) REFERENCES trip_event_log(event_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS pending_outbox
-      ON outbox_delivery(state, next_attempt_at);
-
-    CREATE TABLE IF NOT EXISTS app_metadata (
-      key TEXT PRIMARY KEY NOT NULL,
-      value TEXT NOT NULL
-    );
-
-    PRAGMA user_version = 1;
-  `);
 }
 
 export async function getTelemetryDatabase(): Promise<SQLite.SQLiteDatabase> {
@@ -169,6 +140,7 @@ async function insertOutboxEvent(
     headingDegrees?: number | null;
     isMockLocation?: boolean | null;
     payloadJson: string;
+    deliveryScope: 'local_only' | 'telemetry_upload';
   },
 ): Promise<void> {
   await database.runAsync(
@@ -196,9 +168,11 @@ async function insertOutboxEvent(
     new Date().toISOString(),
   );
   await database.runAsync(
-    `INSERT INTO outbox_delivery (event_id, state, attempt_count)
-     VALUES (?, 'pending', 0)`,
+    `INSERT INTO outbox_delivery (event_id, delivery_scope, state, attempt_count)
+     VALUES (?, ?, ?, 0)`,
     event.eventId,
+    event.deliveryScope,
+    event.deliveryScope === 'telemetry_upload' ? 'pending' : 'not_applicable',
   );
 }
 
@@ -243,6 +217,7 @@ export async function startTripSession(): Promise<TripSessionSummary> {
       eventType: 'session_started',
       occurredAt: now,
       payloadJson: JSON.stringify({ captureMode: 'manual', schemaVersion: 1 }),
+      deliveryScope: 'local_only',
     });
   });
 
@@ -294,6 +269,8 @@ export async function appendLocationSample(
       headingDegrees: sample.heading,
       isMockLocation: sample.isMockLocation,
       payloadJson: JSON.stringify({ source: 'phone_gps', schemaVersion: 1 }),
+      deliveryScope:
+        row.upload_eligibility === 'server_bound' ? 'telemetry_upload' : 'local_only',
     });
 
     const updatedAt = new Date().toISOString();
@@ -350,6 +327,7 @@ export async function recordRejectedSample(
       eventType: 'sample_rejected',
       occurredAt,
       payloadJson: JSON.stringify({ reason, schemaVersion: 1 }),
+      deliveryScope: 'local_only',
     });
     await transaction.runAsync(
       `UPDATE trip_session_projection
@@ -399,6 +377,7 @@ export async function stopTripSession(
       eventType: 'session_stopped',
       occurredAt: now,
       payloadJson: JSON.stringify({ reason, schemaVersion: 1 }),
+      deliveryScope: 'local_only',
     });
     await transaction.runAsync(
       `UPDATE trip_session_projection
@@ -435,10 +414,11 @@ export async function getActiveTripSession(): Promise<TripSessionSummary | null>
   return row ? toSummary(row) : null;
 }
 
-export async function getPendingOutboxCount(): Promise<number> {
+export async function getPendingUploadCount(): Promise<number> {
   const database = await getTelemetryDatabase();
   const row = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM outbox_delivery WHERE state = 'pending'`,
+    `SELECT COUNT(*) AS count FROM outbox_delivery
+     WHERE delivery_scope = 'telemetry_upload' AND state = 'pending'`,
   );
   return row?.count ?? 0;
 }
