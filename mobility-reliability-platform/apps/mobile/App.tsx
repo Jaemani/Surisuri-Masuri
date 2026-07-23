@@ -182,7 +182,7 @@ export default function App() {
                       ? 'Android/iPhone development build에서 확인할 수 있어요.'
                       : state.backgroundPermission === 'granted'
                         ? state.captureMode === 'background'
-                          ? '화면이 꺼져도 현재 주행을 기록해요.'
+                          ? '백그라운드 수집을 요청했어요. 실기기 지속 검증 전입니다.'
                           : '필요한 권한이 준비되었어요.'
                         : backgroundPermission.label}
                   </Text>

@@ -38,10 +38,24 @@ describe('background location runtime', () => {
   it('fails closed when native task management is unavailable', async () => {
     taskManager.isAvailableAsync.mockRejectedValue(new Error('native unavailable'));
 
-    await expect(isBackgroundLocationAvailable()).resolves.toBe(false);
-    await expect(isBackgroundLocationRunning()).resolves.toBe(false);
+    await expect(isBackgroundLocationAvailable()).rejects.toThrow('native unavailable');
+    await expect(isBackgroundLocationRunning()).rejects.toThrow('native unavailable');
     await expect(startBackgroundLocation()).rejects.toThrow('BACKGROUND_TASK_UNAVAILABLE');
     expect(location.startLocationUpdatesAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not treat an unknown running state as a stopped task', async () => {
+    location.hasStartedLocationUpdatesAsync.mockRejectedValue(
+      new Error('native status unavailable'),
+    );
+
+    await expect(isBackgroundLocationRunning()).rejects.toThrow(
+      'native status unavailable',
+    );
+    await expect(stopBackgroundLocation()).rejects.toThrow(
+      'native status unavailable',
+    );
+    expect(location.stopLocationUpdatesAsync).not.toHaveBeenCalled();
   });
 
   it('refuses to start before the global task is defined', async () => {

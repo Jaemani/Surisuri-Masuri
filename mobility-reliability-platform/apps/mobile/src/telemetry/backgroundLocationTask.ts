@@ -5,6 +5,7 @@ import {
   appendLocationSample,
   clearBackgroundTaskFailure,
   getActiveTripSession,
+  hasBackgroundTaskFailure,
   recordBackgroundTaskFailure,
   recordRejectedSample,
 } from './database';
@@ -25,6 +26,7 @@ const handleBackgroundLocation = createBackgroundLocationTaskHandler({
       now: Date.now,
     }),
   recordFailure: recordBackgroundTaskFailure,
+  hasFailure: hasBackgroundTaskFailure,
   clearFailure: clearBackgroundTaskFailure,
 });
 

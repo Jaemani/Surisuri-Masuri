@@ -16,6 +16,7 @@ type BackgroundLocationTaskDependencies = {
     locations: readonly BackgroundLocationInput[],
   ) => Promise<BackgroundLocationBatchResult>;
   recordFailure: (code: BackgroundTaskFailureCode) => Promise<void>;
+  hasFailure: () => Promise<boolean>;
   clearFailure: () => Promise<void>;
 };
 
@@ -50,6 +51,16 @@ export function createBackgroundLocationTaskHandler(
     body: BackgroundLocationTaskBody,
   ): Promise<void> {
     return enqueue(async () => {
+      let held: boolean;
+      try {
+        held = await dependencies.hasFailure();
+      } catch {
+        throw new Error('BACKGROUND_TASK_FAILURE_STATUS_UNAVAILABLE');
+      }
+      if (held) {
+        throw new Error('BACKGROUND_TASK_HELD');
+      }
+
       if (body.error) {
         await fail('native_task_error', 'BACKGROUND_NATIVE_TASK_FAILED');
       }

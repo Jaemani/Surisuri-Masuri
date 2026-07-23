@@ -28,6 +28,7 @@ function dependencies() {
       ignoredReplayCount: 0,
     })),
     recordFailure: vi.fn(async () => undefined),
+    hasFailure: vi.fn(async () => false),
     clearFailure: vi.fn(async () => undefined),
   };
 }
@@ -112,6 +113,19 @@ describe('background location task handler', () => {
     expect((error as Error).message).toBe('BACKGROUND_TASK_PROCESSING_FAILED');
     expect((error as Error).message).not.toContain(String(sample.coords.latitude));
     expect(deps.recordFailure).toHaveBeenCalledWith('batch_processing_failed');
+  });
+
+  it('keeps a prior failure latched until an explicit runtime retry clears it', async () => {
+    const deps = dependencies();
+    deps.hasFailure.mockResolvedValue(true);
+    const handler = createBackgroundLocationTaskHandler(deps);
+
+    await expect(handler({ data: { locations: [] } })).rejects.toThrow(
+      'BACKGROUND_TASK_HELD',
+    );
+    expect(deps.processBatch).not.toHaveBeenCalled();
+    expect(deps.clearFailure).not.toHaveBeenCalled();
+    expect(deps.recordFailure).not.toHaveBeenCalled();
   });
 
   it('clears a prior failure only after a successful batch', async () => {
