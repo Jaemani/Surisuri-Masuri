@@ -113,3 +113,4 @@
 | [HR-20260723-40](./HR-20260723-40-mobile-upload-lease.md) | 모바일 exact-body upload lease와 control-metadata hold | `draft` |
 | [HR-20260723-41](./HR-20260723-41-background-gps-static-boundary.md) | 백그라운드 GPS 정적 구현·검증 경계 | `draft` |
 | [HR-20260723-42](./HR-20260723-42-android-background-native-smoke.md) | Android background GPS native lifecycle smoke | `draft` |
+| [HR-20260811-01](./HR-20260811-01-mobile-upload-disposition.md) | M3 모바일 upload disposition·SQLite v4와 response-loss correlation | `draft` |

@@ -7,7 +7,7 @@ React Native와 Expo 기반의 사용자·수리사 모바일 앱입니다. Andr
 - foreground 위치 권한 상태와 명시적 주행 시작·종료 구현
 - `watchPositionAsync` 위치 sample을 SQLite WAL event log에 append
 - event payload와 delivery 상태를 분리한 local outbox 구현
-- SQLite schema v3와 v1→v2→v3 atomic migration 구현. 기존 v1 session·event는 보존하되 모두 `local_only/not_applicable`로 고정
+- SQLite schema v4와 v1→v2→v3→v4 atomic migration 구현. v4는 active FIFO·expired lease 조회 인덱스, terminal outbox 무결성, batch item의 정수·연속 position 감사를 포함하며, 기존 v1 session·event는 보존하되 모두 `local_only/not_applicable`로 고정
 - server-bound session scope, append-only GPS event, canonical batch body·item membership, pending/lease/retry/ACK 상태의 DB 무결성 구현
 - 같은 server-bound session의 pending GPS를 최대 500개 canonical body와 SHA-256으로 원자 저장하고 기존 active batch를 재발견하는 single-flight materializer 구현
 - 앱 재시작 시 종료되지 않은 주행을 찾아 사용자가 재개·종료 가능
@@ -17,13 +17,27 @@ React Native와 Expo 기반의 사용자·수리사 모바일 앱입니다. Andr
   강제종료 뒤 active session·sample count 복구를 실제 확인
 - Stored body exact SHA 재검증, canonical retry/lease metadata와 safe attempt gate,
   pending·expired lease 및 corruption parent/child hold 구현
+- leased batch의 서버 결과를 `acknowledged`·`retry`·`hold`로 분류해 parent batch와 모든
+  child delivery를 한 SQLite transaction에서 전이. retry는 최대 15분 bounded backoff와
+  jitter 정책을 사용하며, ACK·hold는 terminal 상태로 고정
+- `BEGIN IMMEDIATE` 또는 `COMMIT` 응답이 유실되어 실제 저장 여부가 모호해지는 경우
+  writer mutation을 반복하지 않고 새 query-only connection에서
+  `committed`·`not_committed`·`unverifiable`을 상관. 확인 불가능한 결과는 fail-closed
+  persistence error로 반환
 - 전역 TaskManager, 2단계 위치 권한, foreground fallback, bounded callback queue와
   SQLite 단조 timestamp gate를 포함한 background 위치 수집 코드를 development
   build용으로 구현
 - Android 11 emulator의 native development client에서 foreground service·notification,
   화면 밖 synthetic callback 저장, process force-stop 뒤 cold-launch service 복구와
   명시적 종료를 확인. Android 실기기와 iPhone lifecycle은 미검증
-- Retry·ACK terminal store와 HTTP transport는 미착수
+- 위 upload state machine과 response-loss recovery는 local SQLite component와 Node test로
+  검증했다. 실제 HTTP 업로더, Firebase ID token/App Check, 서버 ACK endpoint와의 연결은
+  아직 미연결이다. 따라서 앱 UI에서 전송을 완료했다고 주장하지 않는다.
+
+M3는 8개월 로드맵에서 7월에 계획한 모바일 업로드 복구 게이트다. 실제 코드 증분의 완료일은
+2026-08-11이며, 코드 기준점은 commit `a9a57cc`, 모바일 테스트는 229건이다. 계획 월과
+실제 완료일을 섞지 않기 위해 이 경계를 제품 업데이트·증거·사람 대상 리포트에서 각각
+분리한다.
 
 화면에는 원본 좌표를 표시하지 않고 저장된 sample 수와 **실제 server-bound upload 대기 수**만 보여줍니다. 현재 UI는 local-only session만 만들므로 이 값은 0이며, 개발 로그에도 좌표를 출력하지 않습니다.
 
@@ -60,9 +74,10 @@ WSL 저장소와 Windows Android emulator를 연결하는 재현 절차와 화�
 [WSL Runbook](../../docs/development/WSL_RUNBOOK.md#android-에뮬레이터-빠른-데모)과
 [EVD-20260723-048](../../docs/evidence/2026-07.md#evd-20260723-048--android-foreground-gps와-sqlite-재시작-복구-smoke)에 있습니다.
 
-이 native smoke는 fresh SQLite v3 open과 현재 local-only foreground 흐름을
-검증합니다. 기존 v1/v2 실제 파일 migration, background lifecycle, offline HTTP
-reconnect, server ACK와 iPhone 동작은 검증하지 않습니다.
+이 historical native smoke는 당시 fresh SQLite v3 open과 local-only foreground 흐름을
+검증했습니다. 현재 source의 v4와 v1→v4 migration, retry/ACK/hold state는 Node SQLite
+component test 범위이며 Expo native connection에서의 실제 migration·offline HTTP
+reconnect·server ACK transport와 iPhone 동작은 별도 gate입니다.
 
 Background source gate는 global task 등록, Android foreground-service 권한, iOS
 `UIBackgroundModes=location`, callback 직렬화·최대 100개, session 전 cached fix
@@ -76,9 +91,15 @@ service notification, process force-stop 뒤 cold-launch 재등록과 명시적 
 근거는 [EVD-20260723-051](../../docs/evidence/2026-07.md#evd-20260723-051--android-background-gps-native-lifecycle-smoke와-cold-launch-복구)에 있습니다.
 Android 실기기·OEM 정책·재부팅·iPhone·배터리 결과는 포함하지 않습니다.
 
-Upload lease는 현재 UI에서 호출되지 않습니다. Node SQLite test는 exact-body
-SHA, pending·expired lease와 fail-closed hold를 검증하지만, 실제 두 Expo native
-connection의 `BEGIN IMMEDIATE` 경쟁과 `busy_timeout` 동작은 development build에서
-별도로 검증해야 합니다.
+Upload lease와 disposition은 현재 UI에서 호출되지 않습니다. Node SQLite test는 exact-body
+SHA, pending·expired lease, retry/ACK/hold terminal invariant와 fail-closed hold를
+검증하지만, 실제 두 Expo native connection의 `BEGIN IMMEDIATE` 경쟁, `busy_timeout`,
+HTTP offline→reconnect와 서버 ACK는 development build에서 별도로 검증해야 합니다.
 
-커밋 전의 unversioned SQLite prototype을 실기기에서 실행한 적이 있다면 현재 앱은 이를 자동 변환하지 않고 안전하게 중단합니다. Version 1 database는 v2를 거쳐 v3로 transaction migration하며 session·event·installation metadata를 보존하고 기존 delivery metadata는 non-deliverable state로 대체합니다. V2 batch body에 canonical scope 결함이 있으면 자동 수정·삭제하지 않고 migration을 중단합니다. Android/iPhone의 실제 v1/v2 파일 migration과 앱 재시작은 아직 별도 검증이 필요합니다.
+커밋 전의 unversioned SQLite prototype을 실기기에서 실행한 적이 있다면 현재 앱은 이를 자동 변환하지 않고 안전하게 중단합니다. Version 1 database는 v2·v3를 거쳐 v4로 transaction migration하며 session·event·installation metadata를 보존하고 기존 delivery metadata는 non-deliverable state로 대체합니다. V2/v3 batch body·binding·terminal child에 canonical scope, 정수 position, nested JSON 결함이 있으면 자동 수정·삭제하지 않고 migration을 중단합니다. Android/iPhone의 실제 v1/v2/v3 파일 migration과 앱 재시작은 아직 별도 검증이 필요합니다.
+
+M3 기록: [ADR-0039](../../docs/decisions/ADR-0039-atomic-mobile-upload-disposition.md),
+[UPD-20260811-01](../../docs/product-updates/UPD-20260811-01-mobile-upload-disposition.md),
+[EVD-20260811-001](../../docs/evidence/2026-08.md#evd-20260811-001--모바일-upload-disposition과-v4-state-integrity),
+[HR-20260811-01](../../docs/reports/human/HR-20260811-01-mobile-upload-disposition.md).
+각 문서는 local component 검증과 HTTP/Firebase/native E2E 미연결 경계를 별도로 기록합니다.

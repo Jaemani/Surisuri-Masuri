@@ -48,7 +48,36 @@
 
 계획이 실제보다 앞서거나 뒤처져도 계획 문서를 성취 기록처럼 고쳐 쓰지 않는다. 차이는 해당 회차 정기리포트의 `실제 진행 입력란`과 증거 링크에 남긴다.
 
-## 4. 2026-07-23 현재 검증된 구현 경계
+## 4. 2026-08-11 현재 검증된 구현 경계
+
+기준일은 2026-08-11이다. 8개월 로드맵에서 M3는 7월에 계획된 모바일 업로드
+복구 게이트로 분리해 관리하며, 아래 구현의 실제 완료일은 2026-08-11이다. 계획 월을
+실제 완료일로 소급하지 않는다. 코드 기준점은 commit `a9a57cc`이며 모바일 테스트는
+229건이다.
+
+- SQLite schema v4와 v1→v2→v3→v4 atomic migration을 구현했다. v4는 active FIFO·expired
+  lease 조회 인덱스, terminal outbox 무결성, batch item의 정수·연속 position 감사와
+  malformed nested JSON fail-closed migration audit를 포함한다.
+- lease된 batch의 disposition을 `acknowledged`·`retry`·`hold`로 원자 적용하고, retry
+  backoff를 최대 15분으로 제한한다. parent batch와 child delivery의 terminal metadata가
+  서로 일치하지 않으면 전이를 거부한다.
+- bounded 100-row FIFO integrity scan 뒤에 due-row SQL fallback을 두어 앞의 future
+  retry/lease가 뒤의 actionable batch를 starvation시키지 않게 했다. fallback 후보도
+  기존 canonical JS 검사와 CAS를 통과해야만 lease 권한을 얻는다.
+- `BEGIN IMMEDIATE`·`COMMIT` 응답 유실은 mutation 재호출 없이 fresh query-only
+  connection에서 `committed`·`not_committed`·`unverifiable`로 상관한다. 확인 불가능한
+  결과는 fail-closed persistence error로 닫는다.
+- 이는 local SQLite component와 Node 테스트에서 검증한 상태다. 실제 HTTP uploader,
+  Firebase ID token/App Check, 서버 ACK endpoint, Expo native multi-connection 경쟁,
+  offline→reconnect와 Android/iPhone 실기기 E2E는 아직 미연결·미검증이다.
+
+관련 문서: [ADR-0039](./decisions/ADR-0039-atomic-mobile-upload-disposition.md),
+[ADR-0036](./decisions/ADR-0036-fail-closed-mobile-upload-lease.md),
+[UPD-20260811-01](./product-updates/UPD-20260811-01-mobile-upload-disposition.md),
+[EVD-20260811-001](./evidence/2026-08.md#evd-20260811-001--모바일-upload-disposition과-v4-state-integrity),
+[HR-20260811-01](./reports/human/HR-20260811-01-mobile-upload-disposition.md).
+
+## 4.1 2026-07-23 당시 검증된 구현 경계 (historical)
 
 다음은 문서 작성 시점에 로컬·클린 러너 증거가 연결된 범위다.
 
