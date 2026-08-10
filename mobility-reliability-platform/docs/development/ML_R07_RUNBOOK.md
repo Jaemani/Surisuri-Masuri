@@ -1,6 +1,6 @@
 # ML R07 실행·인계 Runbook
 
-이 문서는 2026년 8월 R07-A 합성 데이터 계약을 WSL에서 재현하고, 다른 환경에서
+이 문서는 2026년 8월 R07-A/R07-B 합성 데이터 계약·feature·rules baseline을 WSL에서 재현하고, 다른 환경에서
 동일한 경계로 이어받기 위한 절차다. 이 문서의 명령은 local 또는 clean CI에서
 실행하는 검증 절차이며, 실행하지 않은 결과를 성능·현장 성과로 보고하지 않는다.
 
@@ -16,6 +16,14 @@ R07-A의 결과는 다음이다.
 - `developer_device` benchmark 혼입 차단
 - contract 또는 validator 부재 시 fail-closed 처리
 
+R07-B의 현재 결과는 다음이다.
+
+- `quality-features.v1`의 coordinate-free numeric feature와 nested trace/batch/dataset/feature lineage
+- malformed sample·부족한 accuracy·비합성 source를 `review_required`로 닫는 extractor
+- 동일 frozen manifest에서 동작하는 `r07-rules-baseline.v1`
+- `quality-baseline-result.v1`의 synthetic-only provenance, split metric, confusion matrix와 prediction feature hash
+- feature record와 baseline 결과를 Python에서 repository-owned JSON Schema로 재검증하는 fail-closed gate
+
 아직 R07-A의 결과가 아닌 것은 다음이다.
 
 - PyTorch 학습, 모델 성능, calibration 또는 confusion matrix
@@ -23,7 +31,7 @@ R07-A의 결과는 다음이다.
 - 복지관 pilot, 실제 사용자 데이터, legacy 수리데이터 이관
 - ONNX/mobile inference, Firebase/production 배포
 
-R07-A 코드 기준점은 commit `a20a85b`다. 전체 인계는 이 Runbook을 포함한 최신
+R07-A 코드 기준점은 commit `a20a85b`이며 R07-B 코드 기준점은 commit `a9b20d9`다. 전체 인계는 이 Runbook을 포함한 최신
 `main`의 clean commit을 사용하고 `rtk git log -1 --oneline`으로 확인한다. 계획
 월(M4/R07-A)과 실제 실행일·검증 결과를 섞지 않는다.
 
@@ -152,9 +160,32 @@ validator 오류는 path, keyword, trace index와 같은 최소 metadata만 기�
 - 작업 종료 전 `rtk git status --short --branch`로 의도하지 않은 artifact가
   남지 않았는지 확인한다.
 
-## 7. R07-B로 넘기는 입력
+## 7. R07-B feature와 rules baseline 재현
 
-R07-B의 입력은 새로 resplit하거나 복사한 CSV가 아니다.
+R07-A의 동일한 dataset/manifest를 사용해 feature와 rules 결과를 검증한다. 데이터셋을
+다시 split하거나 feature 계산 함수에 label·split을 전달하지 않는다.
+
+```bash
+rtk uv --directory services/ml run --locked --extra dev pytest -q tests/test_features.py tests/test_rules_baseline.py
+```
+
+검증되는 안전 경계는 다음과 같다.
+
+- feature output에 latitude/longitude·raw samples·label·prediction이 없다.
+- feature 값 또는 nested lineage가 바뀌면 feature hash 검증이 실패한다.
+- review 상태에는 numeric feature가 없고 단일 value-free reason code만 있다.
+- baseline result는 `sourceKind=synthetic`, `benchmarkEligible=true`, frozen dataset hash,
+  feature schema version, rule version, split strategy를 포함한다.
+- schema 누락·feature record 변조·label leakage는 결과를 통과시키지 않는다.
+
+2026-08-11 WSL 재현 결과는 Python 49 tests, contract 16 fixture cases이며, synthetic
+48 trace를 train/validation/test 각 16건으로 평가했다. 각 split의 accuracy including
+abstain과 macro-F1은 1.0, abstain rate는 0이다. 이 숫자는 synthetic rules baseline의
+계약·평가 파이프라인만 증명하며 현장 성능 수치로 사용하지 않는다.
+
+## 8. R07-C로 넘기는 입력
+
+R07-C의 입력은 새로 resplit하거나 복사한 CSV가 아니다.
 
 1. 같은 generator snapshot의 `dataset.json`
 2. `quality-dataset-manifest.v1`와 `datasetSha256`
@@ -162,13 +193,14 @@ R07-B의 입력은 새로 resplit하거나 복사한 CSV가 아니다.
 4. `group-time-holdout.v1`의 train/validation/test assignment
 5. feature contract의 현재 버전 `quality-features.v1`
 
-R07-B는 다음을 구현한다.
+R07-B에서 구현된 결과는 다음과 같다.
 
 - GPS 원본 좌표가 아닌 허용된 속도·가속·정지·heading·accuracy·missingness 요약
   feature extractor
 - 동일 입력에 대한 golden vector와 versioned feature output
 - label 또는 test split 정보를 feature 계산에 누출하지 않는 규칙 baseline
 - feature hash와 generator/manifest lineage 기록
+- rules baseline prediction·metrics·abstain을 versioned result로 기록
 
 R07-B가 dataset을 다시 섞거나 trace를 sample 단위로 임의 분할하면 이 ADR의
 holdout 경계를 위반한다. feature extractor가 실패하거나 데이터가 부족하면
@@ -176,7 +208,7 @@ holdout 경계를 위반한다. feature extractor가 실패하거나 데이터�
 않는다. R07-C는 그 이후 동일 split에서 직접 학습 후보와 평가 harness를 별도로
 추가하는 작업이다.
 
-## 8. 인계 체크리스트
+## 9. 인계 체크리스트
 
 - [ ] `a20a85b` 또는 그 후속 commit을 기준으로 clean checkout을 만들었다.
 - [ ] Python 3.12.x와 uv 0.8.13을 확인했다.
@@ -187,5 +219,7 @@ holdout 경계를 위반한다. feature extractor가 실패하거나 데이터�
 - [ ] generated artifact와 raw/PII가 Git status에 없다.
 - [ ] seed, schema version, split strategy, dataset SHA-256을 인계 메모에 남겼다.
 - [ ] 실제 사용자·현장·모델 성능·배포 상태를 R07-A 완료로 표현하지 않았다.
+- [ ] R07-B synthetic baseline 수치를 현장·실기기 성능으로 표현하지 않았다.
 
 관련 결정: [ADR-0040](../decisions/ADR-0040-r07-quality-dataset-contract.md)
+관련 결정: [ADR-0041](../decisions/ADR-0041-r07-feature-and-rules-contract.md)

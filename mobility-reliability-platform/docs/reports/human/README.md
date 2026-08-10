@@ -115,3 +115,4 @@
 | [HR-20260723-42](./HR-20260723-42-android-background-native-smoke.md) | Android background GPS native lifecycle smoke | `draft` |
 | [HR-20260811-01](./HR-20260811-01-mobile-upload-disposition.md) | M3 모바일 upload disposition·SQLite v4와 response-loss correlation | `draft` |
 | [HR-20260811-02](./HR-20260811-02-r07-dataset-foundation.md) | R07 합성 데이터셋·label·group/time split 기반 | `draft` |
+| [HR-20260811-03](./HR-20260811-03-r07-feature-rules-baseline.md) | R07 feature contract·rules baseline | `draft` |

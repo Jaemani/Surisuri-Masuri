@@ -100,7 +100,28 @@
 [EVD-20260811-002](./evidence/2026-08.md#evd-20260811-002--r07-합성-품질-데이터셋-계약과-결정론적-split),
 [HR-20260811-02](./reports/human/HR-20260811-02-r07-dataset-foundation.md).
 
-## 4.2 2026-07-23 당시 검증된 구현 경계 (historical)
+## 4.2 2026-08-11 현재 R07-B 검증된 구현 경계
+
+R07-A와 동일한 frozen synthetic manifest에 coordinate-free feature extractor와
+rules baseline을 연결했다. 코드 기준점은 commit `a9b20d9`이다.
+
+- `quality-features.v1`은 nested trace/batch/dataset/feature lineage와 feature hash를
+  포함하며 raw 좌표·PII·label·prediction을 반환하지 않는다.
+- malformed sample, 부족한 accuracy, 비합성 source는 `review_required`와 단일
+  value-free `reasonCode`로 닫힌다.
+- `r07-rules-baseline.v1`은 feature hash와 frozen dataset lineage를 확인한 뒤에만
+  prediction을 생성한다. 결과는 `quality-baseline-result.v1`로 다시 검증한다.
+- synthetic 48 trace를 split별 16건으로 평가했으며 각 split macro-F1 1.0,
+  abstain rate 0이었다. 이는 synthetic-only 규칙 기준선이며 실제·현장 성능이 아니다.
+- Python 49 tests, contract 16 fixture cases, workspace test와 docs link check가
+  통과했다.
+
+관련 문서: [ADR-0041](./decisions/ADR-0041-r07-feature-and-rules-contract.md),
+[UPD-20260811-03](./product-updates/UPD-20260811-03-r07-feature-rules-baseline.md),
+[EVD-20260811-003](./evidence/2026-08.md#evd-20260811-003--r07-feature-contract와-synthetic-rules-baseline),
+[HR-20260811-03](./reports/human/HR-20260811-03-r07-feature-rules-baseline.md).
+
+## 4.3 2026-07-23 당시 검증된 구현 경계 (historical)
 
 다음은 문서 작성 시점에 로컬·클린 러너 증거가 연결된 범위다.
 

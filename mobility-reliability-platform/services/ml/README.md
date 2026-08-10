@@ -43,6 +43,38 @@ seed, fixed `createdAt`, trace·label·split count, 각 telemetry hash가 들어
 `artifacts/r07/`은 생성물이라 Git에 포함하지 않는다. CI도 runner 임시 폴더에
 두 번 생성한 뒤 byte equality를 검사하고 폐기한다.
 
+## R07-B feature contract와 rules baseline
+
+R07-B에서는 R07-A의 동일한 frozen manifest와 split을 다시 사용해 좌표를 반환하지
+않는 `quality-features.v1` feature record와 synthetic-only rules baseline을 연결한다.
+feature 계산 함수의 입력은 telemetry batch 하나뿐이며 label·split은 계산 경계 밖에서
+계보로만 붙인다. feature record에는 trace, telemetry batch, dataset, extractor의
+SHA-256 lineage가 들어가고 원본 latitude/longitude·PII·label·prediction은 들어가지
+않는다.
+
+추출 실패는 raw payload를 출력하지 않고 `review_required`와 value-free
+`reasonCode`로 닫는다. `developer_device`, `field_pilot`, `legacy_import`은
+benchmark 결과가 아니므로 feature record에서 benchmark eligibility를 false로
+표현한다.
+
+rules baseline은 네 known class와 `unknown_review_required` abstain 상태를 사용한다.
+결과는 `quality-baseline-result.v1`로 별도 검증하며 synthetic source와
+`benchmarkEligible=true`를 반드시 포함한다. 2026-08-11 현재 재현 결과는 48 trace,
+split별 16 trace, 전체 abstain 0, 전체 macro-F1 1.0이다. 이 수치는 생성 데이터의
+규칙 기준선 재현성만 보여주며 실제 GPS, 실기기, 복지관, 수리데이터 또는 현장
+일반화 성능을 의미하지 않는다.
+
+```bash
+rtk pnpm --filter @mobility-reliability/contracts test
+rtk uv --directory services/ml run --locked --extra dev ruff format --check src tests
+rtk uv --directory services/ml run --locked --extra dev ruff check src tests
+rtk uv --directory services/ml run --locked --extra dev pytest -q
+```
+
+현재 Python test는 feature golden vector, malformed/coordinate-free output, feature
+hash tamper, label leakage, frozen split evaluation, baseline result schema를 함께
+검증한다. 모델 학습·PyTorch·ONNX·모바일 추론은 다음 R07-C 범위다.
+
 ## Split and provenance rules
 
 - `group-time-holdout.v1`: 같은 `scenarioGroupId`가 train/validation/test를
