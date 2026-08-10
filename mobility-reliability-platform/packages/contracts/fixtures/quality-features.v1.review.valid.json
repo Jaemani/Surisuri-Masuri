@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "quality-features.v1",
+  "featureId": "9f2a4c15-1f9b-45cf-9f6a-2b99384d2b28",
+  "lineage": {
+    "trace": {
+      "traceId": "d9f6fc2f-8f9a-4554-b845-8dbb4b4ad8f1",
+      "traceVersion": "quality-trace.v1",
+      "traceSha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "telemetryBatch": {
+      "batchId": "e4bb9cfd-7dc6-4d57-aad8-95c5b7d4d542",
+      "schemaVersion": "telemetry-batch.v2",
+      "batchSha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "dataset": {
+      "datasetId": "quality-dataset.r07.synthetic",
+      "datasetVersion": "quality-dataset.r07.synthetic.v1",
+      "datasetSha256": "7e9242ad2c01d4abf94fd4a6c62153ef735b351f66481b4239f1c7bf3833b24c",
+      "split": "test",
+      "sourceKind": "synthetic",
+      "benchmarkEligible": true
+    },
+    "feature": {
+      "featureVersion": "quality-features.v1",
+      "extractorVersion": "r07-feature-extractor.v1",
+      "featureSha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    }
+  },
+  "extractionStatus": "review_required",
+  "reasonCode": "insufficient_samples",
+  "features": null
+}

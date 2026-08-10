@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/quality-features.v1.schema.json",
+  "title": "QualityFeaturesV1",
+  "description": "Versioned, coordinate-free numeric features derived from one telemetry trace. Labels, predictions, PII, and raw coordinates are intentionally not part of this contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "featureId",
+    "lineage",
+    "extractionStatus",
+    "reasonCode",
+    "features"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "quality-features.v1" },
+    "featureId": { "type": "string", "format": "uuid" },
+    "lineage": { "$ref": "#/$defs/lineage" },
+    "extractionStatus": {
+      "type": "string",
+      "enum": ["ok", "review_required"]
+    },
+    "reasonCode": {
+      "type": ["string", "null"],
+      "enum": [
+        "insufficient_samples",
+        "missing_timestamps",
+        "non_monotonic_time",
+        "invalid_or_missing_accuracy",
+        "unsupported_source",
+        "out_of_range",
+        "non_finite_value",
+        "contract_mismatch",
+        "developer_device_not_benchmarkable",
+        "extractor_error",
+        "telemetry_batch_invalid",
+        "samples_invalid",
+        "sequence_invalid",
+        "timestamp_invalid",
+        "timestamp_order_invalid",
+        "coordinate_nonfinite",
+        "coordinate_range_invalid",
+        "accuracy_invalid",
+        "speed_invalid",
+        "heading_invalid",
+        "altitude_invalid",
+        "sent_timestamp_invalid",
+        "sent_timestamp_chronology_invalid",
+        null
+      ]
+    },
+    "features": {
+      "anyOf": [
+        { "$ref": "#/$defs/numericFeatures" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "extractionStatus": { "const": "ok" } }
+      },
+      "then": {
+        "properties": {
+          "reasonCode": { "type": "null" },
+          "features": { "$ref": "#/$defs/numericFeatures" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "extractionStatus": { "const": "review_required" } }
+      },
+      "then": {
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "insufficient_samples",
+              "missing_timestamps",
+              "non_monotonic_time",
+              "invalid_or_missing_accuracy",
+              "unsupported_source",
+              "out_of_range",
+              "non_finite_value",
+              "contract_mismatch",
+              "developer_device_not_benchmarkable",
+              "extractor_error",
+              "telemetry_batch_invalid",
+              "samples_invalid",
+              "sequence_invalid",
+              "timestamp_invalid",
+              "timestamp_order_invalid",
+              "coordinate_nonfinite",
+              "coordinate_range_invalid",
+              "accuracy_invalid",
+              "speed_invalid",
+              "heading_invalid",
+              "altitude_invalid",
+              "sent_timestamp_invalid",
+              "sent_timestamp_chronology_invalid"
+            ]
+          },
+          "features": { "type": "null" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace", "telemetryBatch", "dataset", "feature"],
+      "properties": {
+        "trace": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["traceId", "traceVersion", "traceSha256"],
+          "properties": {
+            "traceId": { "type": "string", "format": "uuid" },
+            "traceVersion": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            },
+            "traceSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "telemetryBatch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["batchId", "schemaVersion", "batchSha256"],
+          "properties": {
+            "batchId": { "type": "string", "format": "uuid" },
+            "schemaVersion": { "const": "telemetry-batch.v2" },
+            "batchSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "dataset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "datasetId",
+            "datasetVersion",
+            "datasetSha256",
+            "split",
+            "sourceKind",
+            "benchmarkEligible"
+          ],
+          "properties": {
+            "datasetId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+            },
+            "datasetVersion": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            },
+            "datasetSha256": { "$ref": "#/$defs/sha256" },
+            "split": {
+              "type": "string",
+              "enum": ["train", "validation", "test"]
+            },
+            "sourceKind": {
+              "type": "string",
+              "enum": ["synthetic", "developer_device", "field_pilot", "legacy_import"]
+            },
+            "benchmarkEligible": { "type": "boolean" }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "sourceKind": { "const": "synthetic" } }
+              },
+              "then": { "properties": { "benchmarkEligible": { "const": true } } }
+            },
+            {
+              "if": {
+                "properties": {
+                  "sourceKind": {
+                    "enum": ["developer_device", "field_pilot", "legacy_import"]
+                  }
+                }
+              },
+              "then": { "properties": { "benchmarkEligible": { "const": false } } }
+            }
+          ]
+        },
+        "feature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["featureVersion", "extractorVersion", "featureSha256"],
+          "properties": {
+            "featureVersion": { "const": "quality-features.v1" },
+            "extractorVersion": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            },
+            "featureSha256": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      }
+    },
+    "numericFeatures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sampleCount",
+        "observedDurationS",
+        "pathLengthM",
+        "displacementM",
+        "meanStepDistanceM",
+        "maxStepDistanceM",
+        "meanSampleIntervalS",
+        "maxSampleIntervalS",
+        "reportedSpeedMeanMps",
+        "reportedSpeedMaxMps",
+        "reportedSpeedStdMps",
+        "derivedSpeedMeanMps",
+        "derivedSpeedMaxMps",
+        "reportedAccelerationMeanAbsMps2",
+        "reportedAccelerationMaxAbsMps2",
+        "headingChangeMeanDeg",
+        "headingChangeMaxDeg",
+        "headingChangeTotalDeg",
+        "headingChangeCount",
+        "stationaryRatio",
+        "accuracyMeanM",
+        "accuracyMaxM",
+        "accuracyMissingRatio",
+        "speedMissingRatio",
+        "headingMissingRatio",
+        "altitudeMissingRatio",
+        "optionalFieldMissingRatio",
+        "sentAfterLastSampleS"
+      ],
+      "properties": {
+        "sampleCount": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "observedDurationS": { "type": "number", "minimum": 0, "maximum": 604800 },
+        "pathLengthM": { "type": "number", "minimum": 0, "maximum": 100000000 },
+        "displacementM": { "type": "number", "minimum": 0, "maximum": 100000000 },
+        "meanStepDistanceM": { "type": "number", "minimum": 0, "maximum": 100000000 },
+        "maxStepDistanceM": { "type": "number", "minimum": 0, "maximum": 100000000 },
+        "meanSampleIntervalS": { "type": "number", "minimum": 0, "maximum": 86400 },
+        "maxSampleIntervalS": { "type": "number", "minimum": 0, "maximum": 86400 },
+        "reportedSpeedMeanMps": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "reportedSpeedMaxMps": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "reportedSpeedStdMps": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "derivedSpeedMeanMps": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "derivedSpeedMaxMps": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "reportedAccelerationMeanAbsMps2": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "reportedAccelerationMaxAbsMps2": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "headingChangeMeanDeg": { "type": "number", "minimum": 0, "maximum": 180 },
+        "headingChangeMaxDeg": { "type": "number", "minimum": 0, "maximum": 180 },
+        "headingChangeTotalDeg": { "type": "number", "minimum": 0, "maximum": 90000 },
+        "headingChangeCount": { "type": "integer", "minimum": 0, "maximum": 499 },
+        "stationaryRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "accuracyMeanM": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "accuracyMaxM": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "accuracyMissingRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "speedMissingRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "headingMissingRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "altitudeMissingRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "optionalFieldMissingRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sentAfterLastSampleS": { "type": "number", "minimum": 0, "maximum": 86400 }
+      }
+    }
+  }
+}

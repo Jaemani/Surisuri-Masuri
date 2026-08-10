@@ -18,5 +18,10 @@
 - `domain-event.v1.schema.json`: 검증 이후 내부 event log에 기록하는 공통 envelope
 - `quality-label.v1.schema.json`: 텔레메트리 trace의 이동 유형·품질 검토 라벨. `unknown_review_required`는 학습 class가 아니라 `review_required`/`abstained` 상태로 표현한다.
 - `quality-dataset-manifest.v1.schema.json`: 합성·개발기기·현장 trace의 계보, hash, seed, group/time split 및 benchmark eligibility를 기록하는 ML dataset manifest. `developer_device` trace는 기록할 수 있지만 benchmark loader에서 제외한다.
+- `quality-features.v1.schema.json`: 하나의 trace에서 추출한 coordinate-free numeric feature와 trace/batch/dataset/feature hash lineage. strict named fields만 허용하며 raw latitude/longitude, PII, label, prediction은 계약상 허용하지 않는다. 추출 실패는 value-free `reasonCode`와 `review_required` 상태로 표현한다.
+- `quality-baseline-result.v1.schema.json`: `quality-features.v1`와 분리된 synthetic-only rules baseline 결과. split별/전체 metric, 네 known class와 `unknown_review_required` confusion matrix, prediction·abstain·feature hash를 strict하게 기록한다.
+
+R07-B1에서는 규칙 baseline 결과를 이 feature contract에 넣지 않는다. baseline output이
+추가될 때는 별도 versioned result schema와 lineage/evaluation contract로 분리한다.
 
 R07 합성 데이터셋은 각 trace를 `telemetry-batch.v2`로 별도 검증하고, manifest의 `telemetryBatchId`와 `telemetrySha256`로 연결한다. manifest schema는 split 간 `scenarioGroupId` leakage나 집계값 일치를 대신 검증하지 않으며, 이는 dataset builder의 결정론적 검증 단계에서 실패시켜야 한다.

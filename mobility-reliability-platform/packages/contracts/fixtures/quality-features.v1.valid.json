@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "quality-features.v1",
+  "featureId": "4b9b6e22-b1c2-4dc0-8f44-932a4f5d6a71",
+  "lineage": {
+    "trace": {
+      "traceId": "7b6c25a9-e20d-4a1f-9a4f-84b29de2f1a8",
+      "traceVersion": "quality-trace.v1",
+      "traceSha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "telemetryBatch": {
+      "batchId": "d6a6e478-20d4-4608-89f1-7980c98844e0",
+      "schemaVersion": "telemetry-batch.v2",
+      "batchSha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "dataset": {
+      "datasetId": "quality-dataset.r07.synthetic",
+      "datasetVersion": "quality-dataset.r07.synthetic.v1",
+      "datasetSha256": "7e9242ad2c01d4abf94fd4a6c62153ef735b351f66481b4239f1c7bf3833b24c",
+      "split": "train",
+      "sourceKind": "synthetic",
+      "benchmarkEligible": true
+    },
+    "feature": {
+      "featureVersion": "quality-features.v1",
+      "extractorVersion": "r07-feature-extractor.v1",
+      "featureSha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  },
+  "extractionStatus": "ok",
+  "reasonCode": null,
+  "features": {
+    "sampleCount": 12,
+    "observedDurationS": 55,
+    "pathLengthM": 8.4,
+    "displacementM": 8.1,
+    "meanStepDistanceM": 0.76,
+    "maxStepDistanceM": 0.91,
+    "meanSampleIntervalS": 5,
+    "maxSampleIntervalS": 5,
+    "reportedSpeedMeanMps": 1.53,
+    "reportedSpeedMaxMps": 1.73,
+    "reportedSpeedStdMps": 0.08,
+    "derivedSpeedMeanMps": 1.52,
+    "derivedSpeedMaxMps": 1.74,
+    "reportedAccelerationMeanAbsMps2": 0.02,
+    "reportedAccelerationMaxAbsMps2": 0.05,
+    "headingChangeMeanDeg": 3.2,
+    "headingChangeMaxDeg": 8.4,
+    "headingChangeTotalDeg": 35.2,
+    "headingChangeCount": 11,
+    "stationaryRatio": 0.08,
+    "accuracyMeanM": 5.6,
+    "accuracyMaxM": 7.4,
+    "accuracyMissingRatio": 0,
+    "speedMissingRatio": 0,
+    "headingMissingRatio": 0,
+    "altitudeMissingRatio": 0,
+    "optionalFieldMissingRatio": 0,
+    "sentAfterLastSampleS": 5
+  }
+}

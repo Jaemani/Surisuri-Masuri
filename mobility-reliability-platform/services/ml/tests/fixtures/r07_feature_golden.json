@@ -1,0 +1,96 @@
+{
+  "batch": {
+    "schemaVersion": "telemetry-batch.v2",
+    "clientBatchId": "1555c4e1-d1ae-4db2-bb0f-bb5dd20daf15",
+    "tenantId": "d35aae31-28b3-41c0-8c15-20f156cc1cf7",
+    "deviceId": "ba9d0844-eb5a-4503-8bc2-b70ac1a6f5e4",
+    "tripId": "d6a6e478-20d4-4608-89f1-7980c98844e0",
+    "clientSessionId": "70afcc4f-38ca-40e4-a520-008dadbf0c38",
+    "installationId": "3c897dd6-520b-47b9-9cf1-c55333a0ba09",
+    "consentRevisionId": "79db4fe2-525f-4fc5-9ea3-ccf2f2a78d75",
+    "sentAt": "2026-08-11T00:00:15Z",
+    "samples": [
+      {
+        "clientSampleId": "85fd63ad-0358-49dd-9dad-dbcdfd324817",
+        "sequence": 0,
+        "capturedAt": "2026-08-11T00:00:00Z",
+        "latitude": 0,
+        "longitude": 0,
+        "horizontalAccuracyM": 5,
+        "altitudeM": 0,
+        "speedMps": 0,
+        "headingDegrees": 350,
+        "activityHint": "wheeled",
+        "isMockLocation": false,
+        "source": "phone_gps"
+      },
+      {
+        "clientSampleId": "1555c4e1-d1ae-4db2-bb0f-bb5dd20daf15",
+        "sequence": 1,
+        "capturedAt": "2026-08-11T00:00:05Z",
+        "latitude": 0.0001,
+        "longitude": 0,
+        "horizontalAccuracyM": 6,
+        "altitudeM": 0,
+        "speedMps": 1,
+        "headingDegrees": 10,
+        "activityHint": "wheeled",
+        "isMockLocation": false,
+        "source": "phone_gps"
+      },
+      {
+        "clientSampleId": "d6a6e478-20d4-4608-89f1-7980c98844e0",
+        "sequence": 2,
+        "capturedAt": "2026-08-11T00:00:10Z",
+        "latitude": 0.0001,
+        "longitude": 0.0001,
+        "horizontalAccuracyM": 7,
+        "altitudeM": 0,
+        "speedMps": 2,
+        "headingDegrees": 20,
+        "activityHint": "wheeled",
+        "isMockLocation": false,
+        "source": "phone_gps"
+      }
+    ]
+  },
+  "lineage": {
+    "traceId": "7b6c25a9-e20d-4a1f-9a4f-84b29de2f1a8",
+    "datasetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "split": "train"
+  },
+  "expected": {
+    "extractionStatus": "ok",
+    "reasonCode": null,
+    "features": {
+      "sampleCount": 3,
+      "observedDurationS": 10.0,
+      "pathLengthM": 22.239016047,
+      "displacementM": 15.725359054,
+      "meanStepDistanceM": 11.119508023,
+      "maxStepDistanceM": 11.119508023,
+      "meanSampleIntervalS": 5.0,
+      "maxSampleIntervalS": 5.0,
+      "reportedSpeedMeanMps": 1.0,
+      "reportedSpeedMaxMps": 2.0,
+      "reportedSpeedStdMps": 0.816496581,
+      "derivedSpeedMeanMps": 2.223901605,
+      "derivedSpeedMaxMps": 2.223901605,
+      "reportedAccelerationMeanAbsMps2": 0.2,
+      "reportedAccelerationMaxAbsMps2": 0.2,
+      "headingChangeMeanDeg": 15.0,
+      "headingChangeMaxDeg": 20.0,
+      "headingChangeTotalDeg": 30.0,
+      "headingChangeCount": 2,
+      "stationaryRatio": 0.333333333,
+      "accuracyMeanM": 6.0,
+      "accuracyMaxM": 7.0,
+      "accuracyMissingRatio": 0.0,
+      "speedMissingRatio": 0.0,
+      "headingMissingRatio": 0.0,
+      "altitudeMissingRatio": 0.0,
+      "optionalFieldMissingRatio": 0.0,
+      "sentAfterLastSampleS": 5.0
+    }
+  }
+}

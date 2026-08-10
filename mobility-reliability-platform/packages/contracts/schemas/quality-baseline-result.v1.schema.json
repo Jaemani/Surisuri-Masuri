@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/quality-baseline-result.v1.schema.json",
+  "title": "QualityBaselineResultV1",
+  "description": "Synthetic-only rules baseline evaluation result. This is separate from the coordinate-free feature contract and is not field or user performance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metricsVersion",
+    "evaluationScope",
+    "sourceKind",
+    "benchmarkEligible",
+    "datasetVersion",
+    "datasetSha256",
+    "featureSchemaVersion",
+    "ruleVersion",
+    "splitStrategy",
+    "splits",
+    "overall",
+    "predictions"
+  ],
+  "properties": {
+    "metricsVersion": { "const": "r07-synthetic-metrics.v1" },
+    "evaluationScope": { "const": "synthetic_only" },
+    "sourceKind": { "const": "synthetic" },
+    "benchmarkEligible": { "const": true },
+    "datasetVersion": { "const": "quality-dataset.r07.synthetic.v1" },
+    "datasetSha256": { "$ref": "#/$defs/sha256" },
+    "featureSchemaVersion": { "const": "quality-features.v1" },
+    "ruleVersion": { "const": "r07-rules-baseline.v1" },
+    "splitStrategy": { "const": "group-time-holdout.v1" },
+    "splits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["train", "validation", "test"],
+      "properties": {
+        "train": { "$ref": "#/$defs/metrics" },
+        "validation": { "$ref": "#/$defs/metrics" },
+        "test": { "$ref": "#/$defs/metrics" }
+      }
+    },
+    "overall": { "$ref": "#/$defs/metrics" },
+    "predictions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "items": { "$ref": "#/$defs/prediction" }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "knownLabelMetricMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mobility_aid_likely",
+        "vehicle_likely",
+        "stationary",
+        "gps_noise_or_insufficient"
+      ],
+      "properties": {
+        "mobility_aid_likely": { "type": "number", "minimum": 0, "maximum": 1 },
+        "vehicle_likely": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stationary": { "type": "number", "minimum": 0, "maximum": 1 },
+        "gps_noise_or_insufficient": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "confusionRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mobility_aid_likely",
+        "vehicle_likely",
+        "stationary",
+        "gps_noise_or_insufficient",
+        "unknown_review_required"
+      ],
+      "properties": {
+        "mobility_aid_likely": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "vehicle_likely": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "stationary": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "gps_noise_or_insufficient": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "unknown_review_required": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        }
+      }
+    },
+    "confusionMatrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mobility_aid_likely",
+        "vehicle_likely",
+        "stationary",
+        "gps_noise_or_insufficient",
+        "unknown_review_required"
+      ],
+      "properties": {
+        "mobility_aid_likely": { "$ref": "#/$defs/confusionRow" },
+        "vehicle_likely": { "$ref": "#/$defs/confusionRow" },
+        "stationary": { "$ref": "#/$defs/confusionRow" },
+        "gps_noise_or_insufficient": { "$ref": "#/$defs/confusionRow" },
+        "unknown_review_required": { "$ref": "#/$defs/confusionRow" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "abstainCount",
+        "abstainRate",
+        "coverage",
+        "accuracyIncludingAbstain",
+        "confusionMatrix",
+        "precision",
+        "recall",
+        "f1",
+        "macroF1"
+      ],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "abstainCount": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "abstainRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "coverage": { "type": "number", "minimum": 0, "maximum": 1 },
+        "accuracyIncludingAbstain": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confusionMatrix": { "$ref": "#/$defs/confusionMatrix" },
+        "precision": { "$ref": "#/$defs/knownLabelMetricMap" },
+        "recall": { "$ref": "#/$defs/knownLabelMetricMap" },
+        "f1": { "$ref": "#/$defs/knownLabelMetricMap" },
+        "macroF1": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "predictionReason": {
+      "type": "string",
+      "enum": [
+        "insufficient_samples",
+        "missingness_high",
+        "accuracy_high",
+        "stationary_ratio",
+        "speed_high",
+        "wheeled_speed_band",
+        "movement_signal_insufficient",
+        "feature_review_required"
+      ]
+    },
+    "prediction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "traceId",
+        "split",
+        "expectedLabel",
+        "predictedLabel",
+        "abstain",
+        "reasonCode",
+        "featureHash"
+      ],
+      "properties": {
+        "traceId": { "type": "string", "format": "uuid" },
+        "split": { "type": "string", "enum": ["train", "validation", "test"] },
+        "expectedLabel": {
+          "type": "string",
+          "enum": [
+            "mobility_aid_likely",
+            "vehicle_likely",
+            "stationary",
+            "gps_noise_or_insufficient"
+          ]
+        },
+        "predictedLabel": {
+          "type": "string",
+          "enum": [
+            "mobility_aid_likely",
+            "vehicle_likely",
+            "stationary",
+            "gps_noise_or_insufficient",
+            "unknown_review_required"
+          ]
+        },
+        "abstain": { "type": "boolean" },
+        "reasonCode": { "$ref": "#/$defs/predictionReason" },
+        "featureHash": { "$ref": "#/$defs/sha256" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "abstain": { "const": true } } },
+          "then": { "properties": { "predictedLabel": { "const": "unknown_review_required" } } }
+        },
+        {
+          "if": { "properties": { "abstain": { "const": false } } },
+          "then": {
+            "properties": {
+              "predictedLabel": {
+                "enum": [
+                  "mobility_aid_likely",
+                  "vehicle_likely",
+                  "stationary",
+                  "gps_noise_or_insufficient"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

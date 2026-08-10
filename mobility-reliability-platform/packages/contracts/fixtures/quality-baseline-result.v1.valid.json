@@ -1,0 +1,91 @@
+{
+  "metricsVersion": "r07-synthetic-metrics.v1",
+  "evaluationScope": "synthetic_only",
+  "sourceKind": "synthetic",
+  "benchmarkEligible": true,
+  "datasetVersion": "quality-dataset.r07.synthetic.v1",
+  "datasetSha256": "7e9242ad2c01d4abf94fd4a6c62153ef735b351f66481b4239f1c7bf3833b24c",
+  "featureSchemaVersion": "quality-features.v1",
+  "ruleVersion": "r07-rules-baseline.v1",
+  "splitStrategy": "group-time-holdout.v1",
+  "splits": {
+    "train": {
+      "count": 1,
+      "abstainCount": 0,
+      "abstainRate": 0,
+      "coverage": 1,
+      "accuracyIncludingAbstain": 1,
+      "confusionMatrix": {
+        "mobility_aid_likely": { "mobility_aid_likely": 1, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "vehicle_likely": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "stationary": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "gps_noise_or_insufficient": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "unknown_review_required": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 }
+      },
+      "precision": { "mobility_aid_likely": 1, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0 },
+      "recall": { "mobility_aid_likely": 1, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0 },
+      "f1": { "mobility_aid_likely": 1, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0 },
+      "macroF1": 0.25
+    },
+    "validation": {
+      "count": 1,
+      "abstainCount": 0,
+      "abstainRate": 0,
+      "coverage": 1,
+      "accuracyIncludingAbstain": 1,
+      "confusionMatrix": {
+        "mobility_aid_likely": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "vehicle_likely": { "mobility_aid_likely": 0, "vehicle_likely": 1, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "stationary": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "gps_noise_or_insufficient": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "unknown_review_required": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 }
+      },
+      "precision": { "mobility_aid_likely": 0, "vehicle_likely": 1, "stationary": 0, "gps_noise_or_insufficient": 0 },
+      "recall": { "mobility_aid_likely": 0, "vehicle_likely": 1, "stationary": 0, "gps_noise_or_insufficient": 0 },
+      "f1": { "mobility_aid_likely": 0, "vehicle_likely": 1, "stationary": 0, "gps_noise_or_insufficient": 0 },
+      "macroF1": 0.25
+    },
+    "test": {
+      "count": 2,
+      "abstainCount": 1,
+      "abstainRate": 0.5,
+      "coverage": 0.5,
+      "accuracyIncludingAbstain": 0.5,
+      "confusionMatrix": {
+        "mobility_aid_likely": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "vehicle_likely": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+        "stationary": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 1 },
+        "gps_noise_or_insufficient": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 1, "unknown_review_required": 0 },
+        "unknown_review_required": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 }
+      },
+      "precision": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 1 },
+      "recall": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 1 },
+      "f1": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 1 },
+      "macroF1": 0.25
+    }
+  },
+  "overall": {
+    "count": 4,
+    "abstainCount": 1,
+    "abstainRate": 0.25,
+    "coverage": 0.75,
+    "accuracyIncludingAbstain": 0.75,
+    "confusionMatrix": {
+      "mobility_aid_likely": { "mobility_aid_likely": 1, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+      "vehicle_likely": { "mobility_aid_likely": 0, "vehicle_likely": 1, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 },
+      "stationary": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 1 },
+      "gps_noise_or_insufficient": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 1, "unknown_review_required": 0 },
+      "unknown_review_required": { "mobility_aid_likely": 0, "vehicle_likely": 0, "stationary": 0, "gps_noise_or_insufficient": 0, "unknown_review_required": 0 }
+    },
+    "precision": { "mobility_aid_likely": 1, "vehicle_likely": 1, "stationary": 0, "gps_noise_or_insufficient": 1 },
+    "recall": { "mobility_aid_likely": 1, "vehicle_likely": 1, "stationary": 0, "gps_noise_or_insufficient": 1 },
+    "f1": { "mobility_aid_likely": 1, "vehicle_likely": 1, "stationary": 0, "gps_noise_or_insufficient": 1 },
+    "macroF1": 0.75
+  },
+  "predictions": [
+    { "traceId": "7b6c25a9-e20d-4a1f-9a4f-84b29de2f1a8", "split": "train", "expectedLabel": "mobility_aid_likely", "predictedLabel": "mobility_aid_likely", "abstain": false, "reasonCode": "wheeled_speed_band", "featureHash": "3333333333333333333333333333333333333333333333333333333333333333" },
+    { "traceId": "327c0a46-2fd8-4f29-b3b9-2bcae10eaf24", "split": "validation", "expectedLabel": "vehicle_likely", "predictedLabel": "vehicle_likely", "abstain": false, "reasonCode": "speed_high", "featureHash": "4444444444444444444444444444444444444444444444444444444444444444" },
+    { "traceId": "1f0669d1-6596-4fac-89d6-146602129e28", "split": "test", "expectedLabel": "stationary", "predictedLabel": "unknown_review_required", "abstain": true, "reasonCode": "feature_review_required", "featureHash": "5555555555555555555555555555555555555555555555555555555555555555" },
+    { "traceId": "d9f6fc2f-8f9a-4554-b845-8dbb4b4ad8f1", "split": "test", "expectedLabel": "gps_noise_or_insufficient", "predictedLabel": "gps_noise_or_insufficient", "abstain": false, "reasonCode": "accuracy_high", "featureHash": "6666666666666666666666666666666666666666666666666666666666666666" }
+  ]
+}

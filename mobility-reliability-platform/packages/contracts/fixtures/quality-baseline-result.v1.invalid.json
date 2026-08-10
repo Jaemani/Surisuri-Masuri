@@ -1,0 +1,25 @@
+{
+  "metricsVersion": "r07-synthetic-metrics.v1",
+  "evaluationScope": "synthetic_only",
+  "sourceKind": "field_pilot",
+  "benchmarkEligible": false,
+  "datasetVersion": "quality-dataset.r07.synthetic.v1",
+  "datasetSha256": "7e9242ad2c01d4abf94fd4a6c62153ef735b351f66481b4239f1c7bf3833b24c",
+  "featureSchemaVersion": "quality-features.v1",
+  "ruleVersion": "r07-rules-baseline.v1",
+  "splitStrategy": "group-time-holdout.v1",
+  "splits": {},
+  "overall": {},
+  "predictions": [
+    {
+      "traceId": "7b6c25a9-e20d-4a1f-9a4f-84b29de2f1a8",
+      "split": "train",
+      "expectedLabel": "mobility_aid_likely",
+      "predictedLabel": "unknown_review_required",
+      "abstain": false,
+      "reasonCode": "free_form_reason_not_allowed",
+      "featureHash": "not-a-sha256"
+    }
+  ],
+  "unexpected": true
+}

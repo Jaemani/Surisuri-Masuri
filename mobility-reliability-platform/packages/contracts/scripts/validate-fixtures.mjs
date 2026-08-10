@@ -28,6 +28,36 @@ async function getValidator(schemaPath) {
 
 const cases = [
   {
+    name: 'valid quality features v1',
+    schema: 'schemas/quality-features.v1.schema.json',
+    fixture: 'fixtures/quality-features.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'valid quality features v1 review state',
+    schema: 'schemas/quality-features.v1.schema.json',
+    fixture: 'fixtures/quality-features.v1.review.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid quality features v1',
+    schema: 'schemas/quality-features.v1.schema.json',
+    fixture: 'fixtures/quality-features.v1.invalid.json',
+    expected: false,
+  },
+  {
+    name: 'valid quality baseline result v1',
+    schema: 'schemas/quality-baseline-result.v1.schema.json',
+    fixture: 'fixtures/quality-baseline-result.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid quality baseline result v1',
+    schema: 'schemas/quality-baseline-result.v1.schema.json',
+    fixture: 'fixtures/quality-baseline-result.v1.invalid.json',
+    expected: false,
+  },
+  {
     name: 'valid quality label v1',
     schema: 'schemas/quality-label.v1.schema.json',
     fixture: 'fixtures/quality-label.v1.valid.json',
