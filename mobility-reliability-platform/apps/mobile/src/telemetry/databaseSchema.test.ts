@@ -4,11 +4,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 
 import {
-  CREATE_TELEMETRY_SCHEMA_V3_SQL,
+  CREATE_TELEMETRY_SCHEMA_V4_SQL,
   CURRENT_TELEMETRY_SCHEMA_VERSION,
+  FIND_INVALID_TERMINAL_OUTBOX_DELIVERY_SQL,
   FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL,
   MIGRATE_TELEMETRY_V1_TO_V2_SQL,
   MIGRATE_TELEMETRY_V2_TO_V3_SQL,
+  MIGRATE_TELEMETRY_V3_TO_V4_SQL,
 } from './databaseSchema';
 import { buildImmutableTelemetryBatch } from './syncProtocol';
 
@@ -121,7 +123,7 @@ function migrateV1LikeRuntime(database: InstanceType<typeof DatabaseSync>): void
   database.exec('PRAGMA foreign_keys = OFF;');
   try {
     database.exec(
-      `BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}${MIGRATE_TELEMETRY_V2_TO_V3_SQL}`,
+      `BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}${MIGRATE_TELEMETRY_V2_TO_V3_SQL}${MIGRATE_TELEMETRY_V3_TO_V4_SQL}`,
     );
     if (database.prepare('PRAGMA foreign_key_check').all().length > 0) {
       throw new Error('DATABASE_FOREIGN_KEY_CHECK_FAILED');
@@ -138,22 +140,24 @@ function migrateV1LikeRuntime(database: InstanceType<typeof DatabaseSync>): void
 function insertLocationEvent(
   database: InstanceType<typeof DatabaseSync>,
   deliveryScope: 'local_only' | 'telemetry_upload',
+  eventId = ids.event,
+  eventSequence = 0,
 ): void {
   database
     .prepare(
       `INSERT INTO trip_event_log (
         event_id, session_id, event_sequence, sample_sequence, event_type,
         occurred_at, latitude, longitude, horizontal_accuracy_m, payload_json, created_at
-      ) VALUES (?, ?, 0, 0, 'location_sample', ?, 37.5, 127.0, 5, '{}', ?)`,
+      ) VALUES (?, ?, ?, ?, 'location_sample', ?, 37.5, 127.0, 5, '{}', ?)`,
     )
-    .run(ids.event, ids.session, now, now);
+    .run(eventId, ids.session, eventSequence, eventSequence, now, now);
   database
     .prepare(
       `INSERT INTO outbox_delivery (event_id, delivery_scope, state)
        VALUES (?, ?, ?)`,
     )
     .run(
-      ids.event,
+      eventId,
       deliveryScope,
       deliveryScope === 'telemetry_upload' ? 'pending' : 'not_applicable',
     );
@@ -220,7 +224,45 @@ function insertUploadBatch(
     );
 }
 
-describe('telemetry SQLite schema v3', () => {
+describe('telemetry SQLite schema v4', () => {
+  it('reports a nested malformed scalar as an invalid body without throwing JSON errors', () => {
+    const database = openDatabase();
+    createV1Database(database);
+    database.exec('PRAGMA foreign_keys = OFF;');
+    database.exec(`BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}COMMIT;`);
+    database.exec('PRAGMA foreign_keys = ON;');
+    insertSession(database, 'server_bound');
+    database.exec('DROP TRIGGER validate_initial_upload_batch_state;');
+    const body = JSON.parse(buildBatchBody()) as Record<string, unknown>;
+    body.samples = ['{'];
+    database
+      .prepare(
+        `INSERT INTO telemetry_upload_batch (
+          client_batch_id, session_id, installation_id, tenant_id, device_id,
+          server_trip_id, consent_revision_id, body_json, body_sha256,
+          sample_count, state, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?, ?)`,
+      )
+      .run(
+        ids.batch,
+        ids.session,
+        ids.installation,
+        ids.tenant,
+        ids.device,
+        ids.trip,
+        ids.consent,
+        JSON.stringify(body),
+        'a'.repeat(64),
+        now,
+        now,
+      );
+
+    expect(database.prepare(FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL).get()).toEqual({
+      invalid: 1,
+    });
+    database.close();
+  });
+
   it('detects a malformed batch already stored by the v2 NULL-logic gap', () => {
     const database = openDatabase();
     createV1Database(database);
@@ -270,7 +312,7 @@ describe('telemetry SQLite schema v3', () => {
 
     database.exec(`BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V2_TO_V3_SQL}COMMIT;`);
     expect(database.prepare('PRAGMA user_version').get()).toEqual({
-      user_version: CURRENT_TELEMETRY_SCHEMA_VERSION,
+      user_version: 3,
     });
     insertSession(database, 'server_bound');
     const body = JSON.parse(buildBatchBody()) as Record<string, unknown>;
@@ -299,12 +341,241 @@ describe('telemetry SQLite schema v3', () => {
         ),
     ).toThrow(/UPLOAD_BATCH_INITIAL_STATE_INVALID/);
 
+    database.exec(`BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V3_TO_V4_SQL}COMMIT;`);
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({
+      user_version: CURRENT_TELEMETRY_SCHEMA_VERSION,
+    });
+
     database.close();
+  });
+
+  it('validates terminal outbox metadata and makes it immutable', () => {
+    const database = openDatabase();
+    database.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
+    insertSession(database, 'server_bound');
+    insertLocationEvent(database, 'telemetry_upload');
+    insertUploadBatch(database);
+    database
+      .prepare(
+        `INSERT INTO telemetry_upload_batch_item (
+           client_batch_id, session_id, position, event_id
+         ) VALUES (?, ?, 0, ?)`,
+      )
+      .run(ids.batch, ids.session, ids.event);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'leased', attempt_count = 1,
+             lease_owner_id = ?, lease_expires_at = ?, updated_at = ?`,
+      )
+      .run(ids.leaseOwner, '2026-07-23T04:02:00.000Z', now);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'acknowledged', lease_owner_id = NULL, lease_expires_at = NULL,
+             receipt_id = ?, server_batch_id = ?, server_state = 'stored',
+             replay = 0, acknowledged_at = ?, updated_at = ?`,
+      )
+      .run(ids.receipt, ids.serverBatch, now, now);
+
+    expect(() =>
+      database
+        .prepare(
+          `UPDATE outbox_delivery
+           SET state = 'acknowledged', acknowledged_at = ?,
+               last_error_code = 'unexpected'`,
+        )
+        .run(now),
+    ).toThrow(/OUTBOX_TERMINAL_METADATA_INVALID/);
+    database
+      .prepare(
+        `UPDATE outbox_delivery
+         SET state = 'acknowledged', next_attempt_at = NULL,
+             acknowledged_at = ?, last_error_code = NULL`,
+      )
+      .run(now);
+    expect(database.prepare(FIND_INVALID_TERMINAL_OUTBOX_DELIVERY_SQL).get()).toBeUndefined();
+    expect(() =>
+      database
+        .prepare(`UPDATE outbox_delivery SET last_error_code = 'tampered'`)
+        .run(),
+    ).toThrow(/OUTBOX_DELIVERY_TERMINAL/);
+
+    database.close();
+  });
+
+  it('audits corrupted v3 terminal metadata before the v4 migration', () => {
+    const database = openDatabase();
+    createV1Database(database);
+    database.exec('PRAGMA foreign_keys = OFF;');
+    database.exec(
+      `BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}${MIGRATE_TELEMETRY_V2_TO_V3_SQL}COMMIT;`,
+    );
+    database.exec('PRAGMA foreign_keys = ON;');
+    insertSession(database, 'server_bound');
+    insertLocationEvent(database, 'telemetry_upload');
+    insertUploadBatch(database);
+    database
+      .prepare(
+        `INSERT INTO telemetry_upload_batch_item (
+           client_batch_id, session_id, position, event_id
+         ) VALUES (?, ?, 0, ?)`,
+      )
+      .run(ids.batch, ids.session, ids.event);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'leased', attempt_count = 1,
+             lease_owner_id = ?, lease_expires_at = ?, updated_at = ?`,
+      )
+      .run(ids.leaseOwner, '2026-07-23T04:02:00.000Z', now);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'held', lease_owner_id = NULL, lease_expires_at = NULL,
+             last_error_code = 'payload_rejected', updated_at = ?`,
+      )
+      .run(now);
+    database
+      .prepare(
+        `UPDATE outbox_delivery
+         SET state = 'held', last_error_code = 'payload_rejected'`,
+      )
+      .run();
+    database
+      .prepare(`UPDATE outbox_delivery SET last_error_code = 'tampered'`)
+      .run();
+
+    expect(database.prepare(FIND_INVALID_TERMINAL_OUTBOX_DELIVERY_SQL).get()).toEqual({
+      invalid: 1,
+    });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    database.close();
+  });
+
+  it('audits a terminal v3 parent whose child is still batched', () => {
+    const database = openDatabase();
+    createV1Database(database);
+    database.exec('PRAGMA foreign_keys = OFF;');
+    database.exec(
+      `BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}${MIGRATE_TELEMETRY_V2_TO_V3_SQL}COMMIT;`,
+    );
+    database.exec('PRAGMA foreign_keys = ON;');
+    insertSession(database, 'server_bound');
+    insertLocationEvent(database, 'telemetry_upload');
+    insertUploadBatch(database);
+    database
+      .prepare(
+        `INSERT INTO telemetry_upload_batch_item (
+           client_batch_id, session_id, position, event_id
+         ) VALUES (?, ?, 0, ?)`,
+      )
+      .run(ids.batch, ids.session, ids.event);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'leased', attempt_count = 1,
+             lease_owner_id = ?, lease_expires_at = ?, updated_at = ?`,
+      )
+      .run(ids.leaseOwner, '2026-07-23T04:02:00.000Z', now);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'held', lease_owner_id = NULL, lease_expires_at = NULL,
+             last_error_code = 'payload_rejected', updated_at = ?`,
+      )
+      .run(now);
+
+    expect(database.prepare(`SELECT state FROM outbox_delivery`).get()).toEqual({
+      state: 'batched',
+    });
+    expect(database.prepare(FIND_INVALID_TERMINAL_OUTBOX_DELIVERY_SQL).get()).toEqual({
+      invalid: 1,
+    });
+    database.close();
+  });
+
+  it('audits a terminal v3 batch whose item positions are not contiguous', () => {
+    const database = openDatabase();
+    createV1Database(database);
+    database.exec('PRAGMA foreign_keys = OFF;');
+    database.exec(
+      `BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}${MIGRATE_TELEMETRY_V2_TO_V3_SQL}COMMIT;`,
+    );
+    database.exec('PRAGMA foreign_keys = ON;');
+    insertSession(database, 'server_bound');
+    insertLocationEvent(database, 'telemetry_upload');
+    insertUploadBatch(database);
+    database
+      .prepare(
+        `INSERT INTO telemetry_upload_batch_item (
+           client_batch_id, session_id, position, event_id
+         ) VALUES (?, ?, 0, ?)`,
+      )
+      .run(ids.batch, ids.session, ids.event);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'leased', attempt_count = 1,
+             lease_owner_id = ?, lease_expires_at = ?, updated_at = ?`,
+      )
+      .run(ids.leaseOwner, '2026-07-23T04:02:00.000Z', now);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'held', lease_owner_id = NULL, lease_expires_at = NULL,
+             last_error_code = 'payload_rejected', updated_at = ?`,
+      )
+      .run(now);
+    database
+      .prepare(
+        `UPDATE outbox_delivery
+         SET state = 'held', last_error_code = 'payload_rejected'`,
+      )
+      .run();
+
+    // Simulate a pre-v4 store damaged outside the guarded application path.
+    database.exec('DROP TRIGGER immutable_upload_batch_item;');
+    database.prepare(`UPDATE telemetry_upload_batch_item SET position = 1`).run();
+
+    expect(database.prepare(FIND_INVALID_TERMINAL_OUTBOX_DELIVERY_SQL).get()).toEqual({
+      invalid: 1,
+    });
+    database.close();
+  });
+
+  it('creates the bounded active FIFO partial index in fresh and migrated schemas', () => {
+    const fresh = openDatabase();
+    fresh.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
+    expect(
+      fresh
+        .prepare(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`)
+        .get('active_upload_batch_fifo'),
+    ).toMatchObject({
+      sql: expect.stringMatching(
+        /ON telemetry_upload_batch\(created_at, client_batch_id\).*WHERE state IN \('pending', 'leased'\)/s,
+      ),
+    });
+    fresh.close();
+
+    const migrated = openDatabase();
+    createV1Database(migrated);
+    migrated.exec('PRAGMA foreign_keys = OFF;');
+    migrated.exec(
+      `BEGIN IMMEDIATE;${MIGRATE_TELEMETRY_V1_TO_V2_SQL}${MIGRATE_TELEMETRY_V2_TO_V3_SQL}${MIGRATE_TELEMETRY_V3_TO_V4_SQL}COMMIT;`,
+    );
+    migrated.exec('PRAGMA foreign_keys = ON;');
+    expect(
+      migrated
+        .prepare(`SELECT 1 AS present FROM sqlite_master WHERE type = 'index' AND name = ?`)
+        .get('active_upload_batch_fifo'),
+    ).toEqual({ present: 1 });
+    migrated.close();
   });
 
   it('rejects NULL canonical scope fields instead of bypassing the batch trigger', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
     insertSession(database, 'server_bound');
     const body = JSON.parse(buildBatchBody()) as Record<string, unknown>;
     body.tenantId = null;
@@ -338,7 +609,7 @@ describe('telemetry SQLite schema v3', () => {
 
   it('creates upload tables and enforces the server-bound scope union', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
 
     expect(
       database.prepare('PRAGMA user_version').get() as { user_version: number },
@@ -351,7 +622,7 @@ describe('telemetry SQLite schema v3', () => {
     ).toThrow(/SESSION_UPLOAD_SCOPE_IMMUTABLE/);
 
     const missingScope = openDatabase();
-    missingScope.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+    missingScope.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
     expect(() =>
       missingScope
         .prepare(
@@ -368,7 +639,7 @@ describe('telemetry SQLite schema v3', () => {
 
   it('rejects invalid delivery-state and batch-ack unions', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
     insertSession(database, 'server_bound');
     database
       .prepare(
@@ -453,7 +724,7 @@ describe('telemetry SQLite schema v3', () => {
 
   it('never allows a local-only session to be promoted or batched', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
     insertSession(database, 'development_local_only');
     insertLocationEvent(database, 'local_only');
     database
@@ -499,7 +770,7 @@ describe('telemetry SQLite schema v3', () => {
 
   it('atomically binds only pending server-scoped samples to an immutable batch', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
     insertSession(database, 'server_bound');
     insertLocationEvent(database, 'telemetry_upload');
     database
@@ -603,7 +874,7 @@ describe('telemetry SQLite schema v3', () => {
            WHERE event_id = ?`,
         )
         .run(now, ids.event),
-    ).toThrow(/OUTBOX_STATE_TRANSITION_INVALID/);
+    ).toThrow(/OUTBOX_STATE_TRANSITION_INVALID|OUTBOX_TERMINAL_METADATA_INVALID/);
     database
       .prepare(
         `UPDATE telemetry_upload_batch
@@ -639,7 +910,7 @@ describe('telemetry SQLite schema v3', () => {
 
   it('refuses to lease a batch whose item cardinality is incomplete', () => {
     const database = openDatabase();
-    database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+    database.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
     insertSession(database, 'server_bound');
     insertLocationEvent(database, 'telemetry_upload');
     insertUploadBatch(database, 2);
@@ -752,7 +1023,7 @@ describe('telemetry SQLite schema v3', () => {
       database.prepare('PRAGMA user_version').get() as { user_version: number },
     ).toEqual({ user_version: CURRENT_TELEMETRY_SCHEMA_VERSION });
     const freshDatabase = openDatabase();
-    freshDatabase.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+    freshDatabase.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
     expect(
       database.prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name`).all(),
     ).toEqual(

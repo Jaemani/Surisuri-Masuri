@@ -1,22 +1,23 @@
 import * as Crypto from 'expo-crypto';
 import * as SQLite from 'expo-sqlite';
 
-import {
-  CREATE_TELEMETRY_SCHEMA_V3_SQL,
-  CURRENT_TELEMETRY_SCHEMA_VERSION,
-  FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL,
-  MIGRATE_TELEMETRY_V1_TO_V2_SQL,
-  MIGRATE_TELEMETRY_V2_TO_V3_SQL,
-} from './databaseSchema';
+import { migrateTelemetryDatabaseCore } from './databaseMigration';
 import type { NormalizedLocationSample, SampleRejectionReason } from './samplePolicy';
 import {
   materializeNextUploadBatchCore,
   type UploadBatchMaterializationResult,
 } from './uploadMaterializer';
 import {
-  leaseNextUploadBatchCore,
-  type UploadLeaseResult,
-} from './uploadLease';
+  leaseNextUploadBatchWithRecovery,
+  type ManagedUploadLeaseConnection,
+  type UploadLeasePersistenceResult,
+} from './uploadLeaseCoordinator';
+import type { UploadDispositionCommand } from './uploadDisposition';
+import {
+  applyUploadDispositionWithRecovery,
+  type ManagedUploadDispositionConnection,
+  type UploadDispositionPersistenceResult,
+} from './uploadDispositionCoordinator';
 
 const DATABASE_NAME = 'mobility-telemetry-v1.sqlite';
 const BACKGROUND_TASK_FAILURE_METADATA_KEY = 'background_task_failure_v1';
@@ -70,84 +71,27 @@ function toSummary(row: SessionRow): TripSessionSummary {
   };
 }
 
-async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
-  await database.execAsync(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA foreign_keys = ON;
-    PRAGMA busy_timeout = 5000;
-  `);
-
-  const versionRow = await database.getFirstAsync<{ user_version: number }>(
-    'PRAGMA user_version',
-  );
-  const schemaVersion = versionRow?.user_version ?? 0;
-  if (schemaVersion > CURRENT_TELEMETRY_SCHEMA_VERSION) {
-    throw new Error('DATABASE_SCHEMA_NEWER_THAN_APP');
-  }
-  if (schemaVersion === CURRENT_TELEMETRY_SCHEMA_VERSION) return;
-
-  const existingV0Table = await database.getFirstAsync<{ name: string }>(
-    `SELECT name FROM sqlite_master
-     WHERE type = 'table' AND name = 'trip_session_projection'`,
-  );
-  if (schemaVersion === 0 && existingV0Table) {
-    throw new Error('UNVERSIONED_DEVELOPMENT_DATABASE_REQUIRES_CLEAR');
-  }
-
-  if (schemaVersion === 0) {
-    try {
-      await database.execAsync(`BEGIN IMMEDIATE;${CREATE_TELEMETRY_SCHEMA_V3_SQL}`);
-      const foreignKeyViolations = await database.getAllAsync('PRAGMA foreign_key_check');
-      if (foreignKeyViolations.length > 0) {
-        throw new Error('DATABASE_FOREIGN_KEY_CHECK_FAILED');
-      }
-      await database.execAsync('COMMIT;');
-    } catch (error) {
-      await database.execAsync('ROLLBACK;').catch(() => undefined);
-      throw error;
-    }
-    return;
-  }
-
-  if (schemaVersion !== 1 && schemaVersion !== 2) {
-    throw new Error('DATABASE_SCHEMA_MIGRATION_UNAVAILABLE');
-  }
-  if (schemaVersion === 2) {
-    const invalidBatch = await database.getFirstAsync<{ invalid: number }>(
-      FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL,
-    );
-    if (invalidBatch) {
-      throw new Error('DATABASE_UPLOAD_BATCH_BODY_INVALID');
-    }
-  }
-
-  await database.execAsync('PRAGMA foreign_keys = OFF;');
-  try {
-    await database.execAsync(
-      `BEGIN IMMEDIATE;
-       ${schemaVersion === 1 ? MIGRATE_TELEMETRY_V1_TO_V2_SQL : ''}
-       ${MIGRATE_TELEMETRY_V2_TO_V3_SQL}`,
-    );
-    const foreignKeyViolations = await database.getAllAsync('PRAGMA foreign_key_check');
-    if (foreignKeyViolations.length > 0) {
-      throw new Error('DATABASE_FOREIGN_KEY_CHECK_FAILED');
-    }
-    await database.execAsync('COMMIT;');
-  } catch (error) {
-    await database.execAsync('ROLLBACK;').catch(() => undefined);
-    throw error;
-  } finally {
-    await database.execAsync('PRAGMA foreign_keys = ON;');
-  }
-
-}
-
 export async function getTelemetryDatabase(): Promise<SQLite.SQLiteDatabase> {
   if (!databasePromise) {
-    databasePromise = SQLite.openDatabaseAsync(DATABASE_NAME).then(async (database) => {
-      await migrate(database);
-      return database;
+    const pendingDatabase = SQLite.openDatabaseAsync(DATABASE_NAME).then(async (database) => {
+      try {
+        await migrateTelemetryDatabaseCore(database);
+        return database;
+      } catch (error) {
+        // A migration failure must never leave a connection with an uncertain
+        // transaction in the cache. The next caller gets a clean connection
+        // and can retry after a transient native SQLite failure.
+        await database.closeAsync().catch(() => undefined);
+        throw error;
+      }
     });
+    const retryableDatabase = pendingDatabase.catch((error) => {
+      if (databasePromise === retryableDatabase) {
+        databasePromise = undefined;
+      }
+      throw error;
+    });
+    databasePromise = retryableDatabase;
   }
 
   return databasePromise;
@@ -539,43 +483,52 @@ export async function materializeNextUploadBatch(): Promise<UploadBatchMateriali
   }
 }
 
-export async function leaseNextUploadBatch(): Promise<UploadLeaseResult> {
+export async function leaseNextUploadBatch(): Promise<UploadLeasePersistenceResult> {
   await getTelemetryDatabase();
+  return leaseNextUploadBatchWithRecovery({
+    openWriter: openUploadPersistenceConnection,
+    openReader: openUploadPersistenceConnection,
+    leaseDependencies: {
+      createLeaseOwnerId: () => Crypto.randomUUID(),
+      now: () => new Date().toISOString(),
+      leaseExpiresAt: (now) =>
+        new Date(Date.parse(now) + 2 * 60 * 1_000).toISOString(),
+      sha256: (body) =>
+        Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, body),
+    },
+  });
+}
+
+type ManagedUploadPersistenceConnection = ManagedUploadDispositionConnection &
+  ManagedUploadLeaseConnection;
+
+async function openUploadPersistenceConnection(): Promise<ManagedUploadPersistenceConnection> {
   const connection = await SQLite.openDatabaseAsync(DATABASE_NAME, {
     useNewConnection: true,
   });
-  try {
-    await connection.execAsync('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
-    const foreignKeys = await connection.getFirstAsync<{ foreign_keys: number }>(
-      'PRAGMA foreign_keys',
-    );
-    if (foreignKeys?.foreign_keys !== 1) {
-      throw new Error('UPLOAD_DATABASE_FOREIGN_KEYS_DISABLED');
-    }
+  return {
+    execAsync: (source) => connection.execAsync(source),
+    closeAsync: () => connection.closeAsync(),
+    getFirstAsync: <T,>(source: string, ...params: Array<string | number | null>) =>
+      connection.getFirstAsync<T>(source, ...params),
+    getAllAsync: <T,>(source: string, ...params: Array<string | number | null>) =>
+      connection.getAllAsync<T>(source, ...params),
+    runAsync: async (source: string, ...params: Array<string | number | null>) => {
+      const result = await connection.runAsync(source, ...params);
+      return { changes: result.changes };
+    },
+  };
+}
 
-    return await leaseNextUploadBatchCore(
-      {
-        withExclusiveTransactionAsync: async (task) => {
-          await connection.execAsync('BEGIN IMMEDIATE;');
-          try {
-            await task(connection);
-            await connection.execAsync('COMMIT;');
-          } catch (error) {
-            await connection.execAsync('ROLLBACK;').catch(() => undefined);
-            throw error;
-          }
-        },
-      },
-      {
-        createLeaseOwnerId: () => Crypto.randomUUID(),
-        now: () => new Date().toISOString(),
-        leaseExpiresAt: (now) =>
-          new Date(Date.parse(now) + 2 * 60 * 1_000).toISOString(),
-        sha256: (body) =>
-          Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, body),
-      },
-    );
-  } finally {
-    await connection.closeAsync();
-  }
+export async function applyUploadDisposition(
+  command: UploadDispositionCommand,
+): Promise<UploadDispositionPersistenceResult> {
+  await getTelemetryDatabase();
+  return applyUploadDispositionWithRecovery(
+    {
+      openWriter: openUploadPersistenceConnection,
+      openReader: openUploadPersistenceConnection,
+    },
+    command,
+  );
 }

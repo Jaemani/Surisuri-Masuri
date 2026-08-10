@@ -5,9 +5,10 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
 
-import { CREATE_TELEMETRY_SCHEMA_V3_SQL } from './databaseSchema';
+import { CREATE_TELEMETRY_SCHEMA_V4_SQL } from './databaseSchema';
 import { buildImmutableTelemetryBatch } from './syncProtocol';
 import {
+  correlateUploadLeaseResultCore,
   leaseNextUploadBatchCore,
   type UploadLeaseDatabase,
   type UploadLeaseDependencies,
@@ -44,7 +45,7 @@ function sha256(body: string): string {
 function openDatabase(): NodeDatabase {
   const database = new DatabaseSync(':memory:');
   database.exec('PRAGMA foreign_keys = ON;');
-  database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+  database.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
   return database;
 }
 
@@ -173,10 +174,96 @@ function seedBatch(
   return { body, digest, eventIds, originalBody: immutable.body };
 }
 
+function seedLaterBatch(database: NodeDatabase): {
+  batchId: string;
+  body: string;
+  digest: string;
+} {
+  const batchId = '40000000-0000-4000-8000-000000000010';
+  const eventId = '50000000-0000-4000-8000-000000000999';
+  const laterCreatedAt = '2026-07-23T08:00:01.000Z';
+  database
+    .prepare(
+      `INSERT INTO trip_event_log (
+         event_id, session_id, event_sequence, sample_sequence, event_type,
+         occurred_at, latitude, longitude, horizontal_accuracy_m,
+         altitude_m, speed_mps, heading_degrees, is_mock_location,
+         payload_json, created_at
+       ) VALUES (?, ?, 999, 999, 'location_sample', ?, 37.6, 127.1, 5,
+                 NULL, NULL, NULL, 0, '{}', ?)`,
+    )
+    .run(eventId, ids.session, laterCreatedAt, laterCreatedAt);
+  database
+    .prepare(
+      `INSERT INTO outbox_delivery (event_id, delivery_scope, state)
+       VALUES (?, 'telemetry_upload', 'pending')`,
+    )
+    .run(eventId);
+  const immutable = buildImmutableTelemetryBatch({
+    clientBatchId: batchId,
+    sentAt: laterCreatedAt,
+    scope: {
+      tenantId: ids.tenant,
+      deviceId: ids.device,
+      tripId: ids.trip,
+      clientSessionId: ids.session,
+      installationId: ids.installation,
+      consentRevisionId: ids.consent,
+    },
+    samples: [
+      {
+        clientSampleId: eventId,
+        sequence: 999,
+        capturedAt: laterCreatedAt,
+        latitude: 37.6,
+        longitude: 127.1,
+        horizontalAccuracyM: 5,
+        altitudeM: null,
+        speedMps: null,
+        headingDegrees: null,
+        activityHint: 'unknown',
+        isMockLocation: false,
+      },
+    ],
+  });
+  const digest = sha256(immutable.body);
+  database
+    .prepare(
+      `INSERT INTO telemetry_upload_batch (
+         client_batch_id, session_id, installation_id, tenant_id, device_id,
+         server_trip_id, consent_revision_id, body_json, body_sha256,
+         sample_count, state, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?, ?)`,
+    )
+    .run(
+      batchId,
+      ids.session,
+      ids.installation,
+      ids.tenant,
+      ids.device,
+      ids.trip,
+      ids.consent,
+      immutable.body,
+      digest,
+      laterCreatedAt,
+      laterCreatedAt,
+    );
+  database
+    .prepare(
+      `INSERT INTO telemetry_upload_batch_item (
+         client_batch_id, session_id, position, event_id
+       ) VALUES (?, ?, 0, ?)`,
+    )
+    .run(batchId, ids.session, eventId);
+  return { batchId, body: immutable.body, digest };
+}
+
 function transactionFor(database: NodeDatabase): UploadLeaseTransaction {
   return {
     getFirstAsync: async <T,>(source: string, ...params: SqlValue[]) =>
       (database.prepare(source).get(...params) as T | undefined) ?? null,
+    getAllAsync: async <T,>(source: string, ...params: SqlValue[]) =>
+      database.prepare(source).all(...params) as T[],
     runAsync: async (source: string, ...params: SqlValue[]) => {
       const result = database.prepare(source).run(...params);
       return { changes: Number(result.changes) };
@@ -296,6 +383,10 @@ describe('telemetry upload batch lease', () => {
     expect(database.prepare(`SELECT state FROM outbox_delivery`).get()).toEqual({
       state: 'batched',
     });
+    if (result.kind !== 'leased') throw new Error('EXPECTED_LEASE_RESULT');
+    await expect(
+      correlateUploadLeaseResultCore(transactionFor(database), result),
+    ).resolves.toEqual({ kind: 'committed' });
     database.close();
   });
 
@@ -313,6 +404,10 @@ describe('telemetry upload batch lease', () => {
       clientBatchId: ids.batch,
       reason: 'local_body_digest_mismatch',
     });
+    if (result.kind !== 'held') throw new Error('EXPECTED_HELD_RESULT');
+    await expect(
+      correlateUploadLeaseResultCore(transactionFor(database), result),
+    ).resolves.toEqual({ kind: 'committed' });
     expect(
       database
         .prepare(
@@ -497,6 +592,82 @@ describe('telemetry upload batch lease', () => {
     database.close();
   });
 
+  it('leases a later due batch without waiting for an older pending backoff', async () => {
+    const database = openDatabase();
+    seedBatch(database);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET next_attempt_at = '2026-07-23T08:06:00.000Z',
+             last_error_code = 'network_failure'`,
+      )
+      .run();
+    const later = seedLaterBatch(database);
+
+    const result = await leaseNextUploadBatchCore(
+      asAsyncDatabase(database),
+      dependencies(),
+    );
+
+    expect(result).toMatchObject({
+      kind: 'leased',
+      lease: {
+        clientBatchId: later.batchId,
+        attemptCount: 1,
+        body: later.body,
+        bodySha256: later.digest,
+      },
+    });
+    expect(
+      database
+        .prepare(
+          `SELECT client_batch_id, state, next_attempt_at
+           FROM telemetry_upload_batch ORDER BY created_at`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        client_batch_id: ids.batch,
+        state: 'pending',
+        next_attempt_at: '2026-07-23T08:06:00.000Z',
+      },
+      { client_batch_id: later.batchId, state: 'leased', next_attempt_at: null },
+    ]);
+    database.close();
+  });
+
+  it('leases a later due batch while an older lease is still active', async () => {
+    const database = openDatabase();
+    seedBatch(database);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'leased', attempt_count = 1,
+             lease_owner_id = ?, lease_expires_at = ?, updated_at = ?`,
+      )
+      .run(ids.oldLeaseOwner, '2026-07-23T08:06:00.000Z', now);
+    const later = seedLaterBatch(database);
+
+    const result = await leaseNextUploadBatchCore(
+      asAsyncDatabase(database),
+      dependencies(),
+    );
+
+    expect(result).toMatchObject({
+      kind: 'leased',
+      lease: { clientBatchId: later.batchId, attemptCount: 1 },
+    });
+    expect(
+      database
+        .prepare(
+          `SELECT attempt_count, lease_owner_id
+           FROM telemetry_upload_batch WHERE client_batch_id = ?`,
+        )
+        .get(ids.batch),
+    ).toEqual({ attempt_count: 1, lease_owner_id: ids.oldLeaseOwner });
+    database.close();
+  });
+
   it('holds malformed persisted retry metadata instead of comparing it as text', async () => {
     const database = openDatabase();
     seedBatch(database);
@@ -528,6 +699,70 @@ describe('telemetry upload batch lease', () => {
     database.close();
   });
 
+  it('holds a persisted retry window over 15 minutes', async () => {
+    const database = openDatabase();
+    seedBatch(database);
+    database.exec(
+      `UPDATE telemetry_upload_batch
+       SET updated_at = '2026-07-23T08:00:00.000Z',
+           next_attempt_at = '2026-07-23T08:15:00.001Z'`,
+    );
+
+    const result = await leaseNextUploadBatchCore(
+      asAsyncDatabase(database),
+      dependencies({
+        sha256: async () => {
+          throw new Error('HASH_PROVIDER_MUST_NOT_RUN');
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({ kind: 'held', reason: 'local_retry_metadata_invalid' });
+    database.close();
+  });
+
+  it.each(['pending', 'leased'] as const)(
+    'rolls back without hold when %s metadata is ahead of the device clock',
+    async (state) => {
+      const database = openDatabase();
+      seedBatch(database);
+      if (state === 'pending') {
+        database.exec(
+          `UPDATE telemetry_upload_batch
+           SET updated_at = '2026-07-23T08:05:00.001Z',
+               next_attempt_at = '2026-07-23T08:06:00.000Z'`,
+        );
+      } else {
+        database
+          .prepare(
+            `UPDATE telemetry_upload_batch
+             SET state = 'leased', attempt_count = 1, lease_owner_id = ?,
+                 lease_expires_at = '2026-07-23T08:06:00.000Z',
+                 updated_at = '2026-07-23T08:05:00.001Z'`,
+          )
+          .run(ids.oldLeaseOwner);
+      }
+
+      await expect(
+        leaseNextUploadBatchCore(
+          asAsyncDatabase(database),
+          dependencies({
+            sha256: async () => {
+              throw new Error('HASH_PROVIDER_MUST_NOT_RUN');
+            },
+          }),
+        ),
+      ).rejects.toThrow('UPLOAD_LEASE_CLOCK_ROLLBACK');
+      expect(database.prepare(`SELECT state FROM telemetry_upload_batch`).get()).toEqual({
+        state,
+      });
+      expect(database.prepare(`SELECT state FROM outbox_delivery`).get()).toEqual({
+        state: 'batched',
+      });
+      database.close();
+    },
+  );
+
   it('does not take over an unexpired lease', async () => {
     const database = openDatabase();
     seedBatch(database);
@@ -537,7 +772,7 @@ describe('telemetry upload batch lease', () => {
          SET state = 'leased', attempt_count = 1,
              lease_owner_id = ?, lease_expires_at = ?, updated_at = ?`,
       )
-      .run(ids.oldLeaseOwner, '2026-07-23T08:06:00.000Z', createdAt);
+      .run(ids.oldLeaseOwner, '2026-07-23T08:06:00.000Z', now);
 
     const result = await leaseNextUploadBatchCore(
       asAsyncDatabase(database),
@@ -617,6 +852,63 @@ describe('telemetry upload batch lease', () => {
     expect(database.prepare(`SELECT state FROM outbox_delivery`).get()).toEqual({
       state: 'held',
     });
+    database.close();
+  });
+
+  it('holds a corrupted NULL lease owner with NULL-safe authority CAS', async () => {
+    const database = openDatabase();
+    seedBatch(database);
+    database.exec('PRAGMA ignore_check_constraints = ON;');
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'leased', attempt_count = 1,
+             lease_owner_id = NULL, lease_expires_at = ?, updated_at = ?`,
+      )
+      .run('2026-07-23T08:06:00.000Z', now);
+    database.exec('PRAGMA ignore_check_constraints = OFF;');
+
+    const result = await leaseNextUploadBatchCore(
+      asAsyncDatabase(database),
+      dependencies({
+        sha256: async () => {
+          throw new Error('HASH_PROVIDER_MUST_NOT_RUN');
+        },
+      }),
+    );
+
+    expect(result).toEqual({
+      kind: 'held',
+      clientBatchId: ids.batch,
+      reason: 'local_lease_metadata_invalid',
+    });
+    expect(database.prepare(`SELECT state FROM outbox_delivery`).get()).toEqual({
+      state: 'held',
+    });
+    database.close();
+  });
+
+  it('holds a persisted lease window longer than five minutes', async () => {
+    const database = openDatabase();
+    seedBatch(database);
+    database
+      .prepare(
+        `UPDATE telemetry_upload_batch
+         SET state = 'leased', attempt_count = 1,
+             lease_owner_id = ?, lease_expires_at = ?, updated_at = ?`,
+      )
+      .run(ids.oldLeaseOwner, '2026-07-23T08:06:00.001Z', createdAt);
+
+    const result = await leaseNextUploadBatchCore(
+      asAsyncDatabase(database),
+      dependencies({
+        sha256: async () => {
+          throw new Error('HASH_PROVIDER_MUST_NOT_RUN');
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({ kind: 'held', reason: 'local_lease_metadata_invalid' });
     database.close();
   });
 
@@ -728,6 +1020,148 @@ describe('telemetry upload batch lease', () => {
       lease: { leaseExpiresAt: '2026-07-23T08:10:00.000Z' },
     });
     database.close();
+  });
+
+  it('reacquires the clock after hashing before granting lease authority', async () => {
+    const database = openDatabase();
+    seedBatch(database);
+    const clock = [now, '2026-07-23T08:11:00.000Z'];
+
+    const result = await leaseNextUploadBatchCore(
+      asAsyncDatabase(database),
+      dependencies({
+        now: () => clock.shift() ?? '2026-07-23T08:11:00.000Z',
+        leaseExpiresAt: (grantNow) =>
+          new Date(Date.parse(grantNow) + 2 * 60 * 1_000).toISOString(),
+      }),
+    );
+
+    expect(result).toMatchObject({
+      kind: 'leased',
+      lease: {
+        leaseExpiresAt: '2026-07-23T08:13:00.000Z',
+      },
+    });
+    expect(
+      database.prepare(`SELECT updated_at FROM telemetry_upload_batch`).get(),
+    ).toEqual({ updated_at: '2026-07-23T08:11:00.000Z' });
+    database.close();
+  });
+
+  it('rolls back if the provider clock moves backward while hashing', async () => {
+    const database = openDatabase();
+    seedBatch(database);
+    const clock = [now, '2026-07-23T08:04:59.999Z'];
+
+    await expect(
+      leaseNextUploadBatchCore(
+        asAsyncDatabase(database),
+        dependencies({ now: () => clock.shift() ?? now }),
+      ),
+    ).rejects.toThrow('UPLOAD_LEASE_CLOCK_ROLLBACK');
+    expect(database.prepare(`SELECT state, attempt_count FROM telemetry_upload_batch`).get()).toEqual({
+      state: 'pending',
+      attempt_count: 0,
+    });
+    database.close();
+  });
+
+  it('bounds one candidate scan to the oldest 100 active rows', async () => {
+    let requestedLimit: number | null = null;
+    let clockCalls = 0;
+    const mustNotRun = () => {
+      throw new Error('DEPENDENCY_MUST_NOT_RUN');
+    };
+    const database: UploadLeaseDatabase = {
+      withExclusiveTransactionAsync: async (task) => {
+        await task({
+          getFirstAsync: async <T,>(source: string) =>
+            (source === 'PRAGMA foreign_keys' ? ({ foreign_keys: 1 } as T) : null),
+          getAllAsync: async <T,>(_source: string, ...params: SqlValue[]) => {
+            requestedLimit = params[0] as number;
+            return Array.from({ length: 100 }, (_, index) => ({
+              client_batch_id: numberedUuid(index + 1000),
+              session_id: ids.session,
+              sample_count: 1,
+              attempt_count_text: '1',
+              attempt_count_type: 'integer',
+              state: 'pending',
+              lease_owner_id: null,
+              lease_expires_at: null,
+              next_attempt_at: '2026-07-23T08:06:00.000Z',
+              body_json: '{}',
+              body_sha256: 'a'.repeat(64),
+              updated_at: now,
+            })) as T[];
+          },
+          runAsync: async () => mustNotRun(),
+        });
+      },
+    };
+
+    const result = await leaseNextUploadBatchCore(database, {
+      createLeaseOwnerId: mustNotRun,
+      leaseExpiresAt: mustNotRun,
+      now: () => {
+        clockCalls += 1;
+        return now;
+      },
+      sha256: async () => mustNotRun(),
+    });
+
+    expect(result).toEqual({ kind: 'none' });
+    expect(requestedLimit).toBe(100);
+    expect(clockCalls).toBe(1);
+  });
+
+  it('does not let 100 older future retries starve a later due batch', async () => {
+    let requestedLimit: number | null = null;
+    const dueCandidate = {
+      client_batch_id: numberedUuid(9999),
+      session_id: ids.session,
+      sample_count: 1,
+      attempt_count_text: '0',
+      attempt_count_type: 'integer',
+      state: 'pending' as const,
+      lease_owner_id: null,
+      lease_expires_at: null,
+      next_attempt_at: null,
+      body_json: '{}',
+      body_sha256: 'a'.repeat(64),
+      updated_at: now,
+    };
+    const database: UploadLeaseDatabase = {
+      withExclusiveTransactionAsync: async (task) => {
+        await task({
+          getFirstAsync: async <T,>(source: string) => {
+            if (source === 'PRAGMA foreign_keys') return { foreign_keys: 1 } as T;
+            if (source.includes('next_attempt_at <= ?')) return dueCandidate as T;
+            return null;
+          },
+          getAllAsync: async <T,>(_source: string, ...params: SqlValue[]) => {
+            requestedLimit = params[0] as number;
+            return Array.from({ length: 100 }, (_, index) => ({
+              ...dueCandidate,
+              client_batch_id: numberedUuid(index + 1000),
+              attempt_count_text: '1',
+              next_attempt_at: '2026-07-23T08:06:00.000Z',
+            })) as T[];
+          },
+          runAsync: async () => ({ changes: 1 }),
+        });
+      },
+    };
+
+    const result = await leaseNextUploadBatchCore(
+      database,
+      dependencies({ sha256: async () => dueCandidate.body_sha256 }),
+    );
+
+    expect(result).toMatchObject({
+      kind: 'leased',
+      lease: { clientBatchId: dueCandidate.client_batch_id, attemptCount: 1 },
+    });
+    expect(requestedLimit).toBe(100);
   });
 
   it('rejects a noncanonical current time before selecting authority', async () => {

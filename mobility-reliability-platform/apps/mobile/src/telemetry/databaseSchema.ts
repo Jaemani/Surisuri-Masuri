@@ -1,4 +1,89 @@
-export const CURRENT_TELEMETRY_SCHEMA_VERSION = 3;
+export const CURRENT_TELEMETRY_SCHEMA_VERSION = 4;
+
+export const FIND_INVALID_TERMINAL_OUTBOX_DELIVERY_SQL = `
+  SELECT 1 AS invalid
+  WHERE EXISTS (
+    SELECT 1
+    FROM outbox_delivery AS delivery
+    WHERE
+      (delivery.state = 'acknowledged' AND NOT COALESCE((
+        delivery.delivery_scope = 'telemetry_upload'
+        AND delivery.attempt_count = 0
+        AND delivery.next_attempt_at IS NULL
+        AND delivery.acknowledged_at IS NOT NULL
+        AND delivery.last_error_code IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM telemetry_upload_batch_item AS item
+          JOIN telemetry_upload_batch AS batch
+            ON batch.client_batch_id = item.client_batch_id
+          WHERE item.event_id = delivery.event_id
+            AND batch.state = 'acknowledged'
+            AND batch.acknowledged_at = delivery.acknowledged_at
+        )
+      ), 0))
+      OR
+      (delivery.state = 'held' AND NOT COALESCE((
+        delivery.delivery_scope = 'telemetry_upload'
+        AND delivery.attempt_count = 0
+        AND delivery.next_attempt_at IS NULL
+        AND delivery.acknowledged_at IS NULL
+        AND delivery.last_error_code IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM telemetry_upload_batch_item AS item
+          JOIN telemetry_upload_batch AS batch
+            ON batch.client_batch_id = item.client_batch_id
+          WHERE item.event_id = delivery.event_id
+            AND batch.state = 'held'
+            AND batch.last_error_code = delivery.last_error_code
+        )
+      ), 0))
+  )
+  OR EXISTS (
+    SELECT 1
+    FROM telemetry_upload_batch AS batch
+    WHERE batch.state IN ('acknowledged', 'held')
+      AND NOT COALESCE((
+        (SELECT COUNT(*)
+         FROM telemetry_upload_batch_item AS item
+         WHERE item.client_batch_id = batch.client_batch_id) = batch.sample_count
+        AND
+        (SELECT MIN(position)
+         FROM telemetry_upload_batch_item AS item
+         WHERE item.client_batch_id = batch.client_batch_id) = 0
+        AND
+        (SELECT MAX(position)
+         FROM telemetry_upload_batch_item AS item
+         WHERE item.client_batch_id = batch.client_batch_id) = batch.sample_count - 1
+        AND
+        (SELECT COUNT(*)
+         FROM telemetry_upload_batch_item AS item
+         WHERE item.client_batch_id = batch.client_batch_id
+           AND typeof(item.position) != 'integer') = 0
+        AND
+        (SELECT COUNT(*)
+         FROM telemetry_upload_batch_item AS item
+         JOIN outbox_delivery AS delivery ON delivery.event_id = item.event_id
+         WHERE item.client_batch_id = batch.client_batch_id
+           AND delivery.delivery_scope = 'telemetry_upload'
+           AND delivery.attempt_count = 0
+           AND delivery.next_attempt_at IS NULL
+           AND (
+             (batch.state = 'acknowledged'
+               AND delivery.state = 'acknowledged'
+               AND delivery.acknowledged_at = batch.acknowledged_at
+               AND delivery.last_error_code IS NULL)
+             OR
+             (batch.state = 'held'
+               AND delivery.state = 'held'
+               AND delivery.acknowledged_at IS NULL
+               AND delivery.last_error_code = batch.last_error_code)
+           )) = batch.sample_count
+      ), 0)
+  )
+  LIMIT 1
+`;
 
 // Uses a safe JSON substitute so malformed JSON is reported as an invalid row
 // instead of making the migration audit itself throw a value-bearing error.
@@ -28,14 +113,40 @@ export const FIND_INVALID_TELEMETRY_UPLOAD_BATCH_SQL = `
     AND json_array_length(candidate.safe_body_json, '$.samples') = candidate.sample_count
     AND NOT EXISTS (
       SELECT 1 FROM json_each(candidate.safe_body_json, '$.samples') AS sample
-      WHERE json_type(sample.value) != 'object'
-        OR (SELECT COUNT(*) FROM json_each(sample.value)) != 12
+      WHERE sample.type != 'object'
+        OR (SELECT COUNT(*) FROM json_each(
+          CASE WHEN sample.type = 'object' THEN sample.value ELSE '{}' END
+        )) != 12
     )
   ), 0)
   LIMIT 1
 `;
 
-export const CREATE_TELEMETRY_SCHEMA_V3_SQL = `
+export const FIND_INVALID_TELEMETRY_UPLOAD_BINDING_SQL = `
+  SELECT 1 AS invalid
+  FROM telemetry_upload_batch AS batch
+  WHERE NOT COALESCE((
+    (SELECT COUNT(*)
+     FROM telemetry_upload_batch_item AS item
+     WHERE item.client_batch_id = batch.client_batch_id) = batch.sample_count
+    AND
+    (SELECT MIN(position)
+     FROM telemetry_upload_batch_item AS item
+     WHERE item.client_batch_id = batch.client_batch_id) = 0
+    AND
+    (SELECT MAX(position)
+     FROM telemetry_upload_batch_item AS item
+     WHERE item.client_batch_id = batch.client_batch_id) = batch.sample_count - 1
+    AND
+    (SELECT COUNT(*)
+     FROM telemetry_upload_batch_item AS item
+     WHERE item.client_batch_id = batch.client_batch_id
+       AND typeof(item.position) != 'integer') = 0
+  ), 0)
+  LIMIT 1
+`;
+
+export const CREATE_TELEMETRY_SCHEMA_V4_SQL = `
   CREATE TABLE IF NOT EXISTS trip_session_projection (
     session_id TEXT PRIMARY KEY NOT NULL,
     installation_id TEXT NOT NULL,
@@ -280,6 +391,14 @@ export const CREATE_TELEMETRY_SCHEMA_V3_SQL = `
   CREATE INDEX IF NOT EXISTS due_upload_batch
     ON telemetry_upload_batch(state, next_attempt_at, created_at);
 
+  CREATE INDEX IF NOT EXISTS active_upload_batch_fifo
+    ON telemetry_upload_batch(created_at, client_batch_id)
+    WHERE state IN ('pending', 'leased');
+
+  CREATE INDEX IF NOT EXISTS expired_upload_batch
+    ON telemetry_upload_batch(lease_expires_at, created_at, client_batch_id)
+    WHERE state = 'leased';
+
   CREATE TRIGGER IF NOT EXISTS immutable_upload_batch_body
     BEFORE UPDATE OF
       client_batch_id, session_id, installation_id, tenant_id, device_id,
@@ -319,8 +438,10 @@ export const CREATE_TELEMETRY_SCHEMA_V3_SQL = `
       AND json_array_length(NEW.body_json, '$.samples') = NEW.sample_count
       AND NOT EXISTS (
         SELECT 1 FROM json_each(NEW.body_json, '$.samples') AS sample
-        WHERE json_type(sample.value) != 'object'
-          OR (SELECT COUNT(*) FROM json_each(sample.value)) != 12
+        WHERE sample.type != 'object'
+          OR (SELECT COUNT(*) FROM json_each(
+            CASE WHEN sample.type = 'object' THEN sample.value ELSE '{}' END
+          )) != 12
       )
     ), 0)
     BEGIN
@@ -336,7 +457,9 @@ export const CREATE_TELEMETRY_SCHEMA_V3_SQL = `
   CREATE TABLE IF NOT EXISTS telemetry_upload_batch_item (
     client_batch_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
-    position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 499),
+    position INTEGER NOT NULL CHECK (
+      typeof(position) = 'integer' AND position BETWEEN 0 AND 499
+    ),
     event_id TEXT NOT NULL UNIQUE,
     PRIMARY KEY (client_batch_id, position),
     FOREIGN KEY (client_batch_id, session_id)
@@ -347,6 +470,13 @@ export const CREATE_TELEMETRY_SCHEMA_V3_SQL = `
 
   CREATE UNIQUE INDEX IF NOT EXISTS event_session_identity
     ON trip_event_log(event_id, session_id);
+
+  CREATE TRIGGER IF NOT EXISTS validate_upload_batch_item_position
+    BEFORE INSERT ON telemetry_upload_batch_item
+    WHEN typeof(NEW.position) != 'integer'
+    BEGIN
+      SELECT RAISE(ABORT, 'UPLOAD_BATCH_ITEM_POSITION_INVALID');
+    END;
 
   CREATE TRIGGER IF NOT EXISTS require_uploadable_batch_item
     BEFORE INSERT ON telemetry_upload_batch_item
@@ -509,6 +639,9 @@ export const CREATE_TELEMETRY_SCHEMA_V3_SQL = `
             WHERE client_batch_id = NEW.client_batch_id) != 0
         OR (SELECT MAX(position) FROM telemetry_upload_batch_item
             WHERE client_batch_id = NEW.client_batch_id) != NEW.sample_count - 1
+        OR (SELECT COUNT(*) FROM telemetry_upload_batch_item
+            WHERE client_batch_id = NEW.client_batch_id
+              AND typeof(position) != 'integer') != 0
       )
     BEGIN
       SELECT RAISE(ABORT, 'UPLOAD_BATCH_CARDINALITY_MISMATCH');
@@ -567,12 +700,59 @@ export const CREATE_TELEMETRY_SCHEMA_V3_SQL = `
       SELECT RAISE(ABORT, 'OUTBOX_STATE_TRANSITION_INVALID');
     END;
 
+  CREATE TRIGGER IF NOT EXISTS validate_terminal_outbox_delivery
+    BEFORE UPDATE OF state ON outbox_delivery
+    WHEN NEW.state IS NOT OLD.state
+      AND NEW.state IN ('acknowledged', 'held')
+      AND NOT COALESCE((
+        NEW.delivery_scope = 'telemetry_upload'
+        AND NEW.attempt_count = 0
+        AND NEW.next_attempt_at IS NULL
+        AND (
+          (NEW.state = 'acknowledged'
+            AND NEW.acknowledged_at IS NOT NULL
+            AND NEW.last_error_code IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM telemetry_upload_batch_item AS item
+              JOIN telemetry_upload_batch AS batch
+                ON batch.client_batch_id = item.client_batch_id
+              WHERE item.event_id = NEW.event_id
+                AND batch.state = 'acknowledged'
+                AND batch.acknowledged_at = NEW.acknowledged_at
+            ))
+          OR
+          (NEW.state = 'held'
+            AND NEW.acknowledged_at IS NULL
+            AND NEW.last_error_code IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM telemetry_upload_batch_item AS item
+              JOIN telemetry_upload_batch AS batch
+                ON batch.client_batch_id = item.client_batch_id
+              WHERE item.event_id = NEW.event_id
+                AND batch.state = 'held'
+                AND batch.last_error_code = NEW.last_error_code
+            ))
+        )
+      ), 0)
+    BEGIN
+      SELECT RAISE(ABORT, 'OUTBOX_TERMINAL_METADATA_INVALID');
+    END;
+
+  CREATE TRIGGER IF NOT EXISTS immutable_terminal_outbox_delivery
+    BEFORE UPDATE ON outbox_delivery
+    WHEN OLD.state IN ('acknowledged', 'held')
+    BEGIN
+      SELECT RAISE(ABORT, 'OUTBOX_DELIVERY_TERMINAL');
+    END;
+
   CREATE TABLE IF NOT EXISTS app_metadata (
     key TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL
   );
 
-  PRAGMA user_version = 3;
+  PRAGMA user_version = 4;
 `;
 
 // The caller must disable foreign_keys before beginning this transaction,
@@ -865,8 +1045,10 @@ export const MIGRATE_TELEMETRY_V1_TO_V2_SQL = `
       AND json_array_length(NEW.body_json, '$.samples') = NEW.sample_count
       AND NOT EXISTS (
         SELECT 1 FROM json_each(NEW.body_json, '$.samples') AS sample
-        WHERE json_type(sample.value) != 'object'
-          OR (SELECT COUNT(*) FROM json_each(sample.value)) != 12
+        WHERE sample.type != 'object'
+          OR (SELECT COUNT(*) FROM json_each(
+            CASE WHEN sample.type = 'object' THEN sample.value ELSE '{}' END
+          )) != 12
       )
     )
     BEGIN
@@ -882,7 +1064,9 @@ export const MIGRATE_TELEMETRY_V1_TO_V2_SQL = `
   CREATE TABLE telemetry_upload_batch_item (
     client_batch_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
-    position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 499),
+    position INTEGER NOT NULL CHECK (
+      typeof(position) = 'integer' AND position BETWEEN 0 AND 499
+    ),
     event_id TEXT NOT NULL UNIQUE,
     PRIMARY KEY (client_batch_id, position),
     FOREIGN KEY (client_batch_id, session_id)
@@ -1055,6 +1239,9 @@ export const MIGRATE_TELEMETRY_V1_TO_V2_SQL = `
             WHERE client_batch_id = NEW.client_batch_id) != 0
         OR (SELECT MAX(position) FROM telemetry_upload_batch_item
             WHERE client_batch_id = NEW.client_batch_id) != NEW.sample_count - 1
+        OR (SELECT COUNT(*) FROM telemetry_upload_batch_item
+            WHERE client_batch_id = NEW.client_batch_id
+              AND typeof(position) != 'integer') != 0
       )
     BEGIN
       SELECT RAISE(ABORT, 'UPLOAD_BATCH_CARDINALITY_MISMATCH');
@@ -1151,8 +1338,10 @@ export const MIGRATE_TELEMETRY_V2_TO_V3_SQL = `
       AND json_array_length(NEW.body_json, '$.samples') = NEW.sample_count
       AND NOT EXISTS (
         SELECT 1 FROM json_each(NEW.body_json, '$.samples') AS sample
-        WHERE json_type(sample.value) != 'object'
-          OR (SELECT COUNT(*) FROM json_each(sample.value)) != 12
+        WHERE sample.type != 'object'
+          OR (SELECT COUNT(*) FROM json_each(
+            CASE WHEN sample.type = 'object' THEN sample.value ELSE '{}' END
+          )) != 12
       )
     ), 0)
     BEGIN
@@ -1160,4 +1349,90 @@ export const MIGRATE_TELEMETRY_V2_TO_V3_SQL = `
     END;
 
   PRAGMA user_version = 3;
+`;
+
+export const MIGRATE_TELEMETRY_V3_TO_V4_SQL = `
+  CREATE INDEX active_upload_batch_fifo
+    ON telemetry_upload_batch(created_at, client_batch_id)
+    WHERE state IN ('pending', 'leased');
+
+  CREATE INDEX expired_upload_batch
+    ON telemetry_upload_batch(lease_expires_at, created_at, client_batch_id)
+    WHERE state = 'leased';
+
+  CREATE TRIGGER validate_upload_batch_item_position
+    BEFORE INSERT ON telemetry_upload_batch_item
+    WHEN typeof(NEW.position) != 'integer'
+    BEGIN
+      SELECT RAISE(ABORT, 'UPLOAD_BATCH_ITEM_POSITION_INVALID');
+    END;
+
+  DROP TRIGGER IF EXISTS enforce_upload_batch_cardinality;
+
+  CREATE TRIGGER enforce_upload_batch_cardinality
+    BEFORE UPDATE OF state ON telemetry_upload_batch
+    WHEN NEW.state IN ('leased', 'acknowledged', 'held')
+      AND (
+        (SELECT COUNT(*) FROM telemetry_upload_batch_item
+         WHERE client_batch_id = NEW.client_batch_id) != NEW.sample_count
+        OR (SELECT MIN(position) FROM telemetry_upload_batch_item
+            WHERE client_batch_id = NEW.client_batch_id) != 0
+        OR (SELECT MAX(position) FROM telemetry_upload_batch_item
+            WHERE client_batch_id = NEW.client_batch_id) != NEW.sample_count - 1
+        OR (SELECT COUNT(*) FROM telemetry_upload_batch_item
+            WHERE client_batch_id = NEW.client_batch_id
+              AND typeof(position) != 'integer') != 0
+      )
+    BEGIN
+      SELECT RAISE(ABORT, 'UPLOAD_BATCH_CARDINALITY_MISMATCH');
+    END;
+
+  CREATE TRIGGER validate_terminal_outbox_delivery
+    BEFORE UPDATE OF state ON outbox_delivery
+    WHEN NEW.state IS NOT OLD.state
+      AND NEW.state IN ('acknowledged', 'held')
+      AND NOT COALESCE((
+        NEW.delivery_scope = 'telemetry_upload'
+        AND NEW.attempt_count = 0
+        AND NEW.next_attempt_at IS NULL
+        AND (
+          (NEW.state = 'acknowledged'
+            AND NEW.acknowledged_at IS NOT NULL
+            AND NEW.last_error_code IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM telemetry_upload_batch_item AS item
+              JOIN telemetry_upload_batch AS batch
+                ON batch.client_batch_id = item.client_batch_id
+              WHERE item.event_id = NEW.event_id
+                AND batch.state = 'acknowledged'
+                AND batch.acknowledged_at = NEW.acknowledged_at
+            ))
+          OR
+          (NEW.state = 'held'
+            AND NEW.acknowledged_at IS NULL
+            AND NEW.last_error_code IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM telemetry_upload_batch_item AS item
+              JOIN telemetry_upload_batch AS batch
+                ON batch.client_batch_id = item.client_batch_id
+              WHERE item.event_id = NEW.event_id
+                AND batch.state = 'held'
+                AND batch.last_error_code = NEW.last_error_code
+            ))
+        )
+      ), 0)
+    BEGIN
+      SELECT RAISE(ABORT, 'OUTBOX_TERMINAL_METADATA_INVALID');
+    END;
+
+  CREATE TRIGGER immutable_terminal_outbox_delivery
+    BEFORE UPDATE ON outbox_delivery
+    WHEN OLD.state IN ('acknowledged', 'held')
+    BEGIN
+      SELECT RAISE(ABORT, 'OUTBOX_DELIVERY_TERMINAL');
+    END;
+
+  PRAGMA user_version = 4;
 `;

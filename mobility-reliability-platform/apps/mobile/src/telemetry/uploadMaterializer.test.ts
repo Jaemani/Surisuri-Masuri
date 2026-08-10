@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
 
-import { CREATE_TELEMETRY_SCHEMA_V3_SQL } from './databaseSchema';
+import { CREATE_TELEMETRY_SCHEMA_V4_SQL } from './databaseSchema';
 import {
   materializeNextUploadBatchCore,
   type UploadMaterializerDatabase,
@@ -38,7 +38,7 @@ function numberedUuid(sequence: number): string {
 function openDatabase(): NodeDatabase {
   const database = new DatabaseSync(':memory:');
   database.exec('PRAGMA foreign_keys = ON;');
-  database.exec(CREATE_TELEMETRY_SCHEMA_V3_SQL);
+  database.exec(CREATE_TELEMETRY_SCHEMA_V4_SQL);
   return database;
 }
 
