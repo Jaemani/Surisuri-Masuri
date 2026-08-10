@@ -27,6 +27,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 mlruns/
+services/ml/data/generated/
+services/ml/artifacts/r07/
+services/ml/*.egg-info/
 
 # Sensitive or generated data
 data/raw/

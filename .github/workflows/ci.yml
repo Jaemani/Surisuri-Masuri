@@ -22,6 +22,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ml-r07:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: mobility-reliability-platform/services/ml
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.8.13"
+          enable-cache: true
+          cache-dependency-glob: mobility-reliability-platform/services/ml/uv.lock
+
+      - name: Install locked ML test environment
+        run: uv sync --locked --extra dev
+
+      - name: Validate R07 contracts, manifests, and split policy
+        run: |
+          uv run --locked --extra dev ruff format --check src tests
+          uv run --locked --extra dev ruff check src tests
+          uv run --locked --extra dev pytest -q
+
+      - name: Reproduce the synthetic dataset without workspace artifacts
+        run: |
+          mkdir -p "$RUNNER_TEMP/r07-a/first" "$RUNNER_TEMP/r07-a/second"
+          uv run --locked --extra dev python -m mobility_ml.generate_r07_dataset --output "$RUNNER_TEMP/r07-a/first"
+          uv run --locked --extra dev python -m mobility_ml.generate_r07_dataset --output "$RUNNER_TEMP/r07-a/second"
+          cmp "$RUNNER_TEMP/r07-a/first/dataset.json" "$RUNNER_TEMP/r07-a/second/dataset.json"
+          cmp "$RUNNER_TEMP/r07-a/first/manifest.json" "$RUNNER_TEMP/r07-a/second/manifest.json"
+          test -z "$(git status --porcelain)"
+
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -28,6 +28,36 @@ async function getValidator(schemaPath) {
 
 const cases = [
   {
+    name: 'valid quality label v1',
+    schema: 'schemas/quality-label.v1.schema.json',
+    fixture: 'fixtures/quality-label.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid quality label v1',
+    schema: 'schemas/quality-label.v1.schema.json',
+    fixture: 'fixtures/quality-label.v1.invalid.json',
+    expected: false,
+  },
+  {
+    name: 'valid quality label v1 review state',
+    schema: 'schemas/quality-label.v1.schema.json',
+    fixture: 'fixtures/quality-label.v1.review.valid.json',
+    expected: true,
+  },
+  {
+    name: 'valid quality dataset manifest v1',
+    schema: 'schemas/quality-dataset-manifest.v1.schema.json',
+    fixture: 'fixtures/quality-dataset-manifest.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid quality dataset manifest v1',
+    schema: 'schemas/quality-dataset-manifest.v1.schema.json',
+    fixture: 'fixtures/quality-dataset-manifest.v1.invalid.json',
+    expected: false,
+  },
+  {
     name: 'valid telemetry batch v2',
     schema: 'schemas/telemetry-batch.v2.schema.json',
     fixture: 'fixtures/telemetry-batch.v2.valid.json',

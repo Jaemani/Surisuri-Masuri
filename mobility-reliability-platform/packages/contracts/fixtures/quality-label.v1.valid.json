@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "quality-label.v1",
+  "labelId": "0f4b6fd7-25cd-4a72-88e9-bc0a4bb2b4f6",
+  "traceId": "7b6c25a9-e20d-4a1f-9a4f-84b29de2f1a8",
+  "scenarioGroupId": "synthetic-mobility-0001",
+  "telemetryBatchId": "d6a6e478-20d4-4608-89f1-7980c98844e0",
+  "telemetrySchemaVersion": "telemetry-batch.v2",
+  "labelState": "known",
+  "label": "mobility_aid_likely",
+  "labelSource": "synthetic_generator",
+  "confidence": 1,
+  "labelGuideVersion": "quality-label-guide.v1",
+  "labeledAt": "2026-08-11T09:00:00Z"
+}

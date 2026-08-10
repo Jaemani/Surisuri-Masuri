@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "quality-dataset-manifest.v1",
+  "datasetId": "quality-dataset.r07.synthetic",
+  "datasetVersion": "v1",
+  "telemetrySchemaVersion": "telemetry-batch.v2",
+  "labelSchemaVersion": "quality-label.v1",
+  "featureSchemaVersion": "quality-features.v1",
+  "generatorVersion": "r07-generator.v1",
+  "splitStrategy": "group-time-holdout.v1",
+  "seed": 20260811,
+  "sourceKind": "synthetic",
+  "createdAt": "2026-08-11T09:00:00Z",
+  "datasetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "traceCount": 1,
+  "labelCounts": {
+    "mobility_aid_likely": 1,
+    "vehicle_likely": 0,
+    "stationary": 0,
+    "gps_noise_or_insufficient": 0,
+    "review_required": 0,
+    "abstained": 0
+  },
+  "splitCounts": { "train": 1, "validation": 0, "test": 0 },
+  "traces": [
+    {
+      "traceId": "7b6c25a9-e20d-4a1f-9a4f-84b29de2f1a8",
+      "telemetryBatchId": "d6a6e478-20d4-4608-89f1-7980c98844e0",
+      "scenarioGroupId": "synthetic-mobility-0001",
+      "labelId": "0f4b6fd7-25cd-4a72-88e9-bc0a4bb2b4f6",
+      "sourceKind": "developer_device",
+      "split": "train",
+      "capturedAt": "2026-08-01T09:00:00Z",
+      "sampleCount": 12,
+      "telemetrySha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "benchmarkEligible": true
+    }
+  ]
+}
