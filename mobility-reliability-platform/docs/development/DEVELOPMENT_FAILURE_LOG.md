@@ -4,7 +4,7 @@
 추적한다. 실제 사용자·기관·staging·production 영향이 있는 사건은 이 문서가 아니라
 [`incidents/`](../incidents/) 정책에 따라 별도 인시던트로 기록한다.
 
-아래 세 항목은 2026-08-11 배포 전 local review에서 발견해 같은 코드 증분에서
+아래 항목은 2026-08-11 배포 전 local review에서 발견해 같은 코드 증분에서
 해결한 경계 결함이다. 모두 WSL2의 local Node SQLite/component test 범위에서만
 관찰되었고 실제 사용자·기관·staging·production 데이터에는 영향이 없었다. 따라서
 `INC-*` 인시던트가 아니며, 이 문서에서는 기존 Android native smoke와 분리해 기록한다.
@@ -97,6 +97,64 @@ nested sample JSON을 audit query가 직접 확장하면 audit 자체가 예외�
 - 제품 업데이트: [UPD-20260811-01](../product-updates/UPD-20260811-01-mobile-upload-disposition.md)
 - 증거: [EVD-20260811-001](../evidence/2026-08.md#evd-20260811-001--모바일-upload-disposition과-v4-state-integrity)
 - 사람 대상 리포트: [HR-20260811-01](../reports/human/HR-20260811-01-mobile-upload-disposition.md)
+
+## DEVFAIL-20260811-04 — trace 상단 시간만 사용한 temporal split 누수
+
+- 상태: `resolved-local-review`
+- 발견일·해결일: 2026-08-11
+- 환경·데이터: WSL2 / R07 synthetic telemetry only
+- 실제 사용자·기관 영향: 없음
+- 인시던트 분류: 비해당. 모델 학습·배포 전 loader 독립 리뷰에서 발견했으며 실제
+  데이터와 모델 artifact를 사용하지 않았다.
+
+### 문제
+
+초기 `group-time-holdout.v1` validator는 trace 상단의 `capturedAt`만 split 시간으로
+사용했다. Batch 안의 실제 sample 시간을 다른 기간으로 바꾸고 trace 상단 시간만
+유지하면 group 검사는 통과할 수 있었다. 이 상태로 모델 비교를 진행하면 미래 sample이
+과거 split에 들어가는 temporal leakage를 성능으로 오해할 위험이 있었다.
+
+### 정정·검증
+
+- 모든 sample의 timezone 포함 timestamp를 UTC로 정규화해 split 시간축에 포함한다.
+- sample 시간순서, trace 상단 시간과 첫 sample의 일치, 마지막 sample 뒤 `sentAt`을
+  함께 검사한다.
+- timezone 없는 값과 malformed 값은 일반 예외가 아니라 `DatasetValidationError`로
+  닫는다.
+- Train sample 전체를 test 기간으로 옮기는 회귀 fixture가
+  `train_validation_time_leakage`로 거부되는지 확인했다.
+
+## DEVFAIL-20260811-05 — dataset·manifest provenance와 malformed input 경계 누락
+
+- 상태: `resolved-local-review`
+- 발견일·해결일: 2026-08-11
+- 환경·데이터: WSL2 / R07 synthetic dataset·tampered fixture
+- 실제 사용자·기관 영향: 없음
+- 인시던트 분류: 비해당. 비커밋 synthetic artifact와 unit test 범위에서만 발견했다.
+
+### 문제
+
+초기 validator는 dataset hash와 일부 trace metadata는 비교했지만 generator/feature/seed,
+trace source·benchmark eligibility, 중복 trace/batch identity를 전부 대조하지 않았다.
+또한 비객체 dataset·trace는 typed validation error가 아니라 `AttributeError`로 빠질 수
+있었다. `jsonschema`가 없을 때의 수동 batch fallback도 기준 schema보다 느슨했다.
+
+### 정정·검증
+
+- Dataset과 manifest root의 ID/version/generator/feature/split/seed/source/fixed time을
+  대조하고 각 trace의 ID/linkage/source/eligibility/count/hash를 재계산한다.
+- `developer_device`, 중복 trace/batch ID, 비객체 dataset/trace를 fail-closed 처리한다.
+- `jsonschema`를 runtime dependency와 `uv.lock`에 고정하고 validator가 없으면 검증을
+  중단한다. 느슨한 fallback은 실행 경로에서 제거했다.
+- Tampered provenance·hash·linkage와 malformed input 회귀 테스트를 포함해 Python
+  26개 테스트가 통과했다.
+
+### R07 관련 기록
+
+- 결정: [ADR-0040](../decisions/ADR-0040-r07-quality-dataset-contract.md)
+- 제품 업데이트: [UPD-20260811-02](../product-updates/UPD-20260811-02-r07-synthetic-dataset-contract.md)
+- 증거: [EVD-20260811-002](../evidence/2026-08.md#evd-20260811-002--r07-합성-품질-데이터셋-계약과-결정론적-split)
+- 사람 대상 리포트: [HR-20260811-02](../reports/human/HR-20260811-02-r07-dataset-foundation.md)
 
 ## DEVFAIL-20260723-01 — Android background job crash와 false-recording state
 

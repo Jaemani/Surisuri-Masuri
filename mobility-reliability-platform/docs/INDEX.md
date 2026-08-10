@@ -27,7 +27,7 @@
 | Firebase, Go, domain command와 worker의 책임은 무엇인가 | [시스템 아키텍처](./architecture/SYSTEM_ARCHITECTURE.md) | [ADR-0007](./decisions/ADR-0007-firebase-first-hybrid.md), [ADR-0011](./decisions/ADR-0011-domain-command-worker-boundaries.md) |
 | pending receipt를 누가 어떻게 복구하는가 | [Telemetry 복구 실행계획](./plans/TELEMETRY_RECOVERY_PLAN.md) | [ADR-0017](./decisions/ADR-0017-fenced-ingest-recovery.md), [ADR-0018](./decisions/ADR-0018-generation-pinned-read-only-classifier.md), [ADR-0019](./decisions/ADR-0019-current-forward-recovery-authorization.md), [ADR-0020](./decisions/ADR-0020-two-pass-forward-reconciliation.md), [ADR-0021](./decisions/ADR-0021-bounded-forward-recovery-worker.md), [ADR-0022](./decisions/ADR-0022-atomic-cleanup-transition-attempt-closure.md), [ADR-0023](./decisions/ADR-0023-fenced-cleanup-lease-claim.md), [ADR-0024](./decisions/ADR-0024-immutable-cleanup-dry-run-target.md), [ADR-0025](./decisions/ADR-0025-generation-pinned-cleanup-delete-and-audit.md), [ADR-0026](./decisions/ADR-0026-fenced-cleanup-execution-ledger-and-expiry-finalization.md), [ADR-0027](./decisions/ADR-0027-paired-read-only-cleanup-absence-attestation.md), [ADR-0028](./decisions/ADR-0028-progress-aware-expired-cleanup-takeover.md), [ADR-0029](./decisions/ADR-0029-durable-artifact-phase-cleanup-execution.md), [ADR-0030](./decisions/ADR-0030-atomic-cleanup-expiry-finalization.md), [ADR-0031](./decisions/ADR-0031-phase-preserving-cleanup-retry-hold-disposition.md), [ADR-0032](./decisions/ADR-0032-bounded-cleanup-terminal-orchestration.md), [forward path 리포트](./reports/human/HR-20260721-09-fenced-forward-admission.md), [claim·cleanup transition 리포트](./reports/human/HR-20260721-10-recovery-claims-cleanup-transition.md), [action outcome·attempt failure 리포트](./reports/human/HR-20260722-17-forward-recovery-outcome.md), [authorization disposition 리포트](./reports/human/HR-20260722-18-authorization-disposition.md), [bounded worker 리포트](./reports/human/HR-20260722-20-bounded-forward-recovery-worker.md), [cleanup attempt closure 리포트](./reports/human/HR-20260722-21-cleanup-transition-attempt-closure.md), [cleanup lease 리포트](./reports/human/HR-20260722-22-fenced-cleanup-lease-claim.md), [cleanup target 리포트](./reports/human/HR-20260722-23-immutable-cleanup-dry-run-target.md), [cleanup delete 리포트](./reports/human/HR-20260722-24-generation-pinned-cleanup-delete.md), [cleanup ledger 리포트](./reports/human/HR-20260722-25-cleanup-execution-ledger.md), [signed absence 리포트](./reports/human/HR-20260722-26-signed-cleanup-absence-audit.md), [cleanup takeover 리포트](./reports/human/HR-20260722-27-progress-aware-cleanup-takeover.md), [durable phase execution 리포트](./reports/human/HR-20260722-28-durable-cleanup-phase-execution.md), [cleanup expiry finalization 리포트](./reports/human/HR-20260722-29-atomic-cleanup-expiry-finalization.md), [cleanup retry·hold 리포트](./reports/human/HR-20260723-30-cleanup-retry-hold-disposition.md), [ADR-0016](./decisions/ADR-0016-immutable-telemetry-artifact-lineage.md) |
 | 데이터 구조와 이관 기준은 무엇인가 | [Target Domain Model](./data/TARGET_DOMAIN_MODEL.md) | [Legacy Inventory](./data/LEGACY_DATA_INVENTORY.md), [Migration Gates](./data/MIGRATION_GATES.md) |
-| ML·AI가 무엇을 판단하고 무엇을 하지 않는가 | [데이터·ML·AI 계획](./plans/DATA_ML_AI_PLAN.md) | [ADR-0006](./decisions/ADR-0006-model-and-llm-responsibility.md) |
+| ML·AI가 무엇을 판단하고 무엇을 하지 않는가 | [데이터·ML·AI 계획](./plans/DATA_ML_AI_PLAN.md) | [ADR-0006](./decisions/ADR-0006-model-and-llm-responsibility.md), [R07 dataset 결정](./decisions/ADR-0040-r07-quality-dataset-contract.md), [R07 실행 Runbook](./development/ML_R07_RUNBOOK.md) |
 | 어떤 결과를 완료로 인정하는가 | [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md) | [증거 인덱스](./evidence/README.md) |
 | 정기보고와 회의록을 어떻게 작성하는가 | [보고·회의 계획](./plans/REPORTING_AND_MEETING_PLAN.md) | [리포트 운영 인덱스](./reports/README.md), [문서 운영 정책](./DOCUMENTATION_POLICY.md) |
 | 실제 제품에서 무엇이 바뀌었는가 | [제품 업데이트](./product-updates/README.md) | [월별 증거](./evidence/2026-07.md) |
@@ -77,7 +77,30 @@
 [EVD-20260811-001](./evidence/2026-08.md#evd-20260811-001--모바일-upload-disposition과-v4-state-integrity),
 [HR-20260811-01](./reports/human/HR-20260811-01-mobile-upload-disposition.md).
 
-## 4.1 2026-07-23 당시 검증된 구현 경계 (historical)
+## 4.1 2026-08-11 R07-A 검증된 구현 경계
+
+8월 R07의 첫 증분으로 모델을 학습하기 전 label·dataset·split 계약을 고정했다. 코드
+기준점은 commit `a20a85b`이다.
+
+- `quality-label.v1`은 네 known class와 review/abstain을 분리한다.
+  `unknown_review_required`는 학습 class가 아니다.
+- `quality-dataset-manifest.v1`과 Python loader가 version, seed, source, count,
+  dataset/trace hash, label/batch linkage와 benchmark eligibility를 함께 검사한다.
+- Seed `20260811`의 합성 trace 48개·sample 576개를 train/validation/test 각 16개로
+  생성한다. 같은 seed에서 두 번 생성한 artifact가 byte equality를 만족했다.
+- 모든 sample 시간과 scenario group을 기준으로 split 누수를 막고, developer-device,
+  중복 identity, provenance 변조와 malformed input을 fail-closed 처리한다.
+- Python 26 tests, contract 11 fixture cases, workspace check/build/test가 local에서
+  통과했다. 이는 synthetic pipeline 증거이며 rules baseline, PyTorch, 모델 성능,
+  ONNX·실기기, 현장·배포 결과가 아니다.
+
+관련 문서: [ADR-0040](./decisions/ADR-0040-r07-quality-dataset-contract.md),
+[R07 Runbook](./development/ML_R07_RUNBOOK.md),
+[UPD-20260811-02](./product-updates/UPD-20260811-02-r07-synthetic-dataset-contract.md),
+[EVD-20260811-002](./evidence/2026-08.md#evd-20260811-002--r07-합성-품질-데이터셋-계약과-결정론적-split),
+[HR-20260811-02](./reports/human/HR-20260811-02-r07-dataset-foundation.md).
+
+## 4.2 2026-07-23 당시 검증된 구현 경계 (historical)
 
 다음은 문서 작성 시점에 로컬·클린 러너 증거가 연결된 범위다.
 

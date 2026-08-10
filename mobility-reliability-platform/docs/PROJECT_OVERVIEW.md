@@ -148,12 +148,17 @@ PostgreSQL/PostGIS, Kafka, Kubernetes는 필요성이 측정되기 전에는 초
 
 ## 11. 현재 실제 상태
 
-2026-07-23 기준 신규 저장소 기반, Firebase Rules, foreground GPS native smoke,
-background GPS source/static gate, SQLite outbox와 telemetry v2 계약, fail-closed Go
-ingest kernel까지 범위별 로컬 증거가 있다. Background는 전역 task·명시적 권한,
-bounded callback과 DB timestamp 단조성 코드만 검증했고 Android/iPhone native
-lifecycle 증거는 없다. 그 뒤의 telemetry authorization, atomic admission,
-immutable artifact 계보도 다음 범위에서만 검증됐다.
+2026-08-11 기준 신규 저장소 기반, Firebase Rules, foreground/background GPS의 제한된
+native smoke, SQLite outbox·upload state, telemetry v2 계약, fail-closed Go ingest
+kernel과 R07-A synthetic ML dataset 계약까지 범위별 로컬 증거가 있다. Android/iPhone
+실기기 전체 lifecycle, 실제 HTTP sync, 모델 학습·ONNX, field·staging·production은
+완료로 주장하지 않는다. 현재 증분은 다음 범위에서만 검증됐다.
+
+- 8월 R07-A에서 네 품질 라벨, review/abstain 상태, telemetry-batch.v2 기반 합성
+  generator, dataset manifest와 group/time split validator를 구현했다. Seed `20260811`의
+  48 synthetic trace·576 sample을 같은 locked 환경에서 재생성하며 dataset/trace hash,
+  source, ID/linkage, 모든 sample 시간과 developer-device 제외를 검사한다. Python 26
+  tests와 contract 11 fixture cases의 근거는 [EVD-20260811-002](./evidence/2026-08.md#evd-20260811-002--r07-합성-품질-데이터셋-계약과-결정론적-split)다. Rules baseline·PyTorch·성능 수치·실제 사용자 데이터는 아직 없다.
 
 - active tenant·beneficiary·installation·trip·assignment·현재 동의를 함께 검사하는 authorization policy와 Firestore exact-read adapter는 [EVD-20260721-012](./evidence/2026-07.md#evd-20260721-012--firestore-텔레메트리-권한-snapshot)의 local synthetic test 범위에서 확인됐다. client용 Firestore read matrix는 [EVD-20260721-013](./evidence/2026-07.md#evd-20260721-013--firestore-client-최소권한-read-matrix)의 Rules Emulator에서 확인됐지만 production Rules 배포와 실제 앱 query는 미검증이다.
 - authorization 재평가와 두 uniqueness index·최초 receipt 생성을 한 Firestore transaction에 묶은 admission adapter는 [EVD-20260721-014](./evidence/2026-07.md#evd-20260721-014--원자적-telemetry-admission과-receipt-lineage)의 local fake seam과 [EVD-20260721-015](./evidence/2026-07.md#evd-20260721-015--firestore-admission-transaction-emulator-integration)의 concurrent same-batch에서 확인됐다. production ADC/IAM과 실제 철회 transaction 경쟁은 미검증이다.

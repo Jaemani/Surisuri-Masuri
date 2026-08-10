@@ -25,11 +25,10 @@ Python/PyTorch 기반 학습·평가 작업을 보관합니다. 현재 R07-A는 
 만들지 않습니다.
 
 ```bash
-cd mobility-reliability-platform/services/ml
-uv sync --locked --extra dev
-uv run --locked --extra dev python -m mobility_ml.generate_r07_dataset \
+rtk uv --directory services/ml sync --locked --extra dev
+rtk uv --directory services/ml run --locked --extra dev python -m mobility_ml.generate_r07_dataset \
   --output artifacts/r07
-uv run --locked --extra dev pytest
+rtk uv --directory services/ml run --locked --extra dev pytest
 ```
 
 Python은 `3.12.x`, uv는 CI 기준 `0.8.13`을 사용한다. `uv.lock`을 바꾸지
