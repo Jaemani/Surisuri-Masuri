@@ -118,3 +118,12 @@
 - 검증: mobile typecheck, 20 files / 253 tests, Android/iOS Expo export, Playwright mobile 2 flows passed
 - 시각 증거: `tests/e2e/mobile-web.spec.ts-snapshots/mobile-repairer-schedule-mobile-chromium-linux.png`
 - 제한: 실제 Android/iPhone picker 조작, 취소·시간대 경계·native accessibility와 production 예약은 미검증
+
+# EVD-20260813-12 — 모바일 복수 구조화 수리항목
+
+- 분류: `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
+- 확인 항목: 1~20개 항목 editor, 항목별 category/action/quantity/line amount, 합계 파생, 제출 전 검토, 수정 후 입력 보존, payload-signature idempotency key
+- command 확인: label과 임의 field를 제외한 exact `workItems` POST body, billed total 일치 client guard
+- 검증: mobile typecheck, 21 files / 258 tests, Playwright mobile 2 flows passed
+- 시각 증거: `tests/e2e/mobile-web.spec.ts-snapshots/mobile-repairer-submit-review-mobile-chromium-linux.png`
+- 제한: 실제 수리·수리사·복지관·보조금 집행, 현장 분류 타당성, native keyboard/accessibility와 production Firebase는 미검증

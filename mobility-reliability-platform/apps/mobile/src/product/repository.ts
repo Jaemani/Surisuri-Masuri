@@ -274,6 +274,10 @@ export class FirebaseProductRepository implements ProductRepository {
     if (input.action === 'schedule') body.scheduledAt = input.scheduledAt;
     if (input.action === 'submit') {
       if (!Number.isSafeInteger(input.billedAmountKrw) || input.billedAmountKrw <= 0) throw new ProductRepositoryError('INVALID_RESPONSE', 'The billed repair amount must be a positive integer.');
+      if (input.workItems.length < 1 || input.workItems.length > 20) throw new ProductRepositoryError('INVALID_RESPONSE', 'A repair submission requires between 1 and 20 structured work items.');
+      const workItemsValid = input.workItems.every((item) => Number.isSafeInteger(item.quantity) && item.quantity >= 1 && item.quantity <= 20 && Number.isSafeInteger(item.lineAmountKrw) && item.lineAmountKrw >= 0 && item.lineAmountKrw <= 100_000_000);
+      const itemTotal = input.workItems.reduce((total, item) => total + item.lineAmountKrw, 0);
+      if (!workItemsValid || !Number.isSafeInteger(itemTotal) || itemTotal !== input.billedAmountKrw) throw new ProductRepositoryError('INVALID_RESPONSE', 'The structured repair items must be valid and match the billed total.');
       body.billedAmountKrw = input.billedAmountKrw;
       body.workItems = input.workItems.map(({ categoryCode, actionCode, quantity, lineAmountKrw }) => ({ categoryCode, actionCode, quantity, lineAmountKrw }));
     }

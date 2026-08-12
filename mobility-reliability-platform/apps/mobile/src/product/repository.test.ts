@@ -107,6 +107,43 @@ describe('FirebaseProductRepository', () => {
     expect(requests[1].init.method).toBe('GET');
   });
 
+  it('posts multiple structured work items with a derived matching billed total', async () => {
+    const requests: Array<{ url: string; init: { method: string; headers: Record<string, string>; body?: string } }> = [];
+    const source = { ...demoProductSnapshot.repairJobs[0], status: 'in_progress' as const, revision: 5, allowedActions: ['submit' as const] };
+    const projected = { ...source, status: 'repairer_submitted' as const, revision: 6, billedAmountKrw: 115000, allowedActions: [] };
+    const repository = new FirebaseProductRepository(firebaseOptions(async (url, init) => {
+      requests.push({ url, init });
+      return init.method === 'POST'
+        ? jsonResponse(200, { commandType: 'transition_repair_request', resourceId: source.id, revision: 6, status: 'repairer_submitted' })
+        : jsonResponse(200, { roleSession: { role: 'repairer', displayName: '따뜻한바퀴 수리센터' }, repairJobs: [projected] });
+    }));
+    await repository.transitionRepairJob({
+      action: 'submit', repairRequestId: source.id, expectedRevision: 5, billedAmountKrw: 115000, idempotencyKey: 'submit-key-1',
+      workItems: [
+        { categoryCode: 'brakes', categoryLabel: '브레이크', actionCode: 'repair', actionLabel: '수리', quantity: 1, lineAmountKrw: 85000 },
+        { categoryCode: 'battery', categoryLabel: '배터리', actionCode: 'replace', actionLabel: '교체', quantity: 2, lineAmountKrw: 30000 },
+      ],
+    });
+    expect(JSON.parse(requests[0].init.body!)).toEqual({
+      tenantId: 'tenant-1', repairRequestId: source.id, expectedRevision: 5, toStatus: 'repairer_submitted', billedAmountKrw: 115000,
+      workItems: [
+        { categoryCode: 'brakes', actionCode: 'repair', quantity: 1, lineAmountKrw: 85000 },
+        { categoryCode: 'battery', actionCode: 'replace', quantity: 2, lineAmountKrw: 30000 },
+      ],
+    });
+    expect(requests[0].init.headers['Idempotency-Key']).toBe('submit-key-1');
+  });
+
+  it('rejects a mismatched structured-item total before sending a command', async () => {
+    let calls = 0;
+    const repository = new FirebaseProductRepository(firebaseOptions(async () => { calls += 1; return jsonResponse(500, {}); }));
+    await expect(repository.transitionRepairJob({
+      action: 'submit', repairRequestId: 'job-1', expectedRevision: 5, billedAmountKrw: 85000, idempotencyKey: 'submit-key-2',
+      workItems: [{ categoryCode: 'brakes', categoryLabel: '브레이크', actionCode: 'repair', actionLabel: '수리', quantity: 1, lineAmountKrw: 84000 }],
+    })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+    expect(calls).toBe(0);
+  });
+
   it('preserves revision conflicts and does not silently retry a mutation', async () => {
     let calls = 0;
     const repository = new FirebaseProductRepository(firebaseOptions(async () => {
