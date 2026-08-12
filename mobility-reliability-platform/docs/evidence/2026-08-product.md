@@ -103,3 +103,10 @@
 - 확인 항목: projection 공개코드와 수동 입력 일치 전 일정·작업 action 비활성화, 대소문자 정규화, 일치 상태 안내
 - 검증: mobile 248 tests, TypeScript, Playwright 4 passed, updated repairer workspace snapshot
 - 제한: QR camera/lookup, 위조 방지, 기기 소유권, native accessibility는 미검증
+
+# EVD-20260813-10 — 네이티브 QR scanner integration
+
+- 분류: `LOCAL_TEST`, `NATIVE_EXPORT`, `SYNTHETIC`, `WEB_VISUAL`
+- 확인 항목: Expo Camera permission flow, QR-only scanner, bounded payload parser, 수동 입력 fallback, 동일 기기-code gate
+- 검증: mobile 19 files / 250 tests, Android/iOS Expo export, Playwright 4 passed
+- 제한: 실제 Android/iPhone 카메라, 저조도·훼손 QR, 위조 방지와 서버 lookup은 미검증

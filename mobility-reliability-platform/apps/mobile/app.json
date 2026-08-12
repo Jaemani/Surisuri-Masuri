@@ -30,6 +30,14 @@
     "plugins": [
       "expo-sqlite",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "수리 전 기기 QR 공개코드를 확인하기 위해 카메라 권한이 필요합니다.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "주행 중 이동 기록을 기기에 저장하기 위해 위치 권한이 필요합니다.",
