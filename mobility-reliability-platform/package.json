@@ -9,6 +9,11 @@
     "check:docs": "node scripts/check-doc-links.mjs",
     "check:firebase": "pnpm --filter @mobility-reliability/firebase-rules test",
     "doctor": "node scripts/doctor.mjs",
-    "test": "pnpm -r --if-present test"
+    "test": "pnpm -r --if-present test",
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
   }
 }
