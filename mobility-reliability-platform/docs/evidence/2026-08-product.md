@@ -128,10 +128,10 @@
 - 시각 증거: `tests/e2e/mobile-web.spec.ts-snapshots/mobile-repairer-submit-review-mobile-chromium-linux.png`
 - 제한: 실제 수리·수리사·복지관·보조금 집행, 현장 분류 타당성, native keyboard/accessibility와 production Firebase는 미검증
 
-# EVD-20260813-13 — field holdout admission 계약
+# EVD-20260813-13 — field holdout·feature admission 계약
 
 - 분류: `LOCAL_TEST`, `CONTRACT_FIXTURE`, `NO_FIELD_DATA`
-- 확인 항목: field_pilot evaluation-only manifest, training/deployment 차단, raw-coordinate field 금지, collection→label freeze→evaluation chronology, 가명 group·trace identity, known-label evaluation eligibility
-- 검증: Node valid/invalid JSON fixture와 Python schema·semantic validator test
+- 확인 항목: field_pilot evaluation-only manifest, training/deployment 차단, raw-coordinate field 금지, collection→label freeze→evaluation chronology, 가명 group·trace identity, known-label eligibility, exact trace·batch·hash linkage, label-free field feature output
+- 검증: Node valid/invalid JSON fixture와 Python schema·semantic·hash·tamper validator test
 - 안전 경계: 오류에는 path/reason만 포함하고 fixture value·좌표를 출력하지 않음
-- 제한: 무작위 fixture만 사용했으며 실제 동의, Android/iPhone trace, server-only consent/artifact 대조, field metric과 ONNX 진입은 미검증
+- 제한: 무작위 fixture와 bridge 검증용 합성 batch만 사용했으며 실제 동의, Android/iPhone trace, server-only consent/artifact 대조, field metric과 ONNX 진입은 미검증

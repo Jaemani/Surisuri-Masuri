@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "quality-field-features.v1",
+  "featureId": "bad",
+  "holdoutId": "field-holdout",
+  "holdoutManifestSha256": "bad",
+  "traceId": "bad",
+  "telemetryBatchId": "bad",
+  "telemetrySha256": "bad",
+  "extractorVersion": "r07-feature-extractor.v1",
+  "extractionStatus": "ok",
+  "reasonCode": "unsupported_source",
+  "features": null,
+  "featureSha256": "bad",
+  "latitude": 37.5
+}

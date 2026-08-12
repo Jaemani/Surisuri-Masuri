@@ -102,7 +102,9 @@ PyTorch는 `pytorch-cpu` explicit index에서 lock한다. CUDA wheel을 WSL 환�
 
 `field_holdout.py`는 실제 동의 field data가 들어올 때 사용할 **평가 전용 manifest**를 검증한다. 입력에는 원본 좌표·경로·Firebase ID·Storage path가 없으며, 학습과 배포 eligibility는 false로 고정한다. frozen training 뒤 수집, label freeze, evaluation window, trace count·identity와 known/review 상태를 fail-closed로 확인한다.
 
-현재 테스트는 contract fixture만 사용하며 실제 field trace, 동의 state, 현장 성능을 증명하지 않는다. field manifest는 `torch_candidate.py`의 synthetic training 입력으로 사용할 수 없다. 세부 운영 경계는 [Field holdout protocol](../../docs/data/FIELD_HOLDOUT_PROTOCOL.md)을 따른다.
+`field_features.py`는 이 manifest에 정확히 연결된 `telemetry-batch.v2`만 공통 numeric extractor에 전달한다. 출력은 별도 `quality-field-features.v1` 계약을 사용하며 좌표·label·split·가명 group·consent digest를 복사하지 않는다. manifest, trace, batch와 canonical hash가 하나라도 다르면 추출을 거부하고, feature record 자체도 hash로 고정한다.
+
+현재 테스트는 contract fixture와 field 계약 bridge 검증용 합성 batch만 사용하며 실제 field trace, 동의 state, 현장 성능을 증명하지 않는다. 합성 training loader도 바뀌지 않았고 field manifest는 `torch_candidate.py`의 학습 입력으로 사용할 수 없다. 세부 운영 경계는 [Field holdout protocol](../../docs/data/FIELD_HOLDOUT_PROTOCOL.md)을 따른다.
 
 ## Split and provenance rules
 

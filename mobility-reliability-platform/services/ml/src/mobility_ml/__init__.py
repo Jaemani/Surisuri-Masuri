@@ -17,6 +17,12 @@ from .features import (
     validate_feature_record_schema,
     verify_feature_hash,
 )
+from .field_features import (
+    FIELD_FEATURE_VERSION,
+    extract_field_feature_record,
+    validate_field_feature_schema,
+    verify_field_feature_hash,
+)
 from .field_holdout import FIELD_HOLDOUT_VERSION, validate_field_holdout
 from .manifest import (
     DATASET_VERSION,
@@ -69,6 +75,10 @@ __all__ = [
     "verify_feature_hash",
     "FIELD_HOLDOUT_VERSION",
     "validate_field_holdout",
+    "FIELD_FEATURE_VERSION",
+    "extract_field_feature_record",
+    "validate_field_feature_schema",
+    "verify_field_feature_hash",
     "METRICS_VERSION",
     "RULE_BASELINE_VERSION",
     "evaluate_frozen_dataset",

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "quality-field-features.v1",
+  "featureId": "123e4567-e89b-42d3-a456-426614174020",
+  "holdoutId": "field-holdout-2026-09-a",
+  "holdoutManifestSha256": "8888888888888888888888888888888888888888888888888888888888888888",
+  "traceId": "123e4567-e89b-42d3-a456-426614174001",
+  "telemetryBatchId": "123e4567-e89b-42d3-a456-426614174002",
+  "telemetrySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "extractorVersion": "r07-feature-extractor.v1",
+  "extractionStatus": "review_required",
+  "reasonCode": "insufficient_samples",
+  "features": null,
+  "featureSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}

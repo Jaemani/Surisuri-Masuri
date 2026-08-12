@@ -16,7 +16,7 @@
     "deploymentEligible": { "const": false },
     "telemetrySchemaVersion": { "const": "telemetry-batch.v2" },
     "labelSchemaVersion": { "const": "quality-label.v1" },
-    "featureSchemaVersion": { "const": "quality-features.v1" },
+    "featureSchemaVersion": { "const": "quality-field-features.v1" },
     "rawCoordinatesIncluded": { "const": false },
     "createdAt": { "type": "string", "format": "date-time" },
     "collectionStartedAt": { "type": "string", "format": "date-time" },
@@ -64,7 +64,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["traceId", "telemetryBatchId", "pseudonymousGroupId", "labelId", "labelState", "expectedLabel", "labelSource", "labelFinalizedAt", "capturedAt", "sampleCount", "telemetrySha256", "featureSha256", "consentProofDigest", "labelEligible", "trainingEligible"],
+        "required": ["traceId", "telemetryBatchId", "pseudonymousGroupId", "labelId", "labelState", "expectedLabel", "labelSource", "labelFinalizedAt", "capturedAt", "sampleCount", "telemetrySha256", "consentProofDigest", "labelEligible", "trainingEligible"],
         "properties": {
           "traceId": { "type": "string", "format": "uuid" },
           "telemetryBatchId": { "type": "string", "format": "uuid" },
@@ -77,7 +77,6 @@
           "capturedAt": { "type": "string", "format": "date-time" },
           "sampleCount": { "type": "integer", "minimum": 1, "maximum": 500 },
           "telemetrySha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-          "featureSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "consentProofDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "labelEligible": { "type": "boolean" },
           "trainingEligible": { "const": false }
