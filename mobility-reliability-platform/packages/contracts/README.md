@@ -24,6 +24,7 @@
 - `quality-field-evaluation-result.v1.schema.json`: 동일한 적격 field feature cohort에서 frozen rules와 frozen PyTorch 후보를 비교한 평가 전용 결과. cohort reconciliation, 두 predictor의 count, abstain, trace별 label/prediction을 기록하되 가명 group·동의 digest·feature 값·원본 위치를 허용하지 않고 학습·배포는 false/defer로 고정한다.
 - `quality-features.v1.schema.json`: 하나의 trace에서 추출한 coordinate-free numeric feature와 trace/batch/dataset/feature hash lineage. strict named fields만 허용하며 raw latitude/longitude, PII, label, prediction은 계약상 허용하지 않는다. 추출 실패는 value-free `reasonCode`와 `review_required` 상태로 표현한다.
 - `quality-baseline-result.v1.schema.json`: `quality-features.v1`와 분리된 synthetic-only rules baseline 결과. split별/전체 metric, 네 known class와 `unknown_review_required` confusion matrix, prediction·abstain·feature hash를 strict하게 기록한다.
+- `reliability-baseline-result.v1.schema.json`: R10 time-to-inspection baseline 결과의 synthetic-only contract. `device-group-time-holdout.v1` 시간창·leakage flag·counts reconciliation, fixed interval·cumulative distance·Kaplan–Meier 방법과 component별 `data_insufficient` abstention을 기록하며 `deploymentAuthorized=false`와 `deploymentDecision=defer`를 고정한다. 실제 event/censoring 데이터·성능·field/production 배포를 의미하지 않는다.
 
 R07-B1에서는 규칙 baseline 결과를 이 feature contract에 넣지 않는다. baseline output이
 추가될 때는 별도 versioned result schema와 lineage/evaluation contract로 분리한다.

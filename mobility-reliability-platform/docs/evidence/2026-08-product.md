@@ -1,5 +1,17 @@
 # 2026년 8월 제품 증거
 
+## EVD-20260813-021 — reliability baseline time-split·censoring·abstention contract
+
+- 생성: 2026-08-13 / Codex 작업 실행
+- 환경·데이터: local / synthetic / contract fixture
+- 출처: `reliability-baseline-result.v1.schema.json`, valid/invalid fixture, `packages/contracts/scripts/validate-fixtures.mjs`
+- 상태: generated / 사람 검토 대기
+- 확인 항목: synthetic-only 범위, `device-group-time-holdout.v1`과 세 시간창, leakage flag, counts reconciliation flag, fixed interval·누적거리·Kaplan–Meier 구조, component abstention, `deploymentAuthorized=false`/`deploymentDecision=defer`, raw coordinate·field/training/deployment claim 차단
+- 검증: `rtk pnpm --filter @mobility-reliability/contracts test` — 전체 36개 fixture case 통과, reliability baseline valid 1개·invalid 1개 포함
+- privacy·안전 경계: raw GPS·좌표·PII를 허용하지 않으며 부품 linkage 없는 상태 추정을 계약 결과로 만들지 않음
+- 현재 증명하지 않는 것: 실제 수리·주행 export, event/censoring 산출, risk curve·calibration·confidence interval, 부품별 성능, field·production 사용과 배포
+- 사용처: [ADR-0055](../decisions/ADR-0055-reliability-baseline-result-contract.md), [UPD-20260813-25](../product-updates/UPD-20260813-25-reliability-baseline-result-contract.md), [R10](../reports/fixed/2026-09-30.md)
+
 ## EVD-20260813-020 — legacy repair→device-state event local dry-run bridge
 
 - 생성: 2026-08-13 / Codex 작업 실행
