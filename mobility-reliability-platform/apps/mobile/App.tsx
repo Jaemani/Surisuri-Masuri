@@ -15,7 +15,7 @@ import {
 import { BottomNavigation, colors } from './src/product/components/ProductUi';
 import { createProductRepository } from './src/product/repository';
 import { useProductData } from './src/product/useProductData';
-import type { UserTab } from './src/product/types';
+import type { CreateRepairRequestInput, UserTab } from './src/product/types';
 
 const productRepository = createProductRepository();
 
@@ -57,7 +57,7 @@ export default function App() {
   }
 
   const openRepairs = () => setActiveTab('repairs');
-  const createRequest = () => void product.createRepairRequest({ title: '오른쪽 바퀴에서 소리가 나요' });
+  const createRequest = (input: CreateRepairRequestInput) => product.createRepairRequest(input);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -76,7 +76,7 @@ export default function App() {
             onOpenRepairs={openRepairs}
           />
         ) : activeTab === 'repairs' ? (
-          <UserRepairScreen request={view.repairRequest} onCreateRequest={createRequest} />
+          <UserRepairScreen isDemo={view.isDemo} request={view.repairRequest} onCreateRequest={createRequest} onRefresh={product.refresh} />
         ) : activeTab === 'device' ? (
           <UserDeviceScreen device={view.device} onOpenRepairs={openRepairs} />
         ) : activeTab === 'support' ? (

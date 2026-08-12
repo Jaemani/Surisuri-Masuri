@@ -5,6 +5,8 @@ import {
   type DeviceRecord,
   type LedgerEntry,
   type RepairRecord,
+  type RepairAdvanceCommand,
+  type RepairTransitionResult,
   type UserRecord,
   type WorkflowStage,
 } from './data/productOperationsRepository'
@@ -60,6 +62,9 @@ const pageTitles: Record<PageKey, { title: string; eyebrow: string; description:
 const workflowLabels: Record<WorkflowStage, string> = { new: '새 요청', assigned: '파트너 배정', submitted: '수리 제출', verified: '센터 검증' }
 const workflowOrder: WorkflowStage[] = ['new', 'assigned', 'submitted', 'verified']
 
+type RepairAdvanceDetails = Pick<RepairAdvanceCommand, 'repairStationId' | 'repairerFirebaseUid' | 'note'>
+type AdvanceRepair = (repairId: string, details?: RepairAdvanceDetails) => Promise<RepairTransitionResult>
+
 function StatusPill({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'muted' }) {
   return <span className={`status-pill ${tone}`}>{children}</span>
 }
@@ -107,11 +112,32 @@ function App() {
   const filteredUsers = useMemo(() => users.filter((user) => `${user.name}${user.code}${user.device}`.toLowerCase().includes(search.toLowerCase())), [search])
 
   const navigate = (nextPage: PageKey) => { setPage(nextPage); setSidebarOpen(false); setSearch('') }
-  const advanceRepair = () => {
+  const advanceRepair: AdvanceRepair = async (repairId, details) => {
+    const result = await repository.advanceRepair({
+      type: 'repair.advance',
+      repairId,
+      actorId: 'console-demo-operator',
+      ...details,
+    })
+    setRepairs(result.repairs)
+    setLedger(result.ledger)
+    return result
+  }
+
+  const refreshRepairProjection = async () => {
+    const [nextRepairs, nextLedger] = await Promise.all([repository.listRepairs(), repository.listLedger()])
+    setRepairs(nextRepairs)
+    setLedger(nextLedger)
+  }
+
+  const handleDashboardAdvance = () => {
     if (!activeRepair) return
-    void repository.advanceRepair({ type: 'repair.advance', repairId: activeRepair.id, actorId: 'console-demo-operator' }).then((result) => {
-      setRepairs(result.repairs)
-      setLedger(result.ledger)
+    if (activeRepair.stage === 'verified') return
+    if (activeRepair.stage === 'new' || activeRepair.stage === 'assigned' || activeRepair.stage === 'submitted') {
+      setPage('repairs')
+      return
+    }
+    void advanceRepair(activeRepair.id).then((result) => {
       notify(result.nextStage ? `${activeRepair.id} · ${workflowLabels[result.nextStage]} 단계로 이동했습니다.` : '이미 센터 검증이 완료된 요청입니다.')
     }).catch((error: unknown) => notify(error instanceof Error ? error.message : '수리 요청을 변경하지 못했습니다.'))
   }
@@ -135,7 +161,7 @@ function App() {
       <header className="topbar"><button className="mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="메뉴 열기"><span /><span /><span /></button><div className="breadcrumb"><span>서울서부 복지관</span><Icon name="chevron" size={14} /><strong>{pageTitles[page].title}</strong></div><div className="top-actions"><button className="icon-button search-toggle" aria-label="검색"><Icon name="search" size={19} /></button><div className="notification"><button className="icon-button" aria-label="알림"><Icon name="bell" size={19} /></button><span /></div><div className="top-divider" /><div className="top-user"><Avatar name="김" color="navy" /><span>김은정</span><Icon name="chevron" size={14} /></div></div></header>
       <div className="content-wrap">
         <div className="demo-banner"><div className="banner-symbol"><Icon name="shield" size={18} /></div><div><strong>데모 환경 · 합성 데이터</strong><span>화면에 표시되는 이용자·기기·금액은 모두 실제 운영 데이터가 아닌 시연용 데이터입니다.</span></div><button onClick={() => notify('데모 환경 안내를 확인했습니다.')}>확인</button></div>
-        {page === 'home' ? <Dashboard data={dashboard} activeRepair={activeRepair} repairs={repairs} ledger={ledger} selectedRepair={selectedRepair} setSelectedRepair={setSelectedRepair} onAdvance={advanceRepair} onNavigate={navigate} notify={notify} /> : <GenericPage page={page} search={search} setSearch={setSearch} users={filteredUsers} devices={devices} repairs={repairs} ledger={ledger} onNavigate={navigate} notify={notify} />}
+        {page === 'home' ? <Dashboard data={dashboard} activeRepair={activeRepair} repairs={repairs} ledger={ledger} selectedRepair={selectedRepair} setSelectedRepair={setSelectedRepair} onAdvance={handleDashboardAdvance} onNavigate={navigate} notify={notify} /> : <GenericPage page={page} search={search} setSearch={setSearch} users={filteredUsers} devices={devices} repairs={repairs} ledger={ledger} onAdvance={advanceRepair} onRefresh={refreshRepairProjection} onNavigate={navigate} notify={notify} />}
       </div>
     </main>
     {toast && <div className="toast"><span className="toast-check"><Icon name="check" size={14} /></span>{toast}</div>}
@@ -152,7 +178,7 @@ function Dashboard({ data, activeRepair, repairs, ledger, selectedRepair, setSel
     <div className="metric-grid">{data.metrics.map((metric) => <Metric key={metric.label} {...metric} onClick={() => onNavigate(metric.icon === 'repair' ? 'repairs' : metric.icon === 'check' ? 'inspections' : metric.icon === 'money' ? 'subsidy' : 'system')} />)}</div>
     <div className="dashboard-grid top-grid"><section className="panel attention-panel"><SectionHeading title="지금 확인이 필요한 일" action="전체 보기" onAction={() => onNavigate('repairs')} /><div className="attention-list">{data.attention.map((item) => <Attention key={item.title} {...item} onClick={() => onNavigate(item.destination)} />)}</div></section><section className="panel week-panel"><SectionHeading title="이번 주 운영 현황" action="보고서 보기" onAction={() => onNavigate('reports')} /><div className="week-chart"><div className="chart-y"><span>12</span><span>8</span><span>4</span><span>0</span></div><div className="chart-area"><div className="grid-line line-1" /><div className="grid-line line-2" /><div className="grid-line line-3" /><div className="bars">{data.weeklyBars.map((bar) => <Bar key={bar.day} {...bar} />)}</div></div></div><div className="chart-legend"><span><i className="legend-dot completed" />처리 완료</span><span><i className="legend-dot pending" />처리 대기</span><strong>{data.weeklyChange} <small>지난주 대비</small></strong></div></section></div>
     <section className="panel workflow-panel"><div className="workflow-heading"><div><SectionHeading title="수리 요청 진행 현황" action="수리 운영 열기" onAction={() => onNavigate('repairs')} /><p>접수부터 센터 검증까지, 한 건의 흐름을 놓치지 않도록 관리하세요.</p></div><button className="ghost-button" onClick={() => notify('필터: 최근 30일을 적용했습니다.')}>최근 30일 <Icon name="chevron" size={14} /></button></div><div className="workflow-board">{workflowOrder.map((stage) => <div className={`workflow-column ${stage === activeRepair.stage ? 'selected-column' : ''}`} key={stage}><div className="column-title"><span className={`column-marker ${stage}`} />{workflowLabels[stage]}<b>{repairs.filter((repair) => repair.stage === stage).length}</b></div>{repairs.filter((repair) => repair.stage === stage).map((repair) => <button className={`repair-card ${selectedRepair === repair.id ? 'selected' : ''}`} key={repair.id} onClick={() => setSelectedRepair(repair.id)}><div className="repair-card-top"><span>{repair.id}</span><StatusPill tone={repair.priority === '높음' ? 'danger' : repair.priority === '낮음' ? 'muted' : 'neutral'}>{repair.priority}</StatusPill></div><strong>{repair.issue}</strong><div className="repair-person"><Avatar name={repair.user} color={repair.user === '박정호' ? 'blue' : repair.user === '이경자' ? 'lilac' : 'mint'} /><span>{repair.user}</span><small>{repair.request}</small></div><div className="repair-card-footer"><span>{repair.partner === '미배정' ? <em className="unassigned">파트너 미배정</em> : repair.partner}</span><span>{repair.amount}</span></div></button>)}</div>)}</div></section>
-    <div className="dashboard-grid bottom-grid"><section className="panel selected-panel"><SectionHeading title="선택한 요청" action="상세 보기" onAction={() => onNavigate('repairs')} /><div className="selected-summary"><div className="selected-title"><div className="request-avatar"><Icon name="repair" size={20} /></div><div><div className="request-id">{activeRepair.id} <StatusPill tone={activeRepair.stage === 'verified' ? 'success' : 'warning'}>{workflowLabels[activeRepair.stage]}</StatusPill></div><h3>{activeRepair.issue}</h3><p>{activeRepair.user} · {activeRepair.device}</p></div></div><div className="stage-line">{workflowOrder.map((stage, index) => <div className={`stage-step ${workflowOrder.indexOf(activeRepair.stage) >= index ? 'done' : ''}`} key={stage}><span>{workflowOrder.indexOf(activeRepair.stage) > index ? '✓' : index + 1}</span><small>{workflowLabels[stage]}</small>{index < workflowOrder.length - 1 && <i />}</div>)}</div><div className="action-row"><button className="primary-button compact" onClick={onAdvance}>{activeRepair.stage === 'new' ? '파트너 배정하기' : activeRepair.stage === 'assigned' ? '수리 제출 확인' : activeRepair.stage === 'submitted' ? '센터 검증 완료' : '검증 완료됨'} <Icon name="arrow" size={15} /></button><button className="icon-button bordered" aria-label="더 보기" onClick={() => notify('감사 로그와 요청 메모를 준비 중입니다.')}><Icon name="more" size={18} /></button></div></div></section><section className="panel ledger-panel"><SectionHeading title="최근 지원금 원장" action="전체 원장" onAction={() => onNavigate('subsidy')} /><div className="ledger-list">{ledger.map((item) => <div className="ledger-row" key={item.id}><div className="ledger-date">{item.date}<small>{item.id}</small></div><div className="ledger-main"><strong>{item.item}</strong><span>{item.user} · {item.actor}</span></div><div className="ledger-amount"><strong>{item.amount}</strong><StatusPill tone={item.state === '예약' ? 'warning' : item.state === '집행 완료' ? 'success' : 'muted'}>{item.state}</StatusPill></div></div>)}</div><div className="ledger-foot"><span>이번 달 누적 집행</span><strong>₩2,480,000 <small>/ ₩4,000,000</small></strong></div></section></div>
+    <div className="dashboard-grid bottom-grid"><section className="panel selected-panel"><SectionHeading title="선택한 요청" action="상세 보기" onAction={() => onNavigate('repairs')} /><div className="selected-summary"><div className="selected-title"><div className="request-avatar"><Icon name="repair" size={20} /></div><div><div className="request-id">{activeRepair.id} <StatusPill tone={activeRepair.stage === 'verified' ? 'success' : 'warning'}>{workflowLabels[activeRepair.stage]}</StatusPill></div><h3>{activeRepair.issue}</h3><p>{activeRepair.user} · {activeRepair.device}</p></div></div><div className="stage-line">{workflowOrder.map((stage, index) => <div className={`stage-step ${workflowOrder.indexOf(activeRepair.stage) >= index ? 'done' : ''}`} key={stage}><span>{workflowOrder.indexOf(activeRepair.stage) > index ? '✓' : index + 1}</span><small>{workflowLabels[stage]}</small>{index < workflowOrder.length - 1 && <i />}</div>)}</div><div className="action-row"><button className="primary-button compact" onClick={onAdvance} disabled={activeRepair.stage === 'verified'}>{activeRepair.stage === 'new' ? '파트너 배정하기' : activeRepair.stage === 'assigned' ? '수리사 처리 대기' : activeRepair.stage === 'submitted' ? '센터 검증 정보 입력' : '검증 완료됨'} {activeRepair.stage !== 'assigned' && activeRepair.stage !== 'verified' && <Icon name="arrow" size={15} />}</button><button className="icon-button bordered" aria-label="더 보기" onClick={() => notify('감사 로그와 요청 메모를 준비 중입니다.')}><Icon name="more" size={18} /></button></div></div></section><section className="panel ledger-panel"><SectionHeading title="최근 지원금 원장" action="전체 원장" onAction={() => onNavigate('subsidy')} /><div className="ledger-list">{ledger.map((item) => <div className="ledger-row" key={item.id}><div className="ledger-date">{item.date}<small>{item.id}</small></div><div className="ledger-main"><strong>{item.item}</strong><span>{item.user} · {item.actor}</span></div><div className="ledger-amount"><strong>{item.amount}</strong><StatusPill tone={item.state === '예약' ? 'warning' : item.state === '집행 완료' ? 'success' : 'muted'}>{item.state}</StatusPill></div></div>)}</div><div className="ledger-foot"><span>이번 달 누적 집행</span><strong>₩2,480,000 <small>/ ₩4,000,000</small></strong></div></section></div>
   </>
 }
 
@@ -168,9 +194,9 @@ function Bar({ day, value, active = false, muted = false }: { day: string; value
   return <div className="bar-group"><div className={`bar ${active ? 'active' : ''} ${muted ? 'muted' : ''}`} style={{ height: `${Math.max(value * 8, 9)}%` }}><span>{value}</span></div><small>{day}</small></div>
 }
 
-function GenericPage({ page, search, setSearch, users: filteredUsers, devices, repairs, ledger, onNavigate, notify }: { page: PageKey; search: string; setSearch: (value: string) => void; users: UserRecord[]; devices: DeviceRecord[]; repairs: RepairRecord[]; ledger: LedgerEntry[]; onNavigate: (page: PageKey) => void; notify: (message: string) => void }) {
+function GenericPage({ page, search, setSearch, users: filteredUsers, devices, repairs, ledger, onAdvance, onRefresh, onNavigate, notify }: { page: PageKey; search: string; setSearch: (value: string) => void; users: UserRecord[]; devices: DeviceRecord[]; repairs: RepairRecord[]; ledger: LedgerEntry[]; onAdvance: AdvanceRepair; onRefresh: () => Promise<void>; onNavigate: (page: PageKey) => void; notify: (message: string) => void }) {
   const meta = pageTitles[page]
-  if (page === 'repairs') return <RepairOperations repairs={repairs} onNavigate={onNavigate} notify={notify} />
+  if (page === 'repairs') return <RepairOperations repairs={repairs} onAdvance={onAdvance} onRefresh={onRefresh} onNavigate={onNavigate} />
   if (page === 'subsidy') return <SubsidyPage ledger={ledger} notify={notify} />
   const action = page === 'users' ? '이용자 등록' : page === 'devices' ? '기기 등록' : page === 'partners' ? '파트너 추가' : page === 'reports' ? '새 보고서' : undefined
   return <><div className="page-intro inner"><div><p className="eyebrow">{meta.eyebrow}</p><h1>{meta.title}</h1><p className="intro-copy">{meta.description}</p></div><div className="intro-actions">{action && <button className="primary-button" onClick={() => notify(`${action} 기능은 데모에서 준비 중입니다.`)}><span>＋</span> {action}</button>}</div></div><div className="toolbar"><div className="search-field"><Icon name="search" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`${meta.title} 검색`} /></div><button className="filter-button" onClick={() => notify('필터 메뉴를 열었습니다.')}>필터 <span>⌄</span></button><button className="filter-button" onClick={() => notify('내보내기 준비 중입니다.')}>내보내기 <Icon name="arrow" size={14} /></button></div>{page === 'users' ? <UsersTable users={filteredUsers} notify={notify} /> : page === 'devices' ? <DevicesTable devices={devices} notify={notify} /> : page === 'inspections' ? <InspectionsTable notify={notify} /> : page === 'partners' ? <PartnersTable notify={notify} /> : page === 'reports' ? <ReportsTable notify={notify} /> : <SystemStatus notify={notify} />}</>
@@ -208,10 +234,108 @@ function SystemStatus({ notify }: { notify: (message: string) => void }) {
   return <div className="system-grid"><section className="panel system-panel"><SectionHeading title="서비스 상태" action="새로고침" onAction={() => notify('서비스 상태를 새로고침했습니다.')} />{services.map((service) => <div className="service-row" key={service.name}><div className="service-status"><span className={`pulse ${service.tone}`} /><div><strong>{service.name}</strong><span>{service.detail}</span></div></div><strong className="service-value">{service.value}</strong><StatusPill tone={service.tone as 'success' | 'warning'}>{service.status}</StatusPill><Icon name="chevron" size={16} /></div>)}</section><section className="panel privacy-panel"><div className="privacy-art"><Icon name="shield" size={26} /></div><p className="eyebrow">PRIVACY BY DEFAULT</p><h2>원본 이동경로는<br />기본 화면에 표시하지 않아요.</h2><p>콘솔에는 집계·위험 근거·데이터 품질·운영 상태만 표시됩니다. 원본 위치는 목적 제한된 접근과 감사 로그를 거칩니다.</p><button className="text-button" onClick={() => notify('개인정보 보호 원칙을 확인했습니다.')}>보호 원칙 보기 <Icon name="arrow" size={15} /></button></section></div>
 }
 
-function RepairOperations({ repairs, onNavigate, notify }: { repairs: RepairRecord[]; onNavigate: (page: PageKey) => void; notify: (message: string) => void }) {
-  const [selected, setSelected] = useState(repairs[0].id)
+const syntheticRepairStations = [
+  { id: 'station-hanmaeum', label: '한마음 모빌리티 · 합성 station-hanmaeum' },
+  { id: 'station-carewheel', label: '케어휠 수리소 · 합성 station-carewheel' },
+  { id: 'station-western', label: '서부 보장구 센터 · 합성 station-western' },
+]
+
+const syntheticRepairers = [
+  { uid: 'demo-repairer-kim', label: '김도현 · 합성 demo-repairer-kim' },
+  { uid: 'demo-repairer-jang', label: '장유진 · 합성 demo-repairer-jang' },
+  { uid: 'demo-repairer-lee', label: '이재훈 · 합성 demo-repairer-lee' },
+]
+
+type RepairCommandState = { status: 'idle' | 'submitting' | 'success' | 'error'; message?: string; conflict?: boolean }
+
+const repairCommandError = (error: unknown) => {
+  if (!(error instanceof Error)) return '수리 요청을 변경하지 못했습니다. 다시 확인해 주세요.'
+  if (error.message.includes('REVISION_CONFLICT')) return '다른 담당자가 먼저 변경했습니다. 최신 상태를 새로고침한 뒤 다시 시도해 주세요.'
+  return error.message || '수리 요청을 변경하지 못했습니다. 다시 확인해 주세요.'
+}
+
+function RepairOperations({ repairs, onAdvance, onRefresh, onNavigate }: { repairs: RepairRecord[]; onAdvance: AdvanceRepair; onRefresh: () => Promise<void>; onNavigate: (page: PageKey) => void }) {
+  const [selected, setSelected] = useState(repairs[0]?.id ?? '')
+  const [assignmentDraft, setAssignmentDraft] = useState({ repairStationId: '', repairerFirebaseUid: '', note: '' })
+  const [reviewNote, setReviewNote] = useState('')
+  const [verification, setVerification] = useState({ repair: false, amount: false, eligibility: false })
+  const [commandState, setCommandState] = useState<RepairCommandState>({ status: 'idle' })
   const repair = repairs.find((item) => item.id === selected) ?? repairs[0]
-  return <><div className="page-intro inner"><div><p className="eyebrow">{pageTitles.repairs.eyebrow}</p><h1>수리 운영</h1><p className="intro-copy">새 요청을 놓치지 않고, 지원금 집행까지 한 흐름으로 기록합니다.</p></div><div className="intro-actions"><button className="ghost-button" onClick={() => onNavigate('subsidy')}><Icon name="money" size={16} /> 지원금 원장</button><button className="primary-button" onClick={() => notify('새 수리 요청 작성 화면은 데모에서 준비 중입니다.')}><span>＋</span> 새 수리 요청</button></div></div><div className="repair-layout"><section className="panel repair-list-panel"><div className="panel-title-row"><div><h2>전체 수리 요청</h2><p>최근 업데이트 순 · 7건 처리 대기</p></div><button className="filter-button">모든 상태 <span>⌄</span></button></div><div className="repair-list">{repairs.map((item) => <button className={`repair-list-row ${selected === item.id ? 'selected' : ''}`} key={item.id} onClick={() => setSelected(item.id)}><div className={`request-stage-dot ${item.stage}`} /><div className="repair-list-main"><div><strong>{item.issue}</strong><StatusPill tone={item.priority === '높음' ? 'danger' : 'neutral'}>{item.priority}</StatusPill></div><span>{item.id} · {item.user} · {item.device}</span></div><div className="repair-list-state"><strong>{workflowLabels[item.stage]}</strong><span>{item.request}</span></div><Icon name="chevron" size={16} /></button>)}</div></section><section className="panel repair-detail-panel"><div className="detail-kicker"><span>REQUEST DETAIL</span><button className="row-more" onClick={() => notify('감사 로그를 열었습니다.')}><Icon name="more" size={18} /></button></div><div className="detail-title"><div className="request-avatar large"><Icon name="repair" size={22} /></div><div><p>{repair.id}</p><h2>{repair.issue}</h2><span>{repair.request} 접수 · {repair.user}</span></div></div><div className="detail-block"><h3>진행 단계</h3><div className="detail-timeline">{workflowOrder.map((stage, index) => <div className={`detail-stage ${workflowOrder.indexOf(repair.stage) >= index ? 'done' : ''}`} key={stage}><span>{workflowOrder.indexOf(repair.stage) > index ? '✓' : index + 1}</span><div><strong>{workflowLabels[stage]}</strong><small>{stage === 'new' ? '센터 요청 접수됨' : stage === 'assigned' ? `파트너 · ${repair.partner}` : stage === 'submitted' ? '수리 결과 및 비용 제출됨' : '담당자 검증 및 예약 완료'}</small></div></div>)}</div></div><div className="detail-block"><h3>지원금 예약</h3><div className="reserve-box"><div><span>예상 집행 금액</span><strong>{repair.amount}</strong></div><StatusPill tone={repair.stage === 'verified' ? 'success' : 'warning'}>{repair.stage === 'verified' ? '집행 완료' : '예약 대기'}</StatusPill></div></div><div className="detail-actions"><button className="primary-button" onClick={() => notify(repair.stage === 'verified' ? '이미 검증이 완료된 요청입니다.' : `${repair.id} 다음 단계 작업을 시작했습니다.`)}>{repair.stage === 'new' ? '파트너 배정하기' : repair.stage === 'assigned' ? '수리 제출 확인' : repair.stage === 'submitted' ? '센터 검증 완료' : '검증 완료'} <Icon name="arrow" size={15} /></button><button className="ghost-button" onClick={() => notify('요청 메모를 준비 중입니다.')}>메모 남기기</button></div></section></div></>
+
+  useEffect(() => {
+    if (repairs.length && !repairs.some((item) => item.id === selected)) setSelected(repairs[0].id)
+  }, [repairs, selected])
+
+  useEffect(() => {
+    setAssignmentDraft({ repairStationId: '', repairerFirebaseUid: '', note: '' })
+    setReviewNote('')
+    setVerification({ repair: false, amount: false, eligibility: false })
+    setCommandState({ status: 'idle' })
+  }, [repair?.id])
+
+  if (!repair) return <div className="panel empty-state">표시할 수리 요청이 없습니다.</div>
+
+  const isBusy = commandState.status === 'submitting'
+  const submitAdvance = async (details?: RepairAdvanceDetails) => {
+    if (isBusy) return
+    setCommandState({ status: 'submitting', message: '서버에 변경을 요청하는 중입니다…' })
+    try {
+      const result = await onAdvance(repair.id, details)
+      setCommandState({ status: 'success', message: result.nextStage ? `${workflowLabels[result.nextStage]} 단계로 변경되었습니다.` : '변경 결과를 확인했습니다.' })
+    } catch (error) {
+      const message = repairCommandError(error)
+      setCommandState({ status: 'error', message, conflict: message.includes('새로고침') })
+    }
+  }
+
+  const refreshAfterConflict = async () => {
+    setCommandState({ status: 'submitting', message: '최신 projection을 불러오는 중입니다…' })
+    try {
+      await onRefresh()
+      setCommandState({ status: 'idle', message: '최신 상태를 불러왔습니다. 명령을 다시 제출해 주세요.' })
+    } catch (error) {
+      setCommandState({ status: 'error', message: repairCommandError(error), conflict: true })
+    }
+  }
+
+  const actionForm = repair.stage === 'new'
+    ? <form className="repair-command-form" onSubmit={(event) => { event.preventDefault(); void submitAdvance(assignmentDraft) }}>
+      <div className="command-form-heading"><div><h3>파트너 배정</h3><p>수리소와 담당 수리사를 선택하면 접수된 요청을 배정합니다.</p></div><StatusPill tone="warning">필수 입력</StatusPill></div>
+      <div className="form-grid">
+        <label htmlFor="repair-station">수리소 ID <span>(합성)</span></label>
+        <select id="repair-station" value={assignmentDraft.repairStationId} onChange={(event) => setAssignmentDraft({ ...assignmentDraft, repairStationId: event.target.value })} required aria-describedby="assignment-help">
+          <option value="">수리소를 선택하세요</option>
+          {syntheticRepairStations.map((station) => <option key={station.id} value={station.id}>{station.label}</option>)}
+        </select>
+        <label htmlFor="repairer-uid">담당 수리사 Firebase UID <span>(합성)</span></label>
+        <select id="repairer-uid" value={assignmentDraft.repairerFirebaseUid} onChange={(event) => setAssignmentDraft({ ...assignmentDraft, repairerFirebaseUid: event.target.value })} required aria-describedby="assignment-help">
+          <option value="">담당 수리사를 선택하세요</option>
+          {syntheticRepairers.map((repairer) => <option key={repairer.uid} value={repairer.uid}>{repairer.label}</option>)}
+        </select>
+      </div>
+      <label className="full-field" htmlFor="assignment-note">배정 메모 <span>(선택)</span></label>
+      <textarea id="assignment-note" value={assignmentDraft.note} onChange={(event) => setAssignmentDraft({ ...assignmentDraft, note: event.target.value })} placeholder="방문 일정이나 전달 사항을 남겨 주세요." rows={2} />
+      <p className="form-help" id="assignment-help">실제 운영에서는 서버가 권한과 수리소·수리사 연결을 다시 확인합니다.</p>
+      <button className="primary-button" type="submit" disabled={isBusy || !assignmentDraft.repairStationId || !assignmentDraft.repairerFirebaseUid} aria-busy={isBusy}>{isBusy ? '배정 요청 중…' : '파트너 배정하기'} <Icon name="arrow" size={15} /></button>
+    </form>
+    : repair.stage === 'assigned'
+      ? <div className="repair-command-form completed-command"><div className="command-form-heading"><div><h3>수리사 처리 대기</h3><p><strong>{repair.partner}</strong>에 배정되었습니다. 수리 제출과 작업 상태 변경은 수리사가 수행합니다.</p></div><StatusPill tone="info">운영자 읽기 전용</StatusPill></div><div className="completion-note pending-note"><Icon name="repair" size={15} /> 수리사가 작업을 완료하면 제출된 수리 결과와 청구 금액을 이 화면에서 확인할 수 있습니다.</div></div>
+      : repair.stage === 'submitted'
+        ? <form className="repair-command-form" onSubmit={(event) => { event.preventDefault(); void submitAdvance({ note: reviewNote }) }}>
+          <div className="command-form-heading"><div><h3>센터 검증 · 합성 데모</h3><p>제출된 수리 결과와 비용을 확인한 뒤, 합성 데모 projection에 검증을 기록합니다.</p></div><StatusPill tone="warning">필수 확인</StatusPill></div>
+          <div className="submission-summary" aria-label="수리 제출 요약"><span>제출 파트너 <strong>{repair.partner}</strong></span><span>청구 금액 <strong>{repair.amount}</strong></span><span>제출 상태 <strong>수리 결과 및 비용 제출됨</strong></span></div>
+          <fieldset className="verification-list"><legend>검증 체크리스트</legend>
+            <label className="check-field"><input type="checkbox" checked={verification.repair} onChange={(event) => setVerification({ ...verification, repair: event.target.checked })} /> <span>수리 결과를 확인했습니다.</span></label>
+            <label className="check-field"><input type="checkbox" checked={verification.amount} onChange={(event) => setVerification({ ...verification, amount: event.target.checked })} /> <span>청구 금액을 확인했습니다.</span></label>
+            <label className="check-field"><input type="checkbox" checked={verification.eligibility} onChange={(event) => setVerification({ ...verification, eligibility: event.target.checked })} /> <span>지원금 적격성을 확인했습니다.</span></label>
+          </fieldset>
+          <label className="full-field" htmlFor="verification-note">검증 메모 <span>(선택)</span></label>
+          <textarea id="verification-note" value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="검증 근거를 남겨 주세요." rows={2} />
+          <button className="primary-button" type="submit" disabled={isBusy || !verification.repair || !verification.amount || !verification.eligibility} aria-busy={isBusy}>{isBusy ? '검증 요청 중…' : '센터 검증 완료'} <Icon name="arrow" size={15} /></button>
+        </form>
+        : <div className="repair-command-form completed-command"><div className="command-form-heading"><div><h3>센터 검증 완료</h3><p>이 요청은 검증이 완료되어 운영자 화면에서 추가 상태 변경을 할 수 없습니다.</p></div><StatusPill tone="success">완료</StatusPill></div><div className="completion-note"><Icon name="check" size={15} /> 합성 데모 projection 기준 revision {repair.revision}의 완료 상태입니다.</div></div>
+
+  return <><div className="page-intro inner"><div><p className="eyebrow">{pageTitles.repairs.eyebrow}</p><h1>수리 운영</h1><p className="intro-copy">합성 데모 흐름에서 접수·배정·제출·검증을 단계별로 확인합니다. 실제 운영 명령은 인증된 도메인 API 결과만 반영합니다.</p></div><div className="intro-actions"><button className="ghost-button" onClick={() => onNavigate('subsidy')}><Icon name="money" size={16} /> 지원금 원장</button></div></div><div className="repair-layout"><section className="panel repair-list-panel"><div className="panel-title-row"><div><h2>전체 수리 요청</h2><p>최근 업데이트 순 · {repairs.length}건 표시</p></div><span className="projection-note">합성 projection · revision 포함</span></div><div className="repair-list">{repairs.map((item) => <button className={`repair-list-row ${selected === item.id ? 'selected' : ''}`} key={item.id} onClick={() => setSelected(item.id)} aria-pressed={selected === item.id}><div className={`request-stage-dot ${item.stage}`} /><div className="repair-list-main"><div><strong>{item.issue}</strong><StatusPill tone={item.priority === '높음' ? 'danger' : 'neutral'}>{item.priority}</StatusPill></div><span>{item.id} · {item.user} · {item.device}</span></div><div className="repair-list-state"><strong>{workflowLabels[item.stage]}</strong><span>{item.request}</span></div><Icon name="chevron" size={16} /></button>)}</div></section><section className="panel repair-detail-panel"><div className="detail-kicker"><span>SYNTHETIC DEMO · REVISION {repair.revision}</span><button className="row-more" aria-label="지원금 원장 열기" onClick={() => onNavigate('subsidy')}><Icon name="money" size={17} /></button></div><div className="detail-title"><div className="request-avatar large"><Icon name="repair" size={22} /></div><div><p>{repair.id}</p><h2>{repair.issue}</h2><span>{repair.request} 접수 · {repair.user}</span></div></div><div className="detail-block"><h3>진행 단계</h3><div className="detail-timeline">{workflowOrder.map((stage, index) => <div className={`detail-stage ${workflowOrder.indexOf(repair.stage) >= index ? 'done' : ''}`} key={stage}><span>{workflowOrder.indexOf(repair.stage) > index ? '✓' : index + 1}</span><div><strong>{workflowLabels[stage]}</strong><small>{stage === 'new' ? '센터 요청 접수됨' : stage === 'assigned' ? `파트너 · ${repair.partner}` : stage === 'submitted' ? '수리 결과 및 비용 제출됨' : '담당자 검증 및 예약 완료'}</small></div></div>)}</div></div><div className="detail-block"><h3>지원금 예약</h3><div className="reserve-box"><div><span>예상 집행 금액 · 읽기 전용</span><strong>{repair.amount}</strong></div><StatusPill tone={repair.stage === 'verified' ? 'success' : 'warning'}>{repair.stage === 'verified' ? '집행 완료' : '예약 대기'}</StatusPill></div></div>{actionForm}{commandState.message && <div className={`command-feedback ${commandState.status}`} role={commandState.status === 'error' ? 'alert' : 'status'} aria-live="polite">{commandState.message}{commandState.conflict && <button className="ghost-button refresh-command" type="button" onClick={() => void refreshAfterConflict()} disabled={isBusy}>새로고침</button>}</div>}</section></div></>
 }
 
 function SubsidyPage({ notify, ledger }: { notify: (message: string) => void; ledger: LedgerEntry[] }) {

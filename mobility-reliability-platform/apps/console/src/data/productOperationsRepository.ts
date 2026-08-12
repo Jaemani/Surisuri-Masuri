@@ -119,6 +119,10 @@ export type RepairAdvanceCommand = {
   type: 'repair.advance'
   repairId: string
   actorId: string
+  /** Optional demo-only context collected by the stage-aware console form. */
+  repairStationId?: string
+  repairerFirebaseUid?: string
+  note?: string
 }
 
 export type DomainRepairStatus =
@@ -341,7 +345,17 @@ export class DemoOperationsRepository implements ProductOperationsRepository {
     const nextStage = index >= 0 && index < order.length - 1 ? order[index + 1] : null
     if (!nextStage) return { repair: clone(repair), repairs: clone(this.repairs), ledger: clone(this.ledger), nextStage: null }
 
-    const updated = { ...repair, stage: nextStage, partner: nextStage === 'assigned' ? '한마음 모빌리티' : repair.partner, revision: repair.revision + 1 }
+    const demoPartnerLabels: Record<string, string> = {
+      'station-hanmaeum': '한마음 모빌리티',
+      'station-carewheel': '케어휠 수리소',
+      'station-western': '서부 보장구 센터',
+    }
+    const updated = {
+      ...repair,
+      stage: nextStage,
+      partner: nextStage === 'assigned' ? demoPartnerLabels[command.repairStationId ?? ''] ?? '한마음 모빌리티' : repair.partner,
+      revision: repair.revision + 1,
+    }
     this.repairs = this.repairs.map((item) => item.id === updated.id ? updated : item)
     return { repair: clone(updated), repairs: clone(this.repairs), ledger: clone(this.ledger), nextStage }
   }

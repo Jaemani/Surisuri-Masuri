@@ -67,3 +67,13 @@
 - 확인 항목: 활성 tenant 수리소 exact read, 미등록 수리소 거부, 전체 수리 상태 전이, 완료 work order와 immutable repair의 atomic write, source quality와 금액·기기·수리소 linkage
 - 개인정보 경계: 완료 repair에 raw issue summary와 memo를 복사하지 않음
 - 제한: repair items·부품 설치/제거·production 배포·실제 현장 수리 완료는 미검증
+
+# EVD-20260813-06 — 수리 접수·복지관 action UI
+
+- 분류: `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
+- 모바일: typecheck, 18 files / 246 tests, Android/iOS Expo export 통과
+- 콘솔: typecheck, 10 tests, production web build 통과
+- Playwright: 모바일 2개 + 콘솔 2개 통과
+- 시각 증거: `mobile-repair-intake`, `mobile-repair-review`, `console-repairs` snapshot
+- 확인 항목: 모바일 category/detail/funding/amount validation과 review, stable idempotency input, projection-pending read-only recovery, console stage-aware synthetic assignment와 operator read-only wait
+- 제한: 실제 Firebase command, native TalkBack/VoiceOver, 현장 직원·이용자 사용 증거가 아님

@@ -1,8 +1,10 @@
+import { useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { TripRecorderState } from '../../telemetry/useTripRecorder';
+import { RepairIntakeForm } from './RepairIntakeForm';
 import { formatMoney, getRepairProgress, getSubsidyProgressPercent, getSubsidyRemaining, repairProgressSteps } from '../state';
-import type { DeviceSummary, RepairWorkOrder, SubsidySummary } from '../types';
+import type { CreateRepairRequestInput, DeviceSummary, RepairWorkOrder, SubsidySummary } from '../types';
 import { Card, colors, DemoBadge, ProductButton, SectionHeading, StatusPill } from './ProductUi';
 
 type RecorderActions = {
@@ -128,16 +130,25 @@ export function UserHomeScreen({ state, displayName, request, device, subsidy, o
   );
 }
 
-type RepairScreenProps = { request: RepairWorkOrder | null; onCreateRequest: () => void };
+type RepairScreenProps = {
+  request: RepairWorkOrder | null;
+  onCreateRequest: (input: CreateRepairRequestInput) => Promise<unknown>;
+  onRefresh: () => Promise<unknown>;
+  isDemo?: boolean;
+};
 
-export function UserRepairScreen({ request, onCreateRequest }: RepairScreenProps) {
+export function UserRepairScreen({ request, onCreateRequest, onRefresh, isDemo = true }: RepairScreenProps) {
+  const scrollRef = useRef<ScrollView>(null);
+  const [showIntake, setShowIntake] = useState(false);
   const currentIndex = request ? getRepairProgress(request.status).currentIndex : -1;
+  const submitRequest = async (input: CreateRepairRequestInput) => { await onCreateRequest(input); setShowIntake(false); };
+  const scrollToTop = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   return (
-    <ScrollView contentContainerStyle={screenStyles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView ref={scrollRef} contentContainerStyle={screenStyles.content} showsVerticalScrollIndicator={false}>
       <View style={screenStyles.pageHeader}><Text style={screenStyles.pageTitle}>수리 도움</Text><Text style={screenStyles.pageSubtitle}>걱정되는 점을 남기면 가까운 수리센터와 연결해 드려요.</Text></View>
-      {request ? (
+      {request && !showIntake ? (
         <Card style={screenStyles.requestCard}>
-          <View style={screenStyles.cardHeaderRow}><View><Text style={screenStyles.cardEyebrow}>데모 요청 · {request.id}</Text><Text style={screenStyles.requestTitle}>{request.title}</Text></View><StatusPill label={request.status === 'completed' ? '완료' : '진행 중'} tone="orange" /></View>
+          <View style={screenStyles.cardHeaderRow}><View><Text style={screenStyles.cardEyebrow}>{isDemo ? '데모 요청' : '수리 요청'} · {request.id}</Text><Text style={screenStyles.requestTitle}>{request.title}</Text></View><StatusPill label={request.status === 'completed' ? '완료' : '진행 중'} tone="orange" /></View>
           <Text style={screenStyles.requestMeta}>{request.createdAt} 접수 · {request.repairer}</Text>
           <View style={screenStyles.stepper}>
             {repairProgressSteps.map((step, index) => {
@@ -152,14 +163,14 @@ export function UserRepairScreen({ request, onCreateRequest }: RepairScreenProps
             })}
           </View>
           <View style={screenStyles.visitBox}><Text style={screenStyles.visitLabel}>다음 약속</Text><Text style={screenStyles.visitValue}>{request.visitAt}</Text><Text style={screenStyles.visitDetail}>방문 전 수리센터에서 전화드릴 예정이에요.</Text></View>
-          <ProductButton label="요청 내용 보기" onPress={() => undefined} variant="secondary" />
+          <ProductButton label="새 수리 요청 작성" onPress={() => setShowIntake(true)} variant="secondary" />
         </Card>
       ) : (
-        <Card style={screenStyles.emptyCard}><View style={screenStyles.emptyIcon}><Text style={screenStyles.emptyIconText}>＋</Text></View><Text style={screenStyles.emptyTitle}>도움이 필요한 곳이 있나요?</Text><Text style={screenStyles.emptyText}>사진과 간단한 설명을 남기면 수리 상담을 시작할 수 있어요.</Text><ProductButton label="수리 요청 시작" onPress={onCreateRequest} /></Card>
+        <View>{request ? <ProductButton label="진행 중인 요청으로 돌아가기" onPress={() => setShowIntake(false)} variant="secondary" /> : null}<RepairIntakeForm onPhaseChange={scrollToTop} onRefresh={onRefresh} onSubmit={submitRequest} /></View>
       )}
       <SectionHeading title="이렇게 도와드려요" />
-      <View style={screenStyles.helpGrid}><Card style={screenStyles.helpCard}><Text style={screenStyles.helpIcon}>▣</Text><Text style={screenStyles.helpTitle}>증상 남기기</Text><Text style={screenStyles.helpText}>사진 한 장으로도 충분해요.</Text></Card><Card style={screenStyles.helpCard}><Text style={screenStyles.helpIcon}>♡</Text><Text style={screenStyles.helpTitle}>센터 연결</Text><Text style={screenStyles.helpText}>가까운 센터를 찾아요.</Text></Card></View>
-      <DemoBadge label="수리 요청·상태 데이터는 데모입니다" />
+      <View style={screenStyles.helpGrid}><Card style={screenStyles.helpCard}><Text style={screenStyles.helpIcon}>▣</Text><Text style={screenStyles.helpTitle}>증상 남기기</Text><Text style={screenStyles.helpText}>어떤 문제가 있는지 적어 주세요.</Text></Card><Card style={screenStyles.helpCard}><Text style={screenStyles.helpIcon}>♡</Text><Text style={screenStyles.helpTitle}>센터 연결</Text><Text style={screenStyles.helpText}>가까운 센터를 찾아요.</Text></Card></View>
+      {isDemo ? <DemoBadge label="수리 요청·상태 데이터는 데모입니다" /> : null}
     </ScrollView>
   );
 }

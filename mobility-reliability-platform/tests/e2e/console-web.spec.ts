@@ -20,15 +20,16 @@ test.describe('institution console web presentation and repair operations', () =
     await repairNavigation.click();
 
     await expect(page.getByRole('heading', { name: '수리 운영' })).toBeVisible();
+    await expect(page.getByText('SYNTHETIC DEMO · REVISION 1')).toBeVisible();
+    await expect(page.getByRole('button', { name: '파트너 배정하기' })).toBeDisabled();
+    await page.getByLabel('수리소 ID (합성)').selectOption('station-hanmaeum');
+    await page.getByLabel('담당 수리사 Firebase UID (합성)').selectOption('demo-repairer-kim');
+    await expect(page.getByRole('button', { name: '파트너 배정하기' })).toBeEnabled();
     await expect(page).toHaveScreenshot('console-repairs.png', {
       animations: 'disabled',
     });
-
-    const registerRepair = page.getByRole('button', { name: /새 수리 요청/ }).first();
-    await expect(registerRepair).toBeVisible();
-    await registerRepair.click();
-
-    await expect(page.getByText(/새 수리 요청 작성 화면은 데모에서 준비 중입니다/)).toBeVisible();
-    await expect(page.getByText('전체 수리 요청')).toBeVisible();
+    await page.getByRole('button', { name: '파트너 배정하기' }).click();
+    await expect(page.getByText('파트너 배정 단계로 변경되었습니다.')).toBeVisible();
+    await expect(page.getByText('수리사 처리 대기')).toBeVisible();
   });
 });
