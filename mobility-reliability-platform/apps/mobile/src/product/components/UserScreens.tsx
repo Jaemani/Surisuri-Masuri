@@ -1,8 +1,8 @@
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { TripRecorderState } from '../../telemetry/useTripRecorder';
-import { demoRepairRequest, demoSubsidy, demoTimeline, money } from '../data';
-import type { RepairRequestStatus, UserTab } from '../types';
+import { formatMoney, getRepairProgress, getSubsidyProgressPercent, getSubsidyRemaining, repairProgressSteps } from '../state';
+import type { DeviceSummary, RepairWorkOrder, SubsidySummary } from '../types';
 import { Card, colors, DemoBadge, ProductButton, SectionHeading, StatusPill } from './ProductUi';
 
 type RecorderActions = {
@@ -13,6 +13,10 @@ type RecorderActions = {
 
 type HomeProps = RecorderActions & {
   state: TripRecorderState;
+  displayName: string;
+  request: RepairWorkOrder | null;
+  device: DeviceSummary;
+  subsidy: SubsidySummary;
   onOpenRepairs: () => void;
 };
 
@@ -27,7 +31,7 @@ function friendlyError(state: TripRecorderState) {
   return null;
 }
 
-export function UserHomeScreen({ state, onStart, onResume, onStop, onOpenRepairs }: HomeProps) {
+export function UserHomeScreen({ state, displayName, request, device, subsidy, onStart, onResume, onStop, onOpenRepairs }: HomeProps) {
   const busy = isBusy(state);
   const error = friendlyError(state);
   const isRecording = state.phase === 'recording';
@@ -38,12 +42,12 @@ export function UserHomeScreen({ state, onStart, onResume, onStop, onOpenRepairs
       <View style={screenStyles.headerRow}>
         <View>
           <Text style={screenStyles.kicker}>오늘도 편안한 하루</Text>
-          <Text accessibilityRole="header" style={screenStyles.greeting}>안녕하세요, 정자님</Text>
+          <Text accessibilityRole="header" style={screenStyles.greeting}>안녕하세요, {displayName.replace(/\s*님$/, '')}님</Text>
         </View>
         <DemoBadge />
       </View>
 
-      <Pressable
+      {request ? <Pressable
         accessibilityLabel="진행 중인 수리 요청 보기"
         accessibilityRole="button"
         onPress={onOpenRepairs}
@@ -53,26 +57,26 @@ export function UserHomeScreen({ state, onStart, onResume, onStop, onOpenRepairs
           <View style={screenStyles.repairHeroIcon}><Text style={screenStyles.repairHeroIconText}>!</Text></View>
           <View style={screenStyles.repairHeroCopy}>
             <View style={screenStyles.repairHeroStatus}><Text style={screenStyles.cardEyebrow}>진행 중인 수리</Text><StatusPill label="수리센터 배정" tone="orange" /></View>
-            <Text accessibilityRole="header" style={screenStyles.repairHeroTitle}>{demoRepairRequest.title}</Text>
-            <Text style={screenStyles.repairHeroDetail}>{demoRepairRequest.repairer}</Text>
+            <Text accessibilityRole="header" style={screenStyles.repairHeroTitle}>{request.title}</Text>
+            <Text style={screenStyles.repairHeroDetail}>{request.repairer}</Text>
           </View>
         </View>
         <View style={screenStyles.nextAppointment}>
-          <View><Text style={screenStyles.appointmentLabel}>다음 약속</Text><Text style={screenStyles.appointmentValue}>{demoRepairRequest.visitAt}</Text></View>
+          <View><Text style={screenStyles.appointmentLabel}>다음 약속</Text><Text style={screenStyles.appointmentValue}>{request.visitAt}</Text></View>
           <Text style={screenStyles.chevron}>›</Text>
         </View>
-      </Pressable>
+      </Pressable> : null}
 
       <View style={screenStyles.homeSummaryRow}>
         <Card style={screenStyles.homeSummaryCard}>
           <Text style={screenStyles.summaryLabel}>남은 수리 지원금</Text>
-          <Text style={screenStyles.summaryValue}>{money(demoSubsidy.total - demoSubsidy.used)}</Text>
-          <Text style={screenStyles.summaryDetail}>2026년 상반기</Text>
+          <Text style={screenStyles.summaryValue}>{formatMoney(getSubsidyRemaining(subsidy))}</Text>
+          <Text style={screenStyles.summaryDetail}>{subsidy.cycle}</Text>
         </Card>
         <Card style={screenStyles.homeSummaryCard}>
           <Text style={screenStyles.summaryLabel}>내 기기 상태</Text>
-          <Text style={screenStyles.summaryValue}>정상</Text>
-          <Text style={screenStyles.summaryDetail}>7월 28일 점검</Text>
+          <Text style={screenStyles.summaryValue}>{device.status === 'healthy' ? '정상' : '확인 필요'}</Text>
+          <Text style={screenStyles.summaryDetail}>{device.name}</Text>
         </Card>
       </View>
 
@@ -124,26 +128,19 @@ export function UserHomeScreen({ state, onStart, onResume, onStop, onOpenRepairs
   );
 }
 
-type RepairScreenProps = { requestSubmitted: boolean; onCreateRequest: () => void };
+type RepairScreenProps = { request: RepairWorkOrder | null; onCreateRequest: () => void };
 
-const repairSteps: Array<{ status: RepairRequestStatus; label: string }> = [
-  { status: 'received', label: '접수' },
-  { status: 'assigned', label: '수리센터 배정' },
-  { status: 'visit_scheduled', label: '방문 예정' },
-  { status: 'completed', label: '완료' },
-];
-
-export function UserRepairScreen({ requestSubmitted, onCreateRequest }: RepairScreenProps) {
-  const currentIndex = repairSteps.findIndex((step) => step.status === demoRepairRequest.status);
+export function UserRepairScreen({ request, onCreateRequest }: RepairScreenProps) {
+  const currentIndex = request ? getRepairProgress(request.status).currentIndex : -1;
   return (
     <ScrollView contentContainerStyle={screenStyles.content} showsVerticalScrollIndicator={false}>
       <View style={screenStyles.pageHeader}><Text style={screenStyles.pageTitle}>수리 도움</Text><Text style={screenStyles.pageSubtitle}>걱정되는 점을 남기면 가까운 수리센터와 연결해 드려요.</Text></View>
-      {requestSubmitted ? (
+      {request ? (
         <Card style={screenStyles.requestCard}>
-          <View style={screenStyles.cardHeaderRow}><View><Text style={screenStyles.cardEyebrow}>데모 요청 · {demoRepairRequest.id}</Text><Text style={screenStyles.requestTitle}>{demoRepairRequest.title}</Text></View><StatusPill label="진행 중" tone="orange" /></View>
-          <Text style={screenStyles.requestMeta}>{demoRepairRequest.createdAt} 접수 · {demoRepairRequest.repairer}</Text>
+          <View style={screenStyles.cardHeaderRow}><View><Text style={screenStyles.cardEyebrow}>데모 요청 · {request.id}</Text><Text style={screenStyles.requestTitle}>{request.title}</Text></View><StatusPill label={request.status === 'completed' ? '완료' : '진행 중'} tone="orange" /></View>
+          <Text style={screenStyles.requestMeta}>{request.createdAt} 접수 · {request.repairer}</Text>
           <View style={screenStyles.stepper}>
-            {repairSteps.map((step, index) => {
+            {repairProgressSteps.map((step, index) => {
               const complete = index <= currentIndex;
               return (
                 <View key={step.status} style={screenStyles.stepItem}>
@@ -154,7 +151,7 @@ export function UserRepairScreen({ requestSubmitted, onCreateRequest }: RepairSc
               );
             })}
           </View>
-          <View style={screenStyles.visitBox}><Text style={screenStyles.visitLabel}>다음 약속</Text><Text style={screenStyles.visitValue}>{demoRepairRequest.visitAt}</Text><Text style={screenStyles.visitDetail}>방문 전 수리센터에서 전화드릴 예정이에요.</Text></View>
+          <View style={screenStyles.visitBox}><Text style={screenStyles.visitLabel}>다음 약속</Text><Text style={screenStyles.visitValue}>{request.visitAt}</Text><Text style={screenStyles.visitDetail}>방문 전 수리센터에서 전화드릴 예정이에요.</Text></View>
           <ProductButton label="요청 내용 보기" onPress={() => undefined} variant="secondary" />
         </Card>
       ) : (
@@ -167,27 +164,27 @@ export function UserRepairScreen({ requestSubmitted, onCreateRequest }: RepairSc
   );
 }
 
-export function UserDeviceScreen({ onOpenRepairs }: { onOpenRepairs: () => void }) {
+export function UserDeviceScreen({ device, onOpenRepairs }: { device: DeviceSummary; onOpenRepairs: () => void }) {
   return (
     <ScrollView contentContainerStyle={screenStyles.content} showsVerticalScrollIndicator={false}>
       <View style={screenStyles.pageHeader}><Text style={screenStyles.pageTitle}>내 기기</Text><Text style={screenStyles.pageSubtitle}>내 이동을 함께하는 기기의 기록을 한눈에 확인해요.</Text></View>
-      <Card style={screenStyles.deviceCard}><View style={screenStyles.deviceVisual}><Text style={screenStyles.deviceGlyph}>♿</Text></View><View style={screenStyles.deviceDetails}><StatusPill label="정상 작동" tone="teal" /><Text style={screenStyles.deviceName}>나래 모빌리티 M-22</Text><Text style={screenStyles.deviceNumber}>등록번호 MR-2208 · 2024년 등록</Text></View></Card>
+      <Card style={screenStyles.deviceCard}><View style={screenStyles.deviceVisual}><Text style={screenStyles.deviceGlyph}>♿</Text></View><View style={screenStyles.deviceDetails}><StatusPill label={device.status === 'healthy' ? '정상 작동' : '확인 필요'} tone={device.status === 'healthy' ? 'teal' : 'orange'} /><Text style={screenStyles.deviceName}>{device.name}</Text><Text style={screenStyles.deviceNumber}>등록번호 {device.registrationNumber} · {device.registeredAt}</Text></View></Card>
       <SectionHeading title="기기 타임라인" action="전체 보기" onAction={() => undefined} />
-      <Card style={screenStyles.timelineCard}>{demoTimeline.map((item, index) => <View key={item.id} style={screenStyles.timelineRow}><View style={screenStyles.timelineRail}><View style={[screenStyles.timelineDot, stylesByTone[item.tone]]} />{index < demoTimeline.length - 1 ? <View style={screenStyles.timelineLine} /> : null}</View><View style={screenStyles.timelineCopy}><Text style={screenStyles.timelineDate}>{item.date}</Text><Text style={screenStyles.timelineTitle}>{item.title}</Text><Text style={screenStyles.timelineDetail}>{item.detail}</Text></View></View>)}</Card>
+      <Card style={screenStyles.timelineCard}>{device.timeline.map((item, index) => <View key={item.id} style={screenStyles.timelineRow}><View style={screenStyles.timelineRail}><View style={[screenStyles.timelineDot, stylesByTone[item.tone]]} />{index < device.timeline.length - 1 ? <View style={screenStyles.timelineLine} /> : null}</View><View style={screenStyles.timelineCopy}><Text style={screenStyles.timelineDate}>{item.date}</Text><Text style={screenStyles.timelineTitle}>{item.title}</Text><Text style={screenStyles.timelineDetail}>{item.detail}</Text></View></View>)}</Card>
       <Card style={screenStyles.actionCard}><View><Text style={screenStyles.actionTitle}>기기 상태가 걱정되나요?</Text><Text style={screenStyles.actionText}>간단한 증상을 남기고 도움을 받아보세요.</Text></View><ProductButton label="수리 도움" onPress={onOpenRepairs} variant="secondary" /></Card>
       <DemoBadge label="기기 이력은 검토용 데모 데이터입니다" />
     </ScrollView>
   );
 }
 
-export function UserSupportScreen() {
-  const progress = Math.round((demoSubsidy.used / demoSubsidy.total) * 100);
+export function UserSupportScreen({ subsidy }: { subsidy: SubsidySummary }) {
+  const progress = getSubsidyProgressPercent(subsidy);
   return (
     <ScrollView contentContainerStyle={screenStyles.content} showsVerticalScrollIndicator={false}>
       <View style={screenStyles.pageHeader}><Text style={screenStyles.pageTitle}>복지지원</Text><Text style={screenStyles.pageSubtitle}>받을 수 있는 지원과 사용 내역을 쉽게 확인해요.</Text></View>
-      <Card style={screenStyles.subsidyCard}><View style={screenStyles.cardHeaderRow}><View><Text style={screenStyles.cardEyebrow}>{demoSubsidy.cycle}</Text><Text style={screenStyles.subsidyTitle}>{demoSubsidy.program}</Text></View><Text style={screenStyles.subsidyHeart}>♡</Text></View><Text style={screenStyles.subsidyAmount}>{money(demoSubsidy.total - demoSubsidy.used)} <Text style={screenStyles.subsidyAmountUnit}>남았어요</Text></Text><View style={screenStyles.progressTrack}><View style={[screenStyles.progressFill, { width: `${progress}%` }]} /></View><View style={screenStyles.progressLabels}><Text style={screenStyles.progressLabel}>사용 {money(demoSubsidy.used)}</Text><Text style={screenStyles.progressLabel}>전체 {money(demoSubsidy.total)}</Text></View><View style={screenStyles.supportNote}><Text style={screenStyles.supportNoteIcon}>i</Text><Text style={screenStyles.supportNoteText}>{demoSubsidy.note}</Text></View></Card>
+      <Card style={screenStyles.subsidyCard}><View style={screenStyles.cardHeaderRow}><View><Text style={screenStyles.cardEyebrow}>{subsidy.cycle}</Text><Text style={screenStyles.subsidyTitle}>{subsidy.program}</Text></View><Text style={screenStyles.subsidyHeart}>♡</Text></View><Text style={screenStyles.subsidyAmount}>{formatMoney(getSubsidyRemaining(subsidy))} <Text style={screenStyles.subsidyAmountUnit}>남았어요</Text></Text><View style={screenStyles.progressTrack}><View style={[screenStyles.progressFill, { width: `${progress}%` }]} /></View><View style={screenStyles.progressLabels}><Text style={screenStyles.progressLabel}>사용 {formatMoney(subsidy.used)}</Text><Text style={screenStyles.progressLabel}>전체 {formatMoney(subsidy.total)}</Text></View><View style={screenStyles.supportNote}><Text style={screenStyles.supportNoteIcon}>i</Text><Text style={screenStyles.supportNoteText}>{subsidy.note}</Text></View></Card>
       <SectionHeading title="지원 안내" />
-      <Card style={screenStyles.infoCard}><InfoRow icon="✓" title="수리비 지원" detail="등록된 기기의 수리비 일부를 지원해요." /><InfoRow icon="☎" title="도움이 필요할 때" detail="복지관 담당자에게 연결해 드릴게요." /><InfoRow icon="▣" title="다음 확인일" detail={demoSubsidy.nextReview} last /></Card>
+      <Card style={screenStyles.infoCard}><InfoRow icon="✓" title="수리비 지원" detail="등록된 기기의 수리비 일부를 지원해요." /><InfoRow icon="☎" title="도움이 필요할 때" detail="복지관 담당자에게 연결해 드릴게요." /><InfoRow icon="▣" title="다음 확인일" detail={subsidy.nextReview} last /></Card>
       <DemoBadge label="지원금 내역은 확인용 데모 데이터입니다" />
     </ScrollView>
   );

@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
-import { Alert, SafeAreaView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 
 import { useTripRecorder } from './src/telemetry/useTripRecorder';
 import { RepairerScreen } from './src/product/components/RepairerScreen';
@@ -13,17 +13,20 @@ import {
   UserSupportScreen,
 } from './src/product/components/UserScreens';
 import { BottomNavigation, colors } from './src/product/components/ProductUi';
-import type { ProductRole, UserTab } from './src/product/types';
+import { createProductRepository } from './src/product/repository';
+import { useProductData } from './src/product/useProductData';
+import type { UserTab } from './src/product/types';
+
+const productRepository = createProductRepository();
 
 export default function App() {
   const recorder = useTripRecorder();
-  const [role, setRole] = useState<ProductRole>('user');
+  const product = useProductData(productRepository);
   const [activeTab, setActiveTab] = useState<UserTab>('home');
-  const [requestSubmitted, setRequestSubmitted] = useState(true);
 
-  const switchToRepairer = () => setRole('repairer');
+  const switchToRepairer = () => void product.setRole('repairer');
   const switchToUser = () => {
-    setRole('user');
+    void product.setRole('user');
     setActiveTab('home');
   };
 
@@ -34,17 +37,27 @@ export default function App() {
     ]);
   };
 
-  if (role === 'repairer') {
+  if (product.phase === 'error') {
+    return <ProductError onRetry={() => void product.refresh()} />;
+  }
+
+  if (product.phase === 'loading' || !product.view) {
+    return <ProductLoading />;
+  }
+
+  const view = product.view;
+
+  if (view.role === 'repairer') {
     return (
       <SafeAreaView style={styles.screen}>
         <StatusBar style="dark" />
-        <RepairerScreen onSwitchToUser={switchToUser} />
+        <RepairerScreen jobs={view.repairJobs} displayName={view.displayName} onSwitchToUser={switchToUser} />
       </SafeAreaView>
     );
   }
 
   const openRepairs = () => setActiveTab('repairs');
-  const createRequest = () => setRequestSubmitted(true);
+  const createRequest = () => void product.createRepairRequest({ title: '오른쪽 바퀴에서 소리가 나요' });
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -53,17 +66,21 @@ export default function App() {
         {activeTab === 'home' ? (
           <UserHomeScreen
             state={recorder.state}
+            displayName={view.displayName}
+            request={view.repairRequest}
+            device={view.device}
+            subsidy={view.subsidy}
             onStart={() => void recorder.start()}
             onResume={() => void recorder.resume()}
             onStop={stopWithConfirmation}
             onOpenRepairs={openRepairs}
           />
         ) : activeTab === 'repairs' ? (
-          <UserRepairScreen requestSubmitted={requestSubmitted} onCreateRequest={createRequest} />
+          <UserRepairScreen request={view.repairRequest} onCreateRequest={createRequest} />
         ) : activeTab === 'device' ? (
-          <UserDeviceScreen onOpenRepairs={openRepairs} />
+          <UserDeviceScreen device={view.device} onOpenRepairs={openRepairs} />
         ) : activeTab === 'support' ? (
-          <UserSupportScreen />
+          <UserSupportScreen subsidy={view.subsidy} />
         ) : (
           <UserSettingsScreen
             state={recorder.state}
@@ -78,7 +95,19 @@ export default function App() {
   );
 }
 
+function ProductLoading() {
+  return <SafeAreaView style={styles.fallback}><ActivityIndicator color={colors.teal} /><Text style={styles.fallbackText}>내 정보를 준비하고 있어요…</Text></SafeAreaView>;
+}
+
+function ProductError({ onRetry }: { onRetry: () => void }) {
+  return <SafeAreaView style={styles.fallback}><Text accessibilityRole="header" style={styles.fallbackTitle}>잠시 문제가 생겼어요</Text><Text style={styles.fallbackText}>정보를 불러오지 못했어요. 다시 시도해 주세요.</Text><Text accessibilityRole="button" onPress={onRetry} style={styles.retry}>다시 시도</Text></SafeAreaView>;
+}
+
 const styles = StyleSheet.create({
   screen: { backgroundColor: colors.canvas, flex: 1 },
   body: { flex: 1 },
+  fallback: { alignItems: 'center', backgroundColor: colors.canvas, flex: 1, justifyContent: 'center', padding: 24 },
+  fallbackTitle: { color: colors.ink, fontSize: 23, fontWeight: '800' },
+  fallbackText: { color: colors.muted, fontSize: 15, marginTop: 10, textAlign: 'center' },
+  retry: { color: colors.teal, fontSize: 16, fontWeight: '800', marginTop: 22, padding: 12 },
 });

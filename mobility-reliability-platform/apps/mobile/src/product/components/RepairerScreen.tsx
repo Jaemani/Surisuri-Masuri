@@ -1,16 +1,16 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { demoRepairJobs } from '../data';
+import type { RepairJob } from '../types';
 import { Card, colors, DemoBadge, ProductButton, SectionHeading, StatusPill } from './ProductUi';
 
-type RepairerScreenProps = { onSwitchToUser: () => void };
+type RepairerScreenProps = { jobs: RepairJob[]; displayName: string; onSwitchToUser: () => void };
 
-export function RepairerScreen({ onSwitchToUser }: RepairerScreenProps) {
+export function RepairerScreen({ jobs, displayName, onSwitchToUser }: RepairerScreenProps) {
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.topBar}>
-          <View><Text style={styles.kicker}>수리사 작업공간</Text><Text accessibilityRole="header" style={styles.title}>오늘의 작업</Text></View>
+          <View><Text style={styles.kicker}>{displayName}</Text><Text accessibilityRole="header" style={styles.title}>오늘의 작업</Text></View>
           <Pressable accessibilityRole="button" accessibilityLabel="사용자 화면으로 전환" onPress={onSwitchToUser} style={styles.roleButton}><Text style={styles.roleButtonText}>사용자 화면</Text></Pressable>
         </View>
         <DemoBadge label="수리사 역할 · 데모 데이터" />
@@ -21,8 +21,8 @@ export function RepairerScreen({ onSwitchToUser }: RepairerScreenProps) {
           <ProductButton label="QR 확인" onPress={() => undefined} variant="secondary" icon="▣" />
         </Card>
 
-        <SectionHeading title="오늘 처리할 작업" action="전체 3건" onAction={() => undefined} />
-        <View style={styles.jobList}>{demoRepairJobs.map((job) => <RepairJobCard key={job.id} {...job} />)}</View>
+        <SectionHeading title="오늘 처리할 작업" action={`전체 ${jobs.length}건`} onAction={() => undefined} />
+        <View style={styles.jobList}>{jobs.map((job) => <RepairJobCard key={job.id} {...job} />)}</View>
 
         <Card style={styles.summaryCard}><View style={styles.summaryIcon}><Text style={styles.summaryGlyph}>✓</Text></View><View style={styles.summaryCopy}><Text style={styles.summaryTitle}>이번 주 점검 8건 완료</Text><Text style={styles.summaryText}>고객의 다음 방문을 미리 준비해 보세요.</Text></View><Text style={styles.chevron}>›</Text></Card>
         <DemoBadge label="고객·작업·기기 정보는 검토용 데모입니다" />
@@ -31,13 +31,13 @@ export function RepairerScreen({ onSwitchToUser }: RepairerScreenProps) {
   );
 }
 
-function RepairJobCard({ customer, device, issue, due, priority }: (typeof demoRepairJobs)[number]) {
+function RepairJobCard({ id, customer, device, issue, due, priority }: RepairJob) {
   return (
     <Card style={styles.jobCard}>
       <View style={styles.jobTop}><StatusPill label={priority === 'today' ? '오늘 방문' : '예정'} tone={priority === 'today' ? 'orange' : 'blue'} /><Text style={styles.jobDue}>{due}</Text></View>
       <Text style={styles.customer}>{customer}</Text><Text style={styles.device}>{device}</Text>
       <View style={styles.issueRow}><View style={styles.issueDot} /><Text style={styles.issue}>{issue}</Text></View>
-      <View style={styles.jobFooter}><Text style={styles.jobId}>데모 작업 · {priority === 'today' ? 'JOB-101' : 'JOB-102'}</Text><Pressable accessibilityRole="button" onPress={() => undefined}><Text style={styles.detailAction}>상세 보기 ›</Text></Pressable></View>
+      <View style={styles.jobFooter}><Text style={styles.jobId}>데모 작업 · {id}</Text><Pressable accessibilityRole="button" onPress={() => undefined}><Text style={styles.detailAction}>상세 보기 ›</Text></Pressable></View>
     </Card>
   );
 }

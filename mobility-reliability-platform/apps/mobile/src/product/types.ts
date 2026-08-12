@@ -4,7 +4,7 @@ export type ProductRole = 'user' | 'repairer';
 
 export type RepairRequestStatus = 'received' | 'assigned' | 'visit_scheduled' | 'completed';
 
-export type RepairRequest = {
+export type RepairWorkOrder = {
   id: string;
   title: string;
   createdAt: string;
@@ -12,6 +12,9 @@ export type RepairRequest = {
   repairer: string;
   visitAt: string;
 };
+
+/** Kept as a product-language alias for screens that call a work order a request. */
+export type RepairRequest = RepairWorkOrder;
 
 export type DeviceTimelineItem = {
   id: string;
@@ -30,6 +33,15 @@ export type SubsidySummary = {
   note: string;
 };
 
+export type DeviceSummary = {
+  id: string;
+  name: string;
+  registrationNumber: string;
+  registeredAt: string;
+  status: 'healthy' | 'attention';
+  timeline: DeviceTimelineItem[];
+};
+
 export type RepairJob = {
   id: string;
   customer: string;
@@ -37,4 +49,22 @@ export type RepairJob = {
   issue: string;
   due: string;
   priority: 'today' | 'scheduled';
+};
+
+export type RoleSession = {
+  role: ProductRole;
+  displayName: string;
+  isDemo: boolean;
+};
+
+export type ProductSnapshot = {
+  roleSession: RoleSession;
+  repairRequest: RepairWorkOrder | null;
+  device: DeviceSummary;
+  subsidy: SubsidySummary;
+  repairJobs: RepairJob[];
+};
+
+export type CreateRepairRequestInput = {
+  title: string;
 };

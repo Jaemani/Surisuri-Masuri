@@ -1,12 +1,14 @@
 import type {
+  DeviceSummary,
   DeviceTimelineItem,
   RepairJob,
-  RepairRequest,
+  RepairWorkOrder,
+  RoleSession,
   SubsidySummary,
 } from './types';
 
 // Demo records are intentionally deterministic so the product prototype is easy to review.
-export const demoRepairRequest: RepairRequest = {
+export const demoRepairRequest: RepairWorkOrder = {
   id: 'demo-request-042',
   title: '오른쪽 바퀴에서 소리가 나요',
   createdAt: '2026년 8월 12일',
@@ -46,6 +48,27 @@ export const demoSubsidy: SubsidySummary = {
   total: 300000,
   nextReview: '2026년 9월 1일',
   note: '남은 지원금은 수리센터에서 확인할 수 있어요.',
+};
+
+export const demoDevice: DeviceSummary = {
+  id: 'demo-device-2208',
+  name: '나래 모빌리티 M-22',
+  registrationNumber: 'MR-2208',
+  registeredAt: '2024년 등록',
+  status: 'healthy',
+  timeline: demoTimeline,
+};
+
+export const demoUserRoleSession: RoleSession = {
+  role: 'user',
+  displayName: '김정자 님',
+  isDemo: true,
+};
+
+export const demoRepairerRoleSession: RoleSession = {
+  role: 'repairer',
+  displayName: '따뜻한바퀴 수리센터',
+  isDemo: true,
 };
 
 export const demoRepairJobs: RepairJob[] = [
