@@ -10,12 +10,12 @@ describe('DemoProductRepository', () => {
     const first = await repository.getSnapshot();
     if (!isBeneficiaryProductSnapshot(first)) throw new Error('expected beneficiary snapshot');
     first.device.timeline.pop();
-    first.repairJobs?.[0] && (first.repairJobs[0].customer = '변경된 이름');
+    first.repairJobs?.[0] && (first.repairJobs[0].customerLabel = '변경된 이름');
 
     const second = await repository.getSnapshot();
     if (!isBeneficiaryProductSnapshot(second)) throw new Error('expected beneficiary snapshot');
     expect(second.device.timeline).toHaveLength(3);
-    expect(isBeneficiaryProductSnapshot(second) ? second.repairJobs?.[0]?.customer : undefined).toBe('김정자 님');
+    expect(isBeneficiaryProductSnapshot(second) ? second.repairJobs?.[0]?.customerLabel : undefined).toBe('이용자 C-1042');
     expect(second.roleSession).toEqual({ role: 'user', displayName: '김정자 님', isDemo: true });
   });
 
@@ -78,7 +78,7 @@ describe('FirebaseProductRepository', () => {
   it('decodes the repairer projection without requiring beneficiary-only fields', async () => {
     const repository = new FirebaseProductRepository(firebaseOptions(async () => jsonResponse(200, {
       roleSession: { role: 'repairer', displayName: '따뜻한바퀴 수리센터', isDemo: false },
-      repairJobs: [{ id: 'job-1', customer: '김정자 님', device: '나래 모빌리티 M-22', issue: '브레이크 점검', due: '오늘 오후 2:00', priority: 'today' }],
+      repairJobs: [{ id: 'job-1', revision: 3, status: 'assigned', customerLabel: '이용자 C-1042', device: { publicCode: 'MOB-1', model: '나래 모빌리티 M-22' }, issue: '브레이크 점검', scheduledAt: null, scheduleLabel: '일정 협의 필요', priority: 'today', billedAmountKrw: null, submittedAt: null, allowedActions: ['schedule'], subsidyAccountId: 'must-not-spread' }],
     })));
 
     const snapshot = await repository.getSnapshot();
@@ -86,7 +86,35 @@ describe('FirebaseProductRepository', () => {
     if (!isRepairerProductSnapshot(snapshot)) throw new Error('expected repairer snapshot');
     expect(snapshot.roleSession.role).toBe('repairer');
     expect(snapshot.repairJobs).toHaveLength(1);
+    expect(snapshot.repairJobs[0]).not.toHaveProperty('subsidyAccountId');
     expect('device' in snapshot).toBe(false);
+  });
+
+  it('posts a narrow repairer schedule command and returns the authoritative refreshed job', async () => {
+    const requests: Array<{ url: string; init: { method: string; headers: Record<string, string>; body?: string } }> = [];
+    const projectedJob = { ...demoProductSnapshot.repairJobs[0], status: 'scheduled' as const, revision: 4, scheduledAt: '2026-08-20T05:00:00.000Z', scheduleLabel: '8월 20일 오후 2:00', allowedActions: ['start' as const] };
+    const repository = new FirebaseProductRepository(firebaseOptions(async (url, init) => {
+      requests.push({ url, init });
+      return init.method === 'POST'
+        ? jsonResponse(200, { commandType: 'transition_repair_request', resourceId: projectedJob.id, revision: 4, status: 'scheduled' })
+        : jsonResponse(200, { roleSession: { role: 'repairer', displayName: '따뜻한바퀴 수리센터' }, repairJobs: [projectedJob] });
+    }));
+
+    const job = await repository.transitionRepairJob({ action: 'schedule', repairRequestId: projectedJob.id, expectedRevision: 3, scheduledAt: projectedJob.scheduledAt!, idempotencyKey: 'schedule-key-1' });
+    expect(job).toMatchObject({ status: 'scheduled', revision: 4 });
+    expect(JSON.parse(requests[0].init.body!)).toEqual({ tenantId: 'tenant-1', repairRequestId: projectedJob.id, expectedRevision: 3, toStatus: 'scheduled', scheduledAt: projectedJob.scheduledAt });
+    expect(requests[0].init.headers['Idempotency-Key']).toBe('schedule-key-1');
+    expect(requests[1].init.method).toBe('GET');
+  });
+
+  it('preserves revision conflicts and does not silently retry a mutation', async () => {
+    let calls = 0;
+    const repository = new FirebaseProductRepository(firebaseOptions(async () => {
+      calls += 1;
+      return jsonResponse(409, { error: { code: 'REVISION_CONFLICT', message: '최신 상태를 다시 확인해 주세요.' } });
+    }));
+    await expect(repository.transitionRepairJob({ action: 'start', repairRequestId: 'job-1', expectedRevision: 4, idempotencyKey: 'start-key-1' })).rejects.toMatchObject({ code: 'REVISION_CONFLICT', status: 409 });
+    expect(calls).toBe(1);
   });
 
   it('posts a Domain Command and returns only the matching server projection', async () => {

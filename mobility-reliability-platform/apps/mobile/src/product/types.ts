@@ -44,11 +44,17 @@ export type DeviceSummary = {
 
 export type RepairJob = {
   id: string;
-  customer: string;
-  device: string;
+  revision: number;
+  status: 'assigned' | 'scheduled' | 'in_progress' | 'repairer_submitted' | 'needs_correction' | 'center_verified';
+  customerLabel: string;
+  device: { publicCode: string; model: string };
   issue: string;
-  due: string;
+  scheduledAt: string | null;
+  scheduleLabel: string;
   priority: 'today' | 'scheduled';
+  billedAmountKrw: number | null;
+  submittedAt: string | null;
+  allowedActions: Array<'schedule' | 'start' | 'submit' | 'resume'>;
 };
 
 export type RoleSession = {
@@ -95,3 +101,8 @@ export type CreateRepairRequestInput = {
   /** Reuse this key when a caller retries after an ambiguous network result. */
   idempotencyKey?: string;
 };
+
+export type RepairerJobCommand =
+  | { action: 'schedule'; repairRequestId: string; expectedRevision: number; scheduledAt: string; idempotencyKey: string }
+  | { action: 'start' | 'resume'; repairRequestId: string; expectedRevision: number; idempotencyKey: string }
+  | { action: 'submit'; repairRequestId: string; expectedRevision: number; billedAmountKrw: number; idempotencyKey: string };

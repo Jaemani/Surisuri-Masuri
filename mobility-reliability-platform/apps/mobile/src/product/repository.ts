@@ -18,6 +18,7 @@ import type {
   SubsidySummary,
   DemoProductSnapshot,
   BeneficiaryProductSnapshot,
+  RepairerJobCommand,
 } from './types';
 
 export type ProductRepositoryErrorCode =
@@ -28,6 +29,10 @@ export type ProductRepositoryErrorCode =
   | 'HTTP_ERROR'
   | 'INVALID_RESPONSE'
   | 'PROJECTION_PENDING'
+  | 'REVISION_CONFLICT'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'REPAIR_ASSIGNMENT_REQUIRED'
+  | 'REPAIR_TRANSITION_FORBIDDEN'
   | 'ROLE_SWITCH_UNSUPPORTED';
 
 export class ProductRepositoryError extends Error {
@@ -45,6 +50,7 @@ export class ProductRepositoryError extends Error {
 export interface ProductRepository {
   getSnapshot(): Promise<ProductSnapshot>;
   createRepairRequest(input: CreateRepairRequestInput): Promise<RepairWorkOrder>;
+  transitionRepairJob(input: RepairerJobCommand): Promise<RepairJob>;
   setRole(role: ProductRole): Promise<RoleSession>;
 }
 
@@ -52,7 +58,7 @@ function copySnapshot(snapshot: ProductSnapshot): ProductSnapshot {
   if (isRepairerProductSnapshot(snapshot)) {
     return {
       roleSession: { ...snapshot.roleSession },
-      repairJobs: snapshot.repairJobs.map((job) => ({ ...job })),
+      repairJobs: snapshot.repairJobs.map(copyRepairJob),
     };
   }
   return {
@@ -61,7 +67,7 @@ function copySnapshot(snapshot: ProductSnapshot): ProductSnapshot {
     repairRequest: snapshot.repairRequest ? { ...snapshot.repairRequest } : null,
     device: { ...snapshot.device, timeline: snapshot.device.timeline.map((item) => ({ ...item })) },
     subsidy: { ...snapshot.subsidy },
-    ...(snapshot.repairJobs ? { repairJobs: snapshot.repairJobs.map((job) => ({ ...job })) } : {}),
+    ...(snapshot.repairJobs ? { repairJobs: snapshot.repairJobs.map(copyRepairJob) } : {}),
   };
 }
 
@@ -108,12 +114,29 @@ export class DemoProductRepository implements ProductRepository {
     return { ...request };
   }
 
+  async transitionRepairJob(input: RepairerJobCommand): Promise<RepairJob> {
+    if (!isRepairerProductSnapshot(this.snapshot)) throw new ProductRepositoryError('ROLE_SWITCH_UNSUPPORTED', 'Repairer commands require the repairer view.');
+    const job = this.snapshot.repairJobs.find((candidate) => candidate.id === input.repairRequestId);
+    if (!job || job.revision !== input.expectedRevision || !job.allowedActions.includes(input.action)) throw new ProductRepositoryError('REVISION_CONFLICT', 'The repair job changed; reload before trying again.', 409);
+    const nextStatus = input.action === 'schedule' ? 'scheduled' : input.action === 'submit' ? 'repairer_submitted' : 'in_progress';
+    const next: RepairJob = {
+      ...job,
+      status: nextStatus,
+      revision: job.revision + 1,
+      ...(input.action === 'schedule' ? { scheduledAt: input.scheduledAt, scheduleLabel: demoScheduleLabel(input.scheduledAt) } : {}),
+      ...(input.action === 'submit' ? { billedAmountKrw: input.billedAmountKrw, submittedAt: new Date().toISOString() } : {}),
+      allowedActions: nextStatus === 'scheduled' ? ['start'] : nextStatus === 'in_progress' ? ['submit'] : [],
+    };
+    this.snapshot = { ...this.snapshot, repairJobs: this.snapshot.repairJobs.map((candidate) => candidate.id === next.id ? next : candidate) };
+    return copyRepairJob(next);
+  }
+
   async setRole(role: ProductRole): Promise<RoleSession> {
     if (role === 'repairer') {
       const jobs = isRepairerProductSnapshot(this.snapshot)
         ? this.snapshot.repairJobs
         : this.snapshot.repairJobs ?? this.userSnapshot?.repairJobs ?? [];
-      this.snapshot = { roleSession: { ...demoRepairerRoleSession }, repairJobs: (jobs ?? []).map((job) => ({ ...job })) };
+      this.snapshot = { roleSession: { ...demoRepairerRoleSession }, repairJobs: (jobs ?? []).map(copyRepairJob) };
     } else {
       if (!this.userSnapshot) throw new ProductRepositoryError('ROLE_SWITCH_UNSUPPORTED', 'A beneficiary snapshot is not available.');
       this.snapshot = { ...this.userSnapshot, roleSession: { ...demoUserRoleSession } };
@@ -158,6 +181,7 @@ export type FirebaseProductRepositoryOptions = {
   endpoints?: {
     snapshot?: string;
     createRepairRequest?: string;
+    transitionRepairRequest?: string;
   };
   /** Required when the runtime does not expose Web Crypto randomUUID. */
   createIdempotencyKey?: () => string;
@@ -168,6 +192,7 @@ export type FirebaseProductRepositoryOptions = {
 export const mobileProductEndpoints = {
   snapshot: '/getMobileProductSnapshot',
   createRepairRequest: '/createRepairRequest',
+  transitionRepairRequest: '/transitionRepairRequest',
 } as const;
 
 /**
@@ -238,6 +263,28 @@ export class FirebaseProductRepository implements ProductRepository {
     return { ...request };
   }
 
+  async transitionRepairJob(input: RepairerJobCommand): Promise<RepairJob> {
+    const options = this.requireOptions();
+    const body: Record<string, unknown> = {
+      tenantId: options.tenantId,
+      repairRequestId: input.repairRequestId,
+      expectedRevision: input.expectedRevision,
+      toStatus: input.action === 'schedule' ? 'scheduled' : input.action === 'submit' ? 'repairer_submitted' : 'in_progress',
+    };
+    if (input.action === 'schedule') body.scheduledAt = input.scheduledAt;
+    if (input.action === 'submit') {
+      if (!Number.isSafeInteger(input.billedAmountKrw) || input.billedAmountKrw <= 0) throw new ProductRepositoryError('INVALID_RESPONSE', 'The billed repair amount must be a positive integer.');
+      body.billedAmountKrw = input.billedAmountKrw;
+    }
+    const response = await this.request('POST', this.endpoint('transitionRepairRequest'), body, input.idempotencyKey);
+    const resourceId = decodeTransitionCommandResult(await readJson(response));
+    const snapshot = await this.getSnapshot();
+    if (!isRepairerProductSnapshot(snapshot)) throw new ProductRepositoryError('PROJECTION_PENDING', 'The repairer projection is not available.');
+    const job = snapshot.repairJobs.find((candidate) => candidate.id === resourceId && candidate.revision > input.expectedRevision);
+    if (!job) throw new ProductRepositoryError('PROJECTION_PENDING', 'The repair command succeeded, but its read projection is not available yet.');
+    return copyRepairJob(job);
+  }
+
   setRole(_role: ProductRole): Promise<RoleSession> {
     return Promise.reject(new ProductRepositoryError(
       'ROLE_SWITCH_UNSUPPORTED',
@@ -258,7 +305,7 @@ export class FirebaseProductRepository implements ProductRepository {
     return this.options;
   }
 
-  private endpoint(kind: 'snapshot' | 'createRepairRequest', withTenant = false): string {
+  private endpoint(kind: 'snapshot' | 'createRepairRequest' | 'transitionRepairRequest', withTenant = false): string {
     const options = this.requireOptions();
     const path = options.endpoints?.[kind] ?? mobileProductEndpoints[kind];
     if (!path.trim()) throw new ProductRepositoryError('NOT_CONFIGURED', `${kind} endpoint is empty.`);
@@ -357,8 +404,9 @@ async function readError(response: ProductHttpResponse): Promise<{ code: Product
     const error = body && typeof body === 'object' && 'error' in body ? (body as { error?: unknown }).error : undefined;
     const code = error && typeof error === 'object' && 'code' in error ? (error as { code?: unknown }).code : undefined;
     const message = error && typeof error === 'object' && 'message' in error ? (error as { message?: unknown }).message : undefined;
+    const preserved = ['REVISION_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'REPAIR_ASSIGNMENT_REQUIRED', 'REPAIR_TRANSITION_FORBIDDEN'] as const;
     return {
-      code: response.status === 401 ? 'AUTH_REQUIRED' : response.status === 403 ? 'HTTP_ERROR' : 'HTTP_ERROR',
+      code: response.status === 401 ? 'AUTH_REQUIRED' : preserved.includes(code as typeof preserved[number]) ? code as typeof preserved[number] : 'HTTP_ERROR',
       message: typeof message === 'string' && message.length > 0 ? message : `The product service rejected the request (${String(code ?? response.status)}).`,
     };
   } catch (_error) {
@@ -374,6 +422,14 @@ function decodeCreateCommandResult(payload: unknown): { resourceId: string } {
     throw new ProductRepositoryError('INVALID_RESPONSE', 'The repair command response is missing its resource identity.');
   }
   return { resourceId: result.resourceId };
+}
+
+function decodeTransitionCommandResult(payload: unknown): string {
+  const candidate = unwrapData(payload);
+  if (!candidate || typeof candidate !== 'object') throw new ProductRepositoryError('INVALID_RESPONSE', 'The repair transition response is invalid.');
+  const result = candidate as { commandType?: unknown; resourceId?: unknown };
+  if (result.commandType !== 'transition_repair_request' || typeof result.resourceId !== 'string' || !result.resourceId) throw new ProductRepositoryError('INVALID_RESPONSE', 'The repair transition response is missing its resource identity.');
+  return result.resourceId;
 }
 
 function decodeProductSnapshot(payload: unknown): ProductSnapshot {
@@ -394,7 +450,7 @@ function decodeProductSnapshot(payload: unknown): ProductSnapshot {
     if (!Array.isArray(snapshot.repairJobs) || !snapshot.repairJobs.every(validRepairJob)) {
       throw new ProductRepositoryError('INVALID_RESPONSE', 'The repairer snapshot is missing a valid repair jobs projection.');
     }
-    return { roleSession: { role: 'repairer', displayName: roleSession.displayName, isDemo: false }, repairJobs: snapshot.repairJobs.map((job) => ({ ...job })) };
+    return { roleSession: { role: 'repairer', displayName: roleSession.displayName, isDemo: false }, repairJobs: snapshot.repairJobs.map((job) => decodeRepairJob(job)) };
   }
   if (!snapshot.device || !validDevice(snapshot.device) || !snapshot.subsidy || !validSubsidy(snapshot.subsidy)) {
     throw new ProductRepositoryError('INVALID_RESPONSE', 'The beneficiary snapshot is missing a valid device or subsidy projection.');
@@ -447,9 +503,37 @@ function validSubsidy(value: unknown): value is SubsidySummary {
 function validRepairJob(value: unknown): value is RepairJob {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<RepairJob>;
-  return typeof item.id === 'string' && typeof item.customer === 'string' && typeof item.device === 'string'
-    && typeof item.issue === 'string' && typeof item.due === 'string' && (item.priority === 'today' || item.priority === 'scheduled');
+  return typeof item.id === 'string' && Number.isSafeInteger(item.revision) && (item.revision ?? 0) > 0
+    && ['assigned', 'scheduled', 'in_progress', 'repairer_submitted', 'needs_correction', 'center_verified'].includes(String(item.status))
+    && typeof item.customerLabel === 'string' && !!item.device && typeof item.device.publicCode === 'string' && typeof item.device.model === 'string'
+    && typeof item.issue === 'string' && (item.scheduledAt === null || typeof item.scheduledAt === 'string') && typeof item.scheduleLabel === 'string'
+    && (item.priority === 'today' || item.priority === 'scheduled') && (item.billedAmountKrw === null || Number.isSafeInteger(item.billedAmountKrw))
+    && (item.submittedAt === null || typeof item.submittedAt === 'string') && Array.isArray(item.allowedActions)
+    && item.allowedActions.every((action) => ['schedule', 'start', 'submit', 'resume'].includes(action));
 }
+
+function decodeRepairJob(value: unknown): RepairJob {
+  if (!validRepairJob(value)) throw new ProductRepositoryError('INVALID_RESPONSE', 'The repair job projection is invalid.');
+  return copyRepairJob(value);
+}
+
+function copyRepairJob(job: RepairJob): RepairJob {
+  return {
+    id: job.id,
+    revision: job.revision,
+    status: job.status,
+    customerLabel: job.customerLabel,
+    device: { publicCode: job.device.publicCode, model: job.device.model },
+    issue: job.issue,
+    scheduledAt: job.scheduledAt,
+    scheduleLabel: job.scheduleLabel,
+    priority: job.priority,
+    billedAmountKrw: job.billedAmountKrw,
+    submittedAt: job.submittedAt,
+    allowedActions: [...job.allowedActions],
+  };
+}
+function demoScheduleLabel(value: string) { return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(value)); }
 
 export type ProductRepositorySource = 'demo' | 'firebase';
 
