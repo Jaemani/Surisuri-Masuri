@@ -4,7 +4,7 @@ test.describe('mobile web visual preview', () => {
   test('renders and completes the primary recording state transition', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: '안녕하세요, 정자님' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '안녕하세요, 김정자님' })).toBeVisible();
     await expect(page.getByText('진행 중인 수리', { exact: true })).toBeVisible();
     await expect(page.getByText('오른쪽 바퀴에서 소리가 나요')).toBeVisible();
     await expect(page.getByText('남은 수리 지원금', { exact: true })).toBeVisible();
