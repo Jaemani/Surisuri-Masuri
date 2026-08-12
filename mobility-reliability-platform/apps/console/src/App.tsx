@@ -324,6 +324,7 @@ function RepairOperations({ repairs, onAdvance, onRefresh, onNavigate }: { repai
         ? <form className="repair-command-form" onSubmit={(event) => { event.preventDefault(); void submitAdvance({ note: reviewNote }) }}>
           <div className="command-form-heading"><div><h3>센터 검증 · 합성 데모</h3><p>제출된 수리 결과와 비용을 확인한 뒤, 합성 데모 projection에 검증을 기록합니다.</p></div><StatusPill tone="warning">필수 확인</StatusPill></div>
           <div className="submission-summary" aria-label="수리 제출 요약"><span>제출 파트너 <strong>{repair.partner}</strong></span><span>청구 금액 <strong>{repair.amount}</strong></span><span>제출 상태 <strong>수리 결과 및 비용 제출됨</strong></span></div>
+          <div className="submitted-work-items" aria-label="제출된 수리 작업">{repair.workItems.length ? repair.workItems.map((item, index) => <div className="reserve-box" key={`${item.categoryCode}-${item.actionCode}-${index}`}><div><span>{item.categoryLabel}</span><strong>{item.actionLabel} · {item.quantity}개</strong></div><b>{item.lineAmountKrw.toLocaleString('ko-KR')}원</b></div>) : <div className="completion-note pending-note">구조화된 수리 항목이 없어 검증할 수 없습니다.</div>}</div>
           <fieldset className="verification-list"><legend>검증 체크리스트</legend>
             <label className="check-field"><input type="checkbox" checked={verification.repair} onChange={(event) => setVerification({ ...verification, repair: event.target.checked })} /> <span>수리 결과를 확인했습니다.</span></label>
             <label className="check-field"><input type="checkbox" checked={verification.amount} onChange={(event) => setVerification({ ...verification, amount: event.target.checked })} /> <span>청구 금액을 확인했습니다.</span></label>
@@ -331,7 +332,7 @@ function RepairOperations({ repairs, onAdvance, onRefresh, onNavigate }: { repai
           </fieldset>
           <label className="full-field" htmlFor="verification-note">검증 메모 <span>(선택)</span></label>
           <textarea id="verification-note" value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="검증 근거를 남겨 주세요." rows={2} />
-          <button className="primary-button" type="submit" disabled={isBusy || !verification.repair || !verification.amount || !verification.eligibility} aria-busy={isBusy}>{isBusy ? '검증 요청 중…' : '센터 검증 완료'} <Icon name="arrow" size={15} /></button>
+          <button className="primary-button" type="submit" disabled={isBusy || !repair.workItems.length || !verification.repair || !verification.amount || !verification.eligibility} aria-busy={isBusy}>{isBusy ? '검증 요청 중…' : '센터 검증 완료'} <Icon name="arrow" size={15} /></button>
         </form>
         : <div className="repair-command-form completed-command"><div className="command-form-heading"><div><h3>센터 검증 완료</h3><p>이 요청은 검증이 완료되어 운영자 화면에서 추가 상태 변경을 할 수 없습니다.</p></div><StatusPill tone="success">완료</StatusPill></div><div className="completion-note"><Icon name="check" size={15} /> 합성 데모 projection 기준 revision {repair.revision}의 완료 상태입니다.</div></div>
 

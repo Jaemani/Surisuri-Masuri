@@ -154,6 +154,7 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
           priority: isToday(job.data().scheduled_at) ? 'today' : 'scheduled',
           billedAmountKrw: nullableMoney(job.data().billed_amount_krw),
           submittedAt: isoLabel(job.data().submitted_at),
+          workItems: safeWorkItems(job.data().work_items),
           allowedActions: repairerAllowedActions(status),
         };
       }),
@@ -174,7 +175,7 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
 
   private consoleRepair(repair: QueryDocumentSnapshot, names: Map<string, string>, devices: Map<string, QueryDocumentSnapshot>, partners: Map<string, string>) {
     const status = repair.data().status as RepairStatus;
-    return { id: repair.id, user: names.get(String(repair.data().requester_person_id)) ?? `이용자 ${shortCode(String(repair.data().requester_person_id))}`, device: publicDevice(devices.get(String(repair.data().device_id))), issue: safeOperationalIssue(repair.data()), request: dateLabel(repair.data().created_at, '날짜 미확인'), partner: partners.get(String(repair.data().repair_station_id)) ?? '미배정', amount: moneyLabel(repair.data().billed_amount_krw ?? repair.data().requested_amount_krw), stage: consoleStage(status), priority: repair.data().priority === 'urgent_review' ? '높음' : repair.data().priority === 'routine' ? '낮음' : '보통', revision: requiredPositiveInteger(repair.data(), 'revision', 'CORRUPT_REPAIR_DOCUMENT') };
+    return { id: repair.id, user: names.get(String(repair.data().requester_person_id)) ?? `이용자 ${shortCode(String(repair.data().requester_person_id))}`, device: publicDevice(devices.get(String(repair.data().device_id))), issue: safeOperationalIssue(repair.data()), request: dateLabel(repair.data().created_at, '날짜 미확인'), partner: partners.get(String(repair.data().repair_station_id)) ?? '미배정', amount: moneyLabel(repair.data().billed_amount_krw ?? repair.data().requested_amount_krw), workItems: safeWorkItems(repair.data().work_items), stage: consoleStage(status), priority: repair.data().priority === 'urgent_review' ? '높음' : repair.data().priority === 'routine' ? '낮음' : '보통', revision: requiredPositiveInteger(repair.data(), 'revision', 'CORRUPT_REPAIR_DOCUMENT') };
   }
 
   private async consoleLedger(tenantId: string, accounts: QueryDocumentSnapshot[], names: Map<string, string>) {
@@ -241,3 +242,16 @@ function ledgerState(type: unknown): '예약' | '집행 완료' | '예약 취소
 function reportState(status: unknown) { return status === 'completed' ? '발행 완료' : status === 'running' ? '검토 중' : '초안'; }
 function isToday(value: unknown) { const millis = timestampMillis(value); if (!millis) return false; const now = new Date(); const date = new Date(millis); return now.getUTCFullYear() === date.getUTCFullYear() && now.getUTCMonth() === date.getUTCMonth() && now.getUTCDate() === date.getUTCDate(); }
 function repairerAllowedActions(status: RepairStatus): Array<'schedule' | 'start' | 'submit' | 'resume'> { if (status === 'assigned') return ['schedule']; if (status === 'scheduled') return ['start']; if (status === 'in_progress') return ['submit']; if (status === 'needs_correction') return ['resume']; return []; }
+function safeWorkItems(value: unknown): Array<{ categoryCode: string; categoryLabel: string; actionCode: string; actionLabel: string; quantity: number; lineAmountKrw: number }> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 20) throw new DomainCommandError('CORRUPT_REPAIR_DOCUMENT', 'Repair work items are invalid.', 500);
+  const categories: Record<string, string> = { wheel_tire: '바퀴·타이어', battery: '배터리', brakes: '브레이크', controls: '조작부', seat_frame: '시트·프레임', other: '기타' };
+  const actions: Record<string, string> = { inspect: '점검', adjust: '조정', repair: '수리', replace: '교체' };
+  return value.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object') throw new DomainCommandError('CORRUPT_REPAIR_DOCUMENT', 'A repair work item is invalid.', 500);
+    const item = candidate as Record<string, unknown>;
+    const categoryCode = String(item.category_code); const actionCode = String(item.action_code);
+    if (!categories[categoryCode] || !actions[actionCode] || !Number.isSafeInteger(item.quantity) || !Number.isSafeInteger(item.line_amount_krw)) throw new DomainCommandError('CORRUPT_REPAIR_DOCUMENT', 'A repair work item contains invalid values.', 500);
+    return { categoryCode, categoryLabel: categories[categoryCode], actionCode, actionLabel: actions[actionCode], quantity: item.quantity as number, lineAmountKrw: item.line_amount_krw as number };
+  });
+}

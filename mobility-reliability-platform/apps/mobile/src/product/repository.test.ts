@@ -78,7 +78,7 @@ describe('FirebaseProductRepository', () => {
   it('decodes the repairer projection without requiring beneficiary-only fields', async () => {
     const repository = new FirebaseProductRepository(firebaseOptions(async () => jsonResponse(200, {
       roleSession: { role: 'repairer', displayName: '따뜻한바퀴 수리센터', isDemo: false },
-      repairJobs: [{ id: 'job-1', revision: 3, status: 'assigned', customerLabel: '이용자 C-1042', device: { publicCode: 'MOB-1', model: '나래 모빌리티 M-22' }, issue: '브레이크 점검', scheduledAt: null, scheduleLabel: '일정 협의 필요', priority: 'today', billedAmountKrw: null, submittedAt: null, allowedActions: ['schedule'], subsidyAccountId: 'must-not-spread' }],
+      repairJobs: [{ id: 'job-1', revision: 3, status: 'assigned', customerLabel: '이용자 C-1042', device: { publicCode: 'MOB-1', model: '나래 모빌리티 M-22' }, issue: '브레이크 점검', scheduledAt: null, scheduleLabel: '일정 협의 필요', priority: 'today', billedAmountKrw: null, submittedAt: null, workItems: [], allowedActions: ['schedule'], subsidyAccountId: 'must-not-spread' }],
     })));
 
     const snapshot = await repository.getSnapshot();

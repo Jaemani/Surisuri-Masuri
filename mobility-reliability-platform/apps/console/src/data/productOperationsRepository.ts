@@ -32,6 +32,7 @@ export type RepairRecord = {
   request: string
   partner: string
   amount: string
+  workItems: Array<{ categoryCode: string; categoryLabel: string; actionCode: string; actionLabel: string; quantity: number; lineAmountKrw: number }>
   stage: WorkflowStage
   priority: '높음' | '보통' | '낮음'
   /** Server projection revision. Required for a production status transition. */
@@ -281,10 +282,10 @@ const demoDevices: DeviceRecord[] = [
 ]
 
 const demoRepairs: RepairRecord[] = [
-  { id: 'SR-2026-081', user: '박정호', device: 'MOB-23991', issue: '주행 중 좌측 쏠림', request: '오늘 08:35', partner: '미배정', amount: '₩180,000', stage: 'new', priority: '높음', revision: 1 },
-  { id: 'SR-2026-079', user: '이경자', device: 'MOB-23874', issue: '충전 단자 접촉 불량', request: '어제 16:10', partner: '한마음 모빌리티', amount: '₩95,000', stage: 'assigned', priority: '보통', revision: 3 },
-  { id: 'SR-2026-074', user: '최민수', device: 'MOB-23703', issue: '등받이 고정 레버 교체', request: '08. 10. 11:22', partner: '케어휠 수리소', amount: '₩72,000', stage: 'submitted', priority: '보통', revision: 4 },
-  { id: 'SR-2026-069', user: '김서윤', device: 'MOB-24018', issue: '타이어 마모 점검', request: '08. 08. 14:05', partner: '한마음 모빌리티', amount: '₩58,000', stage: 'verified', priority: '낮음', revision: 5 },
+  { id: 'SR-2026-081', user: '박정호', device: 'MOB-23991', issue: '주행 중 좌측 쏠림', request: '오늘 08:35', partner: '미배정', amount: '₩180,000', workItems: [], stage: 'new', priority: '높음', revision: 1 },
+  { id: 'SR-2026-079', user: '이경자', device: 'MOB-23874', issue: '충전 단자 접촉 불량', request: '어제 16:10', partner: '한마음 모빌리티', amount: '₩95,000', workItems: [], stage: 'assigned', priority: '보통', revision: 3 },
+  { id: 'SR-2026-074', user: '최민수', device: 'MOB-23703', issue: '등받이 고정 레버 교체', request: '08. 10. 11:22', partner: '케어휠 수리소', amount: '₩72,000', workItems: [{ categoryCode: 'seat_frame', categoryLabel: '시트·프레임', actionCode: 'replace', actionLabel: '교체', quantity: 1, lineAmountKrw: 72000 }], stage: 'submitted', priority: '보통', revision: 4 },
+  { id: 'SR-2026-069', user: '김서윤', device: 'MOB-24018', issue: '타이어 마모 점검', request: '08. 08. 14:05', partner: '한마음 모빌리티', amount: '₩58,000', workItems: [{ categoryCode: 'wheel_tire', categoryLabel: '바퀴·타이어', actionCode: 'inspect', actionLabel: '점검', quantity: 1, lineAmountKrw: 58000 }], stage: 'verified', priority: '낮음', revision: 5 },
 ]
 
 const demoLedger: LedgerEntry[] = [
@@ -506,7 +507,8 @@ const parseDevices: ProjectionParser<DeviceRecord[]> = (value) => arrayOf(value,
 
 const parseRepairs: ProjectionParser<RepairRecord[]> = (value) => arrayOf(value, (item) => {
   const record = asRecord(item)
-  return { id: stringAt(record, 'id'), user: stringAt(record, 'user'), device: stringAt(record, 'device'), issue: stringAt(record, 'issue'), request: stringAt(record, 'request'), partner: stringAt(record, 'partner'), amount: stringAt(record, 'amount'), stage: enumAt(record, 'stage', ['new', 'assigned', 'submitted', 'verified']), priority: enumAt(record, 'priority', ['높음', '보통', '낮음']), revision: numberAt(record, 'revision') }
+  const workItems = record.workItems === undefined ? [] : arrayOf(record.workItems, (candidate) => { const work = asRecord(candidate); return { categoryCode: stringAt(work, 'categoryCode'), categoryLabel: stringAt(work, 'categoryLabel'), actionCode: stringAt(work, 'actionCode'), actionLabel: stringAt(work, 'actionLabel'), quantity: numberAt(work, 'quantity'), lineAmountKrw: numberAt(work, 'lineAmountKrw') } })
+  return { id: stringAt(record, 'id'), user: stringAt(record, 'user'), device: stringAt(record, 'device'), issue: stringAt(record, 'issue'), request: stringAt(record, 'request'), partner: stringAt(record, 'partner'), amount: stringAt(record, 'amount'), workItems, stage: enumAt(record, 'stage', ['new', 'assigned', 'submitted', 'verified']), priority: enumAt(record, 'priority', ['높음', '보통', '낮음']), revision: numberAt(record, 'revision') }
 })
 
 const parseLedger: ProjectionParser<LedgerEntry[]> = (value) => arrayOf(value, (item) => {

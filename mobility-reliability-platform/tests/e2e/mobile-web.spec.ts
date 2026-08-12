@@ -59,10 +59,12 @@ test.describe('mobile web visual preview', () => {
     await page.getByRole('button', { name: '이 일정으로 확정' }).click();
     await expect(page.getByText('현장 확인 후 작업을 시작하세요')).toBeVisible();
     await page.getByRole('button', { name: '현장 확인 후 작업 시작' }).click();
-    await expect(page.getByText('작업을 마치면 비용을 제출하세요')).toBeVisible();
+    await expect(page.getByText('작업을 마치면 결과를 제출하세요')).toBeVisible();
     await page.getByRole('button', { name: '비용 입력 및 제출' }).click();
     await page.getByLabel('수리 청구 금액').fill('85000');
-    await page.getByRole('button', { name: '금액 확인하고 제출' }).click();
+    await page.getByRole('radio', { name: '브레이크' }).click();
+    await page.getByRole('radio', { name: '교체' }).click();
+    await page.getByRole('button', { name: '작업 내용 확인하고 제출' }).click();
     await expect(page.getByText('복지관 검증을 기다리고 있어요')).toBeVisible();
   });
 });

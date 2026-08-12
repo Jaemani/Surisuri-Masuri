@@ -20,5 +20,10 @@
 - Firestore Emulator command 5 + projection 5 passed
 - 완료 이력 하위 item 1건과 raw detail 부재 확인
 
-모바일 입력과 복지관 제출 상세 projection/UI는 다음 작업 단위다.
+## 제품 연결
 
+- 수리사 모바일에 작업 부위·처리 방법·금액 입력을 연결했다.
+- mobile adapter는 표시 label을 제거하고 code·수량·금액만 command로 전송한다.
+- 수리사·복지관 projection은 사람이 읽을 label을 서버에서 파생한다.
+- 복지관 제출 상세는 구조화 항목을 표시하고 항목이 없으면 검증 버튼을 비활성화한다.
+- React Native web flow와 console UI를 Playwright로 함께 검증했다.

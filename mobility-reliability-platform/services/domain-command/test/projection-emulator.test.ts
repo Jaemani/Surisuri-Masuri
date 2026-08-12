@@ -56,9 +56,9 @@ describe('Firestore purpose-limited projection adapter', () => {
       id: 'work-1', revision: 3, status: 'assigned', customerLabel: '이용자 C-1042',
       device: { publicCode: 'MOB-1', model: '나래 EV-2' }, issue: '브레이크',
       scheduledAt: null, scheduleLabel: '일정 협의 필요', priority: 'scheduled',
-      billedAmountKrw: null, submittedAt: null, allowedActions: ['schedule'],
+      billedAmountKrw: null, submittedAt: null, workItems: [], allowedActions: ['schedule'],
     });
-    expect(Object.keys(snapshot.repairJobs[0]!).sort()).toEqual(['allowedActions', 'billedAmountKrw', 'customerLabel', 'device', 'id', 'issue', 'priority', 'revision', 'scheduleLabel', 'scheduledAt', 'status', 'submittedAt'].sort());
+    expect(Object.keys(snapshot.repairJobs[0]!).sort()).toEqual(['allowedActions', 'billedAmountKrw', 'customerLabel', 'device', 'id', 'issue', 'priority', 'revision', 'scheduleLabel', 'scheduledAt', 'status', 'submittedAt', 'workItems'].sort());
     expect(JSON.stringify(snapshot)).not.toContain('account-1');
     expect(snapshot).not.toHaveProperty('device');
     expect(snapshot).not.toHaveProperty('subsidy');

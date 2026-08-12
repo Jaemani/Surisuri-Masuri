@@ -19,6 +19,7 @@ export interface MobileRepairerSnapshot {
     priority: 'today' | 'scheduled';
     billedAmountKrw: number | null;
     submittedAt: string | null;
+    workItems: Array<{ categoryCode: string; categoryLabel: string; actionCode: string; actionLabel: string; quantity: number; lineAmountKrw: number }>;
     allowedActions: Array<'schedule' | 'start' | 'submit' | 'resume'>;
   }>;
 }

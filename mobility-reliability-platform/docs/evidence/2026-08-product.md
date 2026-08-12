@@ -87,3 +87,12 @@
 - 시각 증거: `mobile-repairer-list`, `mobile-repairer-workspace` snapshot
 - 확인 항목: 일정 확정 → 작업 시작 → 비용 제출 → 복지관 검증 대기, 공개코드 대조, 한 단계 한 CTA, authoritative projection refresh
 - 제한: native picker, QR camera/lookup, 구조화 작업 항목, 실제 Firebase 배포와 실기기 접근성은 미검증
+
+# EVD-20260813-08 — 구조화 수리 항목 end-to-end
+
+- 분류: `LOCAL_EMULATOR`, `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
+- command: category/action/quantity/line amount exact allowlist, 합계-청구액 일치 검증
+- storage: work order structured map 및 완료 repair item atomic materialization
+- UI: 수리사 부위·처리 선택, 복지관 제출 항목 검증과 빈 항목 fail-closed
+- 검증: mobile 248 tests, console 10 tests/build, domain 12 tests, Emulator 10, Playwright 4 passed
+- 제한: 현장 분류 적합성, 복수 항목 편집 UX, 부품 catalog/component linkage와 실제 배포는 미검증

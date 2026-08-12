@@ -85,6 +85,7 @@ export const demoRepairJobs: RepairJob[] = [
     priority: 'today',
     billedAmountKrw: null,
     submittedAt: null,
+    workItems: [],
     allowedActions: ['schedule'],
   },
   {
@@ -99,6 +100,7 @@ export const demoRepairJobs: RepairJob[] = [
     priority: 'scheduled',
     billedAmountKrw: null,
     submittedAt: null,
+    workItems: [],
     allowedActions: ['start'],
   },
   {
@@ -113,6 +115,7 @@ export const demoRepairJobs: RepairJob[] = [
     priority: 'scheduled',
     billedAmountKrw: null,
     submittedAt: null,
+    workItems: [],
     allowedActions: ['submit'],
   },
 ];

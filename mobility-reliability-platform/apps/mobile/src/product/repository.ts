@@ -124,7 +124,7 @@ export class DemoProductRepository implements ProductRepository {
       status: nextStatus,
       revision: job.revision + 1,
       ...(input.action === 'schedule' ? { scheduledAt: input.scheduledAt, scheduleLabel: demoScheduleLabel(input.scheduledAt) } : {}),
-      ...(input.action === 'submit' ? { billedAmountKrw: input.billedAmountKrw, submittedAt: new Date().toISOString() } : {}),
+      ...(input.action === 'submit' ? { billedAmountKrw: input.billedAmountKrw, workItems: input.workItems.map((item) => ({ ...item })), submittedAt: new Date().toISOString() } : {}),
       allowedActions: nextStatus === 'scheduled' ? ['start'] : nextStatus === 'in_progress' ? ['submit'] : [],
     };
     this.snapshot = { ...this.snapshot, repairJobs: this.snapshot.repairJobs.map((candidate) => candidate.id === next.id ? next : candidate) };
@@ -275,6 +275,7 @@ export class FirebaseProductRepository implements ProductRepository {
     if (input.action === 'submit') {
       if (!Number.isSafeInteger(input.billedAmountKrw) || input.billedAmountKrw <= 0) throw new ProductRepositoryError('INVALID_RESPONSE', 'The billed repair amount must be a positive integer.');
       body.billedAmountKrw = input.billedAmountKrw;
+      body.workItems = input.workItems.map(({ categoryCode, actionCode, quantity, lineAmountKrw }) => ({ categoryCode, actionCode, quantity, lineAmountKrw }));
     }
     const response = await this.request('POST', this.endpoint('transitionRepairRequest'), body, input.idempotencyKey);
     const resourceId = decodeTransitionCommandResult(await readJson(response));
@@ -509,6 +510,7 @@ function validRepairJob(value: unknown): value is RepairJob {
     && typeof item.issue === 'string' && (item.scheduledAt === null || typeof item.scheduledAt === 'string') && typeof item.scheduleLabel === 'string'
     && (item.priority === 'today' || item.priority === 'scheduled') && (item.billedAmountKrw === null || Number.isSafeInteger(item.billedAmountKrw))
     && (item.submittedAt === null || typeof item.submittedAt === 'string') && Array.isArray(item.allowedActions)
+    && Array.isArray(item.workItems) && item.workItems.every(validRepairWorkItem)
     && item.allowedActions.every((action) => ['schedule', 'start', 'submit', 'resume'].includes(action));
 }
 
@@ -530,9 +532,11 @@ function copyRepairJob(job: RepairJob): RepairJob {
     priority: job.priority,
     billedAmountKrw: job.billedAmountKrw,
     submittedAt: job.submittedAt,
+    workItems: job.workItems.map((item) => ({ ...item })),
     allowedActions: [...job.allowedActions],
   };
 }
+function validRepairWorkItem(value: unknown): value is RepairJob['workItems'][number] { if (!value || typeof value !== 'object') return false; const item = value as Partial<RepairJob['workItems'][number]>; return ['wheel_tire','battery','brakes','controls','seat_frame','other'].includes(String(item.categoryCode)) && typeof item.categoryLabel === 'string' && ['inspect','adjust','repair','replace'].includes(String(item.actionCode)) && typeof item.actionLabel === 'string' && Number.isSafeInteger(item.quantity) && Number.isSafeInteger(item.lineAmountKrw); }
 function demoScheduleLabel(value: string) { return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(value)); }
 
 export type ProductRepositorySource = 'demo' | 'firebase';

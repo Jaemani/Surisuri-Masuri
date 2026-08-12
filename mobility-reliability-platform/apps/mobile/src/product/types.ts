@@ -54,8 +54,11 @@ export type RepairJob = {
   priority: 'today' | 'scheduled';
   billedAmountKrw: number | null;
   submittedAt: string | null;
+  workItems: RepairWorkItem[];
   allowedActions: Array<'schedule' | 'start' | 'submit' | 'resume'>;
 };
+
+export type RepairWorkItem = { categoryCode: 'wheel_tire' | 'battery' | 'brakes' | 'controls' | 'seat_frame' | 'other'; categoryLabel: string; actionCode: 'inspect' | 'adjust' | 'repair' | 'replace'; actionLabel: string; quantity: number; lineAmountKrw: number };
 
 export type RoleSession = {
   role: ProductRole;
@@ -105,4 +108,4 @@ export type CreateRepairRequestInput = {
 export type RepairerJobCommand =
   | { action: 'schedule'; repairRequestId: string; expectedRevision: number; scheduledAt: string; idempotencyKey: string }
   | { action: 'start' | 'resume'; repairRequestId: string; expectedRevision: number; idempotencyKey: string }
-  | { action: 'submit'; repairRequestId: string; expectedRevision: number; billedAmountKrw: number; idempotencyKey: string };
+  | { action: 'submit'; repairRequestId: string; expectedRevision: number; billedAmountKrw: number; workItems: RepairWorkItem[]; idempotencyKey: string };
