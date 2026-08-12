@@ -109,7 +109,8 @@ def _state_hash(model: nn.Module) -> str:
     digest = hashlib.sha256()
     for name, tensor in sorted(model.state_dict().items()):
         digest.update(name.encode())
-        digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+        raw = tensor.detach().cpu().contiguous().view(torch.uint8).flatten().tolist()
+        digest.update(bytes(raw))
     return digest.hexdigest()
 
 

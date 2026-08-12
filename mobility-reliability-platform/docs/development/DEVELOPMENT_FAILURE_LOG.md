@@ -4,6 +4,16 @@
 추적한다. 실제 사용자·기관·staging·production 영향이 있는 사건은 이 문서가 아니라
 [`incidents/`](../incidents/) 정책에 따라 별도 인시던트로 기록한다.
 
+## DEVFAIL-20260813-03 — PyTorch 상태 해시의 미선언 NumPy 의존
+
+- 상태: `resolved-local-development`
+- 환경: WSL2 / Python 3.12 / locked uv environment
+- 실제 사용자·기관 영향: 없음
+- 증상: 전체 ML test에서 `_state_hash()`가 `Tensor.numpy()`를 호출했지만 NumPy가 선언된 dependency가 아니어서 두 PyTorch 후보 테스트가 실패했다.
+- 영향: clean 환경에서 R07-C 재현 명령이 실패했다. 모델 학습 결과나 production artifact는 배포되지 않았다.
+- 복구: contiguous tensor를 `torch.uint8` byte view로 바꾼 뒤 Python 기본 `bytes`로 해시해 NumPy 의존을 제거했다.
+- 예방: 재현성 코드가 optional transitive package를 암묵적으로 사용하지 않도록 locked clean 환경의 전체 pytest를 게이트로 유지한다.
+
 ## DEVFAIL-20260813-01 — Expo Web 설치 후처리의 CLI 파일 해석 일시 실패
 
 - 상태: `resolved-local-development`
