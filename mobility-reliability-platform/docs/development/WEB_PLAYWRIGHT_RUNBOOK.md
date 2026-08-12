@@ -2,7 +2,7 @@
 
 ## 목적
 
-React Native 모바일 화면을 브라우저에서 빠르게 확인하고 390×844 시각 회귀 테스트를 실행한다. 웹 preview는 UI와 상태 전이만 검증한다.
+React Native 모바일과 복지관 콘솔을 브라우저에서 빠르게 확인하고 390×844 모바일·1440×1024 콘솔 시각 회귀 테스트를 실행한다. 웹 preview는 UI와 demo 상태 전이만 검증한다.
 
 ## 최초 설치
 
@@ -27,6 +27,14 @@ pnpm --filter @mobility-reliability/mobile run web:e2e
 
 브라우저에서 `http://localhost:19006`을 연다. 웹은 네이티브 DB가 아니라 결정론적 preview state를 사용한다.
 
+복지관 콘솔은 별도 터미널에서 실행한다.
+
+```bash
+pnpm --filter @mobility-reliability/console run web:e2e
+```
+
+브라우저에서 `http://localhost:19007`을 연다.
+
 ## 테스트
 
 ```bash
@@ -39,7 +47,7 @@ pnpm test:e2e
 pnpm test:e2e:update
 ```
 
-기준 이미지 갱신 전 홈·기록 중 화면을 직접 열어 잘림, 카피, 핵심 버튼 위치를 확인한다.
+기준 이미지 갱신 전 모바일의 수리·지원금 우선순위와 콘솔의 오늘 할 일·수리 운영 화면을 직접 열어 잘림, 카피, 글자 크기, 핵심 버튼 위치를 확인한다.
 
 ## 네이티브 검증 전용
 

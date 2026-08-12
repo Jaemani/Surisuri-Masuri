@@ -4,6 +4,11 @@ React Native와 Expo 기반의 사용자·수리사 모바일 앱입니다. Andr
 
 ## 현재 상태
 
+- 사용자·보호자용 홈, 수리, 내 기기, 복지지원, 설정·알림 제품 화면 구현
+- 동일 코드베이스의 수리사 작업·기기 확인 화면 구현
+- 홈 우선순위는 진행 중 수리·다음 약속·지원금·기기 상태이며 GPS는 선택적 사용량 기록으로 표시
+- 현재 인명·기기·수리·지원금은 deterministic demo이고 Domain Command API와 Firebase 운영 데이터는 미연결
+
 - foreground 위치 권한 상태와 명시적 주행 시작·종료 구현
 - `watchPositionAsync` 위치 sample을 SQLite WAL event log에 append
 - event payload와 delivery 상태를 분리한 local outbox 구현
@@ -39,7 +44,7 @@ M3는 8개월 로드맵에서 7월에 계획한 모바일 업로드 복구 게�
 실제 완료일을 섞지 않기 위해 이 경계를 제품 업데이트·증거·사람 대상 리포트에서 각각
 분리한다.
 
-화면에는 원본 좌표를 표시하지 않고 저장된 sample 수와 **실제 server-bound upload 대기 수**만 보여줍니다. 현재 UI는 local-only session만 만들므로 이 값은 0이며, 개발 로그에도 좌표를 출력하지 않습니다.
+화면에는 원본 좌표나 개발용 sample·upload queue를 표시하지 않습니다. 현재 UI는 local-only session만 만들고 개발 로그에도 좌표를 출력하지 않습니다.
 
 ## 모바일 수집 게이트
 
