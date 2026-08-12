@@ -3,7 +3,7 @@
 ## 1. 문서 상태
 
 - 문서 성격: 프로젝트 정보 기준 문서
-- 기준일: 2026-07-22
+- 기준일: 2026-08-13
 - 프로젝트 기간: 2026-05-01 ~ 2026-12-31
 - 내부 개발명: Mobility Reliability Platform
 - 외부 제품명: 상표 검토 전까지 미정
@@ -72,6 +72,12 @@ archive 경로는 사용자가 제공한 참조 식별자다. 2026-07-21 현재 
 4. **지자체·정책 담당자**에게는 개인 원본이 아닌 검증된 익명 집계·예산·점검 지표를 제공한다.
 
 복지관 연결은 제품 도입의 출발점이지 모든 기관에 동일한 양식을 강제한다는 뜻이 아니다. core model은 표준화하고 기관별 출력은 adapter로 분리한다.
+
+### 2026-08-13 구현 snapshot
+
+현재 local synthetic 제품 흐름은 수리 접수, 복지관 배정, 수리사 일정·작업·구조화 결과 제출, 복지관 검증 대기까지 이어진다. QR camera와 native 일정 선택 dependency는 Android/iOS export에 포함됐고 WSL web 흐름은 Playwright로 검토했다.
+
+Firebase production 연결, 실제 사용자·복지관·수리사 처리, Android/iPhone의 QR camera와 native picker 조작은 아직 검증하지 않았다. 최신 코드 근거와 제한은 [2026년 8월 제품 증거](evidence/2026-08-product.md)를 우선한다.
 
 ## 6. 최종 사용자 흐름
 

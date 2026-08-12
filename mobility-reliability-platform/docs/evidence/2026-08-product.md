@@ -110,3 +110,11 @@
 - 확인 항목: Expo Camera permission flow, QR-only scanner, bounded payload parser, 수동 입력 fallback, 동일 기기-code gate
 - 검증: mobile 19 files / 250 tests, Android/iOS Expo export, Playwright 4 passed
 - 제한: 실제 Android/iPhone 카메라, 저조도·훼손 QR, 위조 방지와 서버 lookup은 미검증
+
+# EVD-20260813-11 — 네이티브 방문 일정 선택
+
+- 분류: `LOCAL_TEST`, `NATIVE_EXPORT`, `WEB_VISUAL`, `SYNTHETIC`
+- 확인 항목: 현재 이후·180일 이내 client guard, native `Date`의 canonical ISO 변환, Asia/Seoul 표시, 선택값 변경 시에만 idempotency key reset, WSL web fallback
+- 검증: mobile typecheck, 20 files / 253 tests, Android/iOS Expo export, Playwright mobile 2 flows passed
+- 시각 증거: `tests/e2e/mobile-web.spec.ts-snapshots/mobile-repairer-schedule-mobile-chromium-linux.png`
+- 제한: 실제 Android/iPhone picker 조작, 취소·시간대 경계·native accessibility와 production 예약은 미검증

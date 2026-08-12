@@ -58,7 +58,10 @@ test.describe('mobile web visual preview', () => {
     await expect(page.getByText('기기 코드가 일치합니다')).toBeVisible();
     await expect(page).toHaveScreenshot('mobile-repairer-workspace.png', { animations: 'disabled', fullPage: true });
     await page.getByRole('button', { name: '방문 일정 확정' }).click();
-    await expect(page.getByRole('heading', { name: '방문 일정 확인' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '방문 일정 선택' })).toBeVisible();
+    await expect(page.getByText('Android와 iPhone에서는 기기의 날짜·시간 선택기가 열립니다.')).toBeVisible();
+    await page.getByRole('button', { name: '30분 뒤' }).click();
+    await expect(page).toHaveScreenshot('mobile-repairer-schedule.png', { animations: 'disabled', fullPage: true, mask: [page.getByTestId('repairer-schedule-summary')] });
     await page.getByRole('button', { name: '이 일정으로 확정' }).click();
     await expect(page.getByText('현장 확인 후 작업을 시작하세요')).toBeVisible();
     await page.getByRole('button', { name: '현장 확인 후 작업 시작' }).click();
