@@ -58,3 +58,12 @@
 - 확인 항목: Firebase ID token·App Check·tenant scope HTTP 경계, 역할별 mobile union, operator-only console projection, assigned-repairer filter, DTO redaction, nested tenant fail-closed, bounded reads, Functions endpoint 정렬
 - 금지 경계: `privatePeople`, raw GPS/trip, Storage path, repairer subsidy projection, production→demo fallback 없음
 - 제한: production Firebase 배포/Auth/App Check/native network/현장 사용 증거가 아니며 guardian 대상 projection과 cross-organization grant는 미구현
+
+# EVD-20260813-05 — 완료 수리 이력 materialization
+
+- 분류: `LOCAL_EMULATOR`, `SYNTHETIC`
+- 실행: `pnpm --filter @mobility-reliability/domain-command test:emulator`
+- 결과: command 5개 + projection 5개, 총 10 scenarios 통과
+- 확인 항목: 활성 tenant 수리소 exact read, 미등록 수리소 거부, 전체 수리 상태 전이, 완료 work order와 immutable repair의 atomic write, source quality와 금액·기기·수리소 linkage
+- 개인정보 경계: 완료 repair에 raw issue summary와 memo를 복사하지 않음
+- 제한: repair items·부품 설치/제거·production 배포·실제 현장 수리 완료는 미검증

@@ -92,8 +92,12 @@ export class FirestoreDomainCommandStore implements CommandStore {
       await this.assertRepairActor(tx, input.actor, current);
 
       if (input.command.toStatus === 'assigned') {
+        if (!input.command.repairStationId) throw new DomainCommandError('REPAIR_STATION_REQUIRED', 'An assigned repair needs a repair station.');
         if (!input.command.repairerFirebaseUid) throw new DomainCommandError('REPAIRER_REQUIRED', 'An assigned repair needs a repairer identity.');
-        await this.assertActiveRepairer(tx, input.actor.tenantId, input.command.repairerFirebaseUid);
+        await Promise.all([
+          this.assertActiveRepairStation(tx, input.actor.tenantId, input.command.repairStationId),
+          this.assertActiveRepairer(tx, input.actor.tenantId, input.command.repairerFirebaseUid),
+        ]);
       }
       if (input.command.toStatus === 'center_verified' && current.publicFundingInvolved && !input.command.subsidyAccountId) {
         throw new DomainCommandError('SUBSIDY_ACCOUNT_REQUIRED', 'Publicly funded verification requires the subsidy account used for the decision.');
@@ -112,6 +116,9 @@ export class FirestoreDomainCommandStore implements CommandStore {
       tx.update(repairRef, this.repairData(mutation.workOrder));
       tx.create(eventRef, this.eventData(mutation.event));
       tx.create(repairRef.collection('statusHistory').doc(eventId), this.eventData(mutation.event));
+      if (mutation.workOrder.status === 'completed') {
+        tx.create(this.repairHistoryRef(input.actor.tenantId, eventId), this.completedRepairData(mutation.workOrder, eventId));
+      }
       tx.create(idemRef, this.idempotencyData(input.bodyHash, mutation.result));
       return mutation.result;
     });
@@ -217,6 +224,12 @@ export class FirestoreDomainCommandStore implements CommandStore {
     if (!snapshot.exists || data?.tenant_id !== tenantId || data.status !== 'active' || !Array.isArray(data.roles) || !data.roles.includes('repairer')) throw new DomainCommandError('REPAIRER_NOT_FOUND', 'The selected repairer is not an active institution repairer.', 409);
   }
 
+  private async assertActiveRepairStation(tx: Transaction, tenantId: string, repairStationId: string) {
+    const snapshot = await tx.get(this.tenantRef(tenantId).collection('repairStations').doc(repairStationId));
+    const data = snapshot.data();
+    if (!snapshot.exists || data?.tenant_id !== tenantId || data.repair_station_id !== repairStationId || data.status !== 'active') throw new DomainCommandError('REPAIR_STATION_NOT_FOUND', 'The selected repair station is not active in this institution.', 409);
+  }
+
   private decodeRepair(data: DocumentData | undefined): RepairWorkOrder {
     if (!data || typeof data.work_order_id !== 'string' || typeof data.tenant_id !== 'string' || typeof data.status !== 'string' || !Number.isSafeInteger(data.revision)) throw new DomainCommandError('CORRUPT_REPAIR_DOCUMENT', 'The repair work-order document is invalid.', 500);
     return {
@@ -253,6 +266,30 @@ export class FirestoreDomainCommandStore implements CommandStore {
     return compact({ schema_version: 1, work_order_id: workOrder.id, tenant_id: workOrder.tenantId, requester_person_id: workOrder.beneficiaryId, device_id: workOrder.deviceId, issue_summary: workOrder.issueSummary, public_funding_involved: workOrder.publicFundingInvolved, requested_amount_krw: workOrder.requestedAmountKrw, repair_station_id: workOrder.repairStationId, repairer_firebase_uid: workOrder.repairerFirebaseUid, subsidy_account_id: workOrder.subsidyAccountId, billed_amount_krw: workOrder.billedAmountKrw, submitted_at: workOrder.submittedAt ? Timestamp.fromDate(new Date(workOrder.submittedAt)) : undefined, subsidy_decision_id: workOrder.subsidyDecisionId, status: workOrder.status, revision: workOrder.revision, created_by: workOrder.createdByUid, updated_by: workOrder.updatedByUid, created_at: Timestamp.fromDate(new Date(workOrder.createdAt)), updated_at: Timestamp.fromDate(new Date(workOrder.updatedAt)), source: 'native' });
   }
 
+  private completedRepairData(workOrder: RepairWorkOrder, repairId: string): Record<string, unknown> {
+    const recordedAt = Timestamp.fromDate(new Date(workOrder.updatedAt));
+    return compact({
+      schema_version: 1,
+      repair_id: repairId,
+      tenant_id: workOrder.tenantId,
+      work_order_id: workOrder.id,
+      device_id: workOrder.deviceId,
+      service_tenant_id: workOrder.tenantId,
+      repair_station_id: workOrder.repairStationId,
+      repairer_membership_uid: workOrder.repairerFirebaseUid,
+      occurred_at: workOrder.submittedAt ? Timestamp.fromDate(new Date(workOrder.submittedAt)) : recordedAt,
+      recorded_at: recordedAt,
+      repair_kind: 'corrective',
+      status: 'completed',
+      currency: 'KRW',
+      billed_amount_krw: workOrder.billedAmountKrw,
+      source_quality: 'verified',
+      created_at: recordedAt,
+      updated_at: recordedAt,
+      source: 'domain_command',
+    });
+  }
+
   private eventData(event: DomainEvent): Record<string, unknown> {
     const payload = snakeObject(event.payload);
     return compact({ schema_version: 1, event_id: event.eventId, event_type: event.eventType, tenant_id: event.tenantId, aggregate_type: event.aggregateType, aggregate_id: event.aggregateId, aggregate_revision: event.revision, actor_uid: event.actorUid, actor_role: event.actorRole, occurred_at: Timestamp.fromDate(new Date(event.occurredAt)), received_at: this.serverTimestamp(), idempotency_key: payload.idempotency_key, payload, processing_status: 'pending', source: 'native' });
@@ -271,6 +308,7 @@ export class FirestoreDomainCommandStore implements CommandStore {
   private iso(value: unknown): string { return value instanceof Timestamp ? value.toDate().toISOString() : new Date(String(value)).toISOString(); }
   private tenantRef(tenantId: string) { return this.db.collection('tenants').doc(tenantId); }
   private repairRef(tenantId: string, repairId: string) { return this.tenantRef(tenantId).collection('repairWorkOrders').doc(repairId); }
+  private repairHistoryRef(tenantId: string, repairId: string) { return this.tenantRef(tenantId).collection('repairs').doc(repairId); }
   private eventRef(tenantId: string, eventId: string) { return this.tenantRef(tenantId).collection('domainEvents').doc(eventId); }
   private idemRef(tenantId: string, key: string) { return this.tenantRef(tenantId).collection('commandIdempotency').doc(deterministicId('key', key)); }
   private summaryRef(tenantId: string, accountId: string) { return this.tenantRef(tenantId).collection('subsidyAccounts').doc(accountId); }
