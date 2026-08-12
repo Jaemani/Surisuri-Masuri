@@ -24,18 +24,19 @@
 
 | ID | 작업흐름 | 범위 | 최종 산출물 |
 | --- | --- | --- | --- |
-| WS1 | Mobile Capture | 권한, 주행 세션, foreground/background GPS, SQLite outbox, sync, QR, 접근성 | Android/iOS 앱과 복구 가능한 수집 |
+| WS1 | Role-aware Mobile | 사용자 수리·지원·기기, 수리사 작업·QR, 권한, GPS, SQLite outbox, 접근성 | 역할별 Android/iOS 앱과 복구 가능한 사용량 수집 |
 | WS2 | Trusted Telemetry & Commands | wire contract, Firebase identity/App Check, telemetry authorization, receipt/Storage, session·trip/domain command | fail-closed 수집·도메인 명령 경로 |
 | WS3 | Domain & Reliability Twin | async worker, 수리 importer, event model, device/part projection, replay | 특정 시점 상태를 재구성하는 digital twin |
 | WS4 | ML & Evaluation | labeling, rules baseline, PyTorch quality model, ONNX, survival/calibration | 재현 가능한 두 모델과 배포/유보 결정 |
 | WS5 | Evidence-grounded AI | Fact Store, report schema, agent loop, validator, fallback | 근거 ID가 연결된 대상별 보고서 |
-| WS6 | Console & Field Ops | tenant console, adapter, pilot, observability, security, accessibility | 복지관 운영 화면과 실증 운영 근거 |
+| WS6 | Repair & Institution Ops | 수리 work order, 기관 검증, 지원금 원장, tenant console, adapter, pilot | 요청부터 지원금·예방점검까지 이어지는 복지관 운영 |
 | WS7 | EvidenceOps & Communication | ADR, update, incident, evidence, fixed report, demo/whitepaper | 계획·실제·증거가 연결된 기술 포트폴리오 |
 
 ## 4. 핵심 의존성
 
 ```text
-WS1 local event log
+WS1 role-aware repair request + local event log
+  ├─> WS6 repair assignment / verification / subsidy ledger
   └─> WS2 authenticated session/trip command + batch ingest
         ├─> raw object/receipt
         └─> WS3 async privacy/quality + trip/repair event replay
@@ -72,7 +73,8 @@ WS7은 모든 단계의 결정·테스트·실패·화면을 병렬로 수집한
 
 **5월 2차 / R02**
 
-- 모바일 권한·동의·주행 세션 UX와 GPS event 최소 필드를 설계한다.
+- 사용자 수리 요청, 수리사 작업, 복지관 검증과 지원금 원장의 역할·상태를 설계한다.
+- 모바일 권한·동의·주행 세션 UX와 GPS event 최소 필드를 보조 레이어로 설계한다.
 - 위치 원본, PII, 도메인 상태의 분리와 삭제 책임을 정의한다.
 - app shell과 한 번의 foreground GPS vertical slice를 목표로 한다.
 
@@ -94,6 +96,7 @@ WS7은 모든 단계의 결정·테스트·실패·화면을 병렬로 수집한
 
 **6월 1차 / R03**
 
+- 사용자·수리사 역할별 앱 셸, 기기·QR, 수리 요청 vertical slice를 구현한다.
 - foreground/background 권한 흐름, OS lifecycle, 수집 모드를 구현한다.
 - SQLite WAL, schema migration, append-only payload와 mutable delivery state를 분리한다.
 - 앱 재시작 후 열린 trip과 미전송 event를 복원한다.
@@ -123,6 +126,7 @@ WS7은 모든 단계의 결정·테스트·실패·화면을 병렬로 수집한
 
 **7월 1차 / R05**
 
+- 복지관 오늘 할 일과 수리 운영 기본화면, 수리사 작업 제출 surface를 구현한다.
 - 5월의 telemetry event `v0.1` 초안을 모바일·서버 fixture로 호환성 검증하고 versioned wire contract candidate를 동결한다.
 - strict telemetry decode, 요청 크기 제한, Firebase ID token/App Check 검증을 구성한다.
 - membership, device assignment, server trip, installation, consent revision authorizer를 만든다.
@@ -156,6 +160,8 @@ WS7은 모든 단계의 결정·테스트·실패·화면을 병렬로 수집한
 
 **8월 1차 / R07**
 
+- 수리 상태기계, 기관별 수리소 배정 정책과 감사 가능한 지원금 원장을 구현한다.
+- 레거시 사용자·기기·수리·수리소의 importer dry-run 계약을 고정한다.
 - 주행/차량 이동/GPS 오류/정지 등 라벨 정의와 검토 도구를 만든다.
 - 속도·가속·정지·방향·accuracy·motion feature를 버전 관리한다.
 - 규칙 baseline과 PyTorch 1D CNN/GRU 등 최소 후보를 같은 split에서 비교한다.

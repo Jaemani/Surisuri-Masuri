@@ -21,8 +21,9 @@
 - 도메인 workflow Node test 6개
 - 계약 valid/invalid fixture
 - Firebase Firestore/Storage Emulator Rules test
+- Playwright mobile/console product-flow test 4개와 승인된 visual snapshot
 
-검증 명령과 정확한 실행 결과는 [EVD-20260813-001](../evidence/2026-08.md#evd-20260813-001--제품-중심-모바일과-수리지원금-도메인-기반)에 기록한다.
+검증 명령과 정확한 실행 결과는 [EVD-20260813-001](../evidence/2026-08-product.md#evd-20260813-001--제품-중심-모바일과-수리지원금-도메인-기반)에 기록한다.
 
 ## 제한
 
@@ -30,3 +31,4 @@
 - 수리 요청 버튼 일부는 로컬 UI 상태만 바꾸며 Domain Command API에 연결되지 않았다.
 - 수리사 QR 화면은 카메라 스캔과 서버 조회가 연결된 운영 기능이 아니다.
 - Android/iPhone native build와 현장 접근성 검증은 이 업데이트의 증거가 아니다.
+- 복지관 콘솔도 deterministic UI state이며 Firebase 운영 adapter는 아직 연결되지 않았다.
