@@ -60,6 +60,7 @@ export function normalizeTransitionCommand(input: unknown): TransitionRepairRequ
     if (value[key] !== undefined) (command as unknown as Record<string, unknown>)[field] = safeId(value[key], field);
   }
   if (value.billedAmountKrw !== undefined) command.billedAmountKrw = positiveKrw(value.billedAmountKrw, 'billedAmountKrw');
+  if (value.workItems !== undefined) command.workItems = normalizeWorkItems(value.workItems);
   if (value.scheduledAt !== undefined) {
     if (typeof value.scheduledAt !== 'string' || Number.isNaN(Date.parse(value.scheduledAt))) throw new DomainCommandError('INVALID_SCHEDULED_AT', 'scheduledAt must be an ISO timestamp.');
     command.scheduledAt = new Date(value.scheduledAt).toISOString();
@@ -74,7 +75,7 @@ const transitionFieldAllowlist: Record<RepairStatus, ReadonlySet<string>> = {
   assigned: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'repairStationId', 'repairerFirebaseUid', 'note']),
   scheduled: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'scheduledAt']),
   in_progress: new Set(['repairRequestId', 'toStatus', 'expectedRevision']),
-  repairer_submitted: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'billedAmountKrw']),
+  repairer_submitted: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'billedAmountKrw', 'workItems']),
   needs_correction: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'note']),
   center_verified: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'subsidyAccountId', 'subsidyDecisionId', 'note']),
   completed: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'note']),
@@ -87,6 +88,21 @@ function assertTransitionFields(value: Record<string, unknown>, toStatus: Repair
   const allowed = transitionFieldAllowlist[toStatus];
   const disallowed = Object.keys(value).filter((key) => !allowed.has(key));
   if (disallowed.length > 0) throw new DomainCommandError('UNEXPECTED_COMMAND_FIELD', `The ${toStatus} transition contains unsupported fields.`);
+}
+
+function normalizeWorkItems(value: unknown): import('./types.js').RepairWorkItem[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 20) throw new DomainCommandError('INVALID_WORK_ITEMS', 'workItems must contain between 1 and 20 structured items.');
+  const categories = new Set(['wheel_tire', 'battery', 'brakes', 'controls', 'seat_frame', 'other']);
+  const actions = new Set(['inspect', 'adjust', 'repair', 'replace']);
+  return value.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new DomainCommandError('INVALID_WORK_ITEM', 'Each work item must be an object.');
+    const item = candidate as Record<string, unknown>;
+    const expected = new Set(['categoryCode', 'actionCode', 'quantity', 'lineAmountKrw']);
+    if (Object.keys(item).some((key) => !expected.has(key)) || !categories.has(String(item.categoryCode)) || !actions.has(String(item.actionCode))) throw new DomainCommandError('INVALID_WORK_ITEM', 'A work item contains unsupported fields or codes.');
+    if (!Number.isSafeInteger(item.quantity) || (item.quantity as number) < 1 || (item.quantity as number) > 20) throw new DomainCommandError('INVALID_WORK_ITEM_QUANTITY', 'A work item quantity must be between 1 and 20.');
+    if (!Number.isSafeInteger(item.lineAmountKrw) || (item.lineAmountKrw as number) < 0 || (item.lineAmountKrw as number) > 100_000_000) throw new DomainCommandError('INVALID_WORK_ITEM_AMOUNT', 'A work item amount is invalid.');
+    return { categoryCode: item.categoryCode, actionCode: item.actionCode, quantity: item.quantity, lineAmountKrw: item.lineAmountKrw } as import('./types.js').RepairWorkItem;
+  });
 }
 
 export function normalizeSubsidyCommand(input: unknown): AppendSubsidyTransactionCommand {
@@ -205,6 +221,11 @@ export function transitionRepairWorkOrder(input: {
     const latest = input.now.getTime() + 180 * 24 * 60 * 60 * 1000;
     if (scheduledAt < earliest || scheduledAt > latest) throw new DomainCommandError('SCHEDULED_AT_OUT_OF_RANGE', 'The appointment time is outside the supported scheduling window.');
   }
+  if (input.command.toStatus === 'repairer_submitted') {
+    if (!input.command.workItems?.length) throw new DomainCommandError('WORK_ITEMS_REQUIRED', 'A repair submission needs structured work items.');
+    const itemTotal = input.command.workItems.reduce((sum, item) => sum + item.lineAmountKrw, 0);
+    if (itemTotal !== input.command.billedAmountKrw) throw new DomainCommandError('WORK_ITEM_TOTAL_MISMATCH', 'The work item total must equal the billed amount.');
+  }
   const next: RepairWorkOrder = {
     ...input.current,
     status: input.command.toStatus,
@@ -216,6 +237,7 @@ export function transitionRepairWorkOrder(input: {
     ...(input.command.scheduledAt === undefined ? {} : { scheduledAt: input.command.scheduledAt }),
     ...(input.command.subsidyAccountId === undefined ? {} : { subsidyAccountId: input.command.subsidyAccountId }),
     ...(input.command.billedAmountKrw === undefined ? {} : { billedAmountKrw: input.command.billedAmountKrw }),
+    ...(input.command.workItems === undefined ? {} : { workItems: input.command.workItems.map((item) => ({ ...item })) }),
     ...(input.command.toStatus === 'repairer_submitted' ? { submittedAt: now } : {}),
     ...(input.command.subsidyDecisionId === undefined ? {} : { subsidyDecisionId: input.command.subsidyDecisionId }),
     ...(input.command.subsidyAccountId === undefined ? {} : { subsidyAccountId: input.command.subsidyAccountId }),

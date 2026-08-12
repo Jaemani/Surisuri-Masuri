@@ -42,8 +42,16 @@ export interface TransitionRepairRequestCommand {
   scheduledAt?: string;
   subsidyAccountId?: string;
   billedAmountKrw?: number;
+  workItems?: RepairWorkItem[];
   subsidyDecisionId?: string;
   note?: string;
+}
+
+export interface RepairWorkItem {
+  categoryCode: 'wheel_tire' | 'battery' | 'brakes' | 'controls' | 'seat_frame' | 'other';
+  actionCode: 'inspect' | 'adjust' | 'repair' | 'replace';
+  quantity: number;
+  lineAmountKrw: number;
 }
 
 export interface AppendSubsidyTransactionCommand {
@@ -71,6 +79,7 @@ export interface RepairWorkOrder {
   scheduledAt?: string;
   subsidyAccountId?: string;
   billedAmountKrw?: number;
+  workItems?: RepairWorkItem[];
   submittedAt?: string;
   subsidyDecisionId?: string;
   status: RepairStatus;

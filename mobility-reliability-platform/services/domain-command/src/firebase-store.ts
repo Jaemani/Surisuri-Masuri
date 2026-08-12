@@ -117,7 +117,9 @@ export class FirestoreDomainCommandStore implements CommandStore {
       tx.create(eventRef, this.eventData(mutation.event));
       tx.create(repairRef.collection('statusHistory').doc(eventId), this.eventData(mutation.event));
       if (mutation.workOrder.status === 'completed') {
-        tx.create(this.repairHistoryRef(input.actor.tenantId, eventId), this.completedRepairData(mutation.workOrder, eventId));
+        const historyRef = this.repairHistoryRef(input.actor.tenantId, eventId);
+        tx.create(historyRef, this.completedRepairData(mutation.workOrder, eventId));
+        mutation.workOrder.workItems?.forEach((item, index) => tx.create(historyRef.collection('items').doc(`item-${String(index + 1).padStart(2, '0')}`), this.completedRepairItemData(input.actor.tenantId, eventId, item, index)));
       }
       tx.create(idemRef, this.idempotencyData(input.bodyHash, mutation.result));
       return mutation.result;
@@ -249,6 +251,7 @@ export class FirestoreDomainCommandStore implements CommandStore {
       ...(data.scheduled_at === undefined ? {} : { scheduledAt: this.iso(data.scheduled_at) }),
       ...(data.subsidy_account_id === undefined ? {} : { subsidyAccountId: data.subsidy_account_id }),
       ...(data.billed_amount_krw === undefined ? {} : { billedAmountKrw: data.billed_amount_krw }),
+      ...(Array.isArray(data.work_items) ? { workItems: data.work_items.map((item: Record<string, unknown>) => ({ categoryCode: item.category_code, actionCode: item.action_code, quantity: item.quantity, lineAmountKrw: item.line_amount_krw })) } : {}),
       ...(data.submitted_at === undefined ? {} : { submittedAt: this.iso(data.submitted_at) }),
       ...(data.subsidy_decision_id === undefined ? {} : { subsidyDecisionId: data.subsidy_decision_id }),
       status: data.status,
@@ -268,7 +271,11 @@ export class FirestoreDomainCommandStore implements CommandStore {
   }
 
   private repairData(workOrder: RepairWorkOrder): Record<string, unknown> {
-    return compact({ schema_version: 1, work_order_id: workOrder.id, tenant_id: workOrder.tenantId, requester_person_id: workOrder.beneficiaryId, device_id: workOrder.deviceId, issue_summary: workOrder.issueSummary, public_funding_involved: workOrder.publicFundingInvolved, requested_amount_krw: workOrder.requestedAmountKrw, repair_station_id: workOrder.repairStationId, repairer_firebase_uid: workOrder.repairerFirebaseUid, scheduled_at: workOrder.scheduledAt ? Timestamp.fromDate(new Date(workOrder.scheduledAt)) : undefined, subsidy_account_id: workOrder.subsidyAccountId, billed_amount_krw: workOrder.billedAmountKrw, submitted_at: workOrder.submittedAt ? Timestamp.fromDate(new Date(workOrder.submittedAt)) : undefined, subsidy_decision_id: workOrder.subsidyDecisionId, status: workOrder.status, revision: workOrder.revision, created_by: workOrder.createdByUid, updated_by: workOrder.updatedByUid, created_at: Timestamp.fromDate(new Date(workOrder.createdAt)), updated_at: Timestamp.fromDate(new Date(workOrder.updatedAt)), source: 'native' });
+    return compact({ schema_version: 1, work_order_id: workOrder.id, tenant_id: workOrder.tenantId, requester_person_id: workOrder.beneficiaryId, device_id: workOrder.deviceId, issue_summary: workOrder.issueSummary, public_funding_involved: workOrder.publicFundingInvolved, requested_amount_krw: workOrder.requestedAmountKrw, repair_station_id: workOrder.repairStationId, repairer_firebase_uid: workOrder.repairerFirebaseUid, scheduled_at: workOrder.scheduledAt ? Timestamp.fromDate(new Date(workOrder.scheduledAt)) : undefined, subsidy_account_id: workOrder.subsidyAccountId, billed_amount_krw: workOrder.billedAmountKrw, work_items: workOrder.workItems?.map((item) => ({ category_code: item.categoryCode, action_code: item.actionCode, quantity: item.quantity, line_amount_krw: item.lineAmountKrw })), submitted_at: workOrder.submittedAt ? Timestamp.fromDate(new Date(workOrder.submittedAt)) : undefined, subsidy_decision_id: workOrder.subsidyDecisionId, status: workOrder.status, revision: workOrder.revision, created_by: workOrder.createdByUid, updated_by: workOrder.updatedByUid, created_at: Timestamp.fromDate(new Date(workOrder.createdAt)), updated_at: Timestamp.fromDate(new Date(workOrder.updatedAt)), source: 'native' });
+  }
+
+  private completedRepairItemData(tenantId: string, repairId: string, item: NonNullable<RepairWorkOrder['workItems']>[number], index: number): Record<string, unknown> {
+    return { schema_version: 1, repair_item_id: `item-${String(index + 1).padStart(2, '0')}`, tenant_id: tenantId, repair_id: repairId, category_code: item.categoryCode, action_code: item.actionCode, quantity: item.quantity, line_amount_krw: item.lineAmountKrw, source_quality: 'verified', created_at: this.serverTimestamp() };
   }
 
   private completedRepairData(workOrder: RepairWorkOrder, repairId: string): Record<string, unknown> {

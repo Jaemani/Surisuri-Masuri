@@ -54,9 +54,10 @@ test('repairer submission and center verification preserve required evidence', a
   await store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'assigned', expectedRevision: 2, repairStationId: 'station-1', repairerFirebaseUid: 'repairer-1' }, idempotencyKey: 'transition-011', bodyHash: 'b' });
   await store.transitionRepair({ actor: repairer, command: { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3, scheduledAt: futureAppointment() }, idempotencyKey: 'transition-012', bodyHash: 'c' });
   await store.transitionRepair({ actor: repairer, command: { repairRequestId: created.resourceId, toStatus: 'in_progress', expectedRevision: 4 }, idempotencyKey: 'transition-013', bodyHash: 'd' });
-  const submitted = await store.transitionRepair({ actor: repairer, command: { repairRequestId: created.resourceId, toStatus: 'repairer_submitted', expectedRevision: 5, billedAmountKrw: 175000 }, idempotencyKey: 'transition-014', bodyHash: 'e' });
+  const submitted = await store.transitionRepair({ actor: repairer, command: { repairRequestId: created.resourceId, toStatus: 'repairer_submitted', expectedRevision: 5, billedAmountKrw: 175000, workItems: [{ categoryCode: 'wheel_tire', actionCode: 'replace', quantity: 1, lineAmountKrw: 175000 }] }, idempotencyKey: 'transition-014', bodyHash: 'e' });
   assert.equal(submitted.status, 'repairer_submitted');
   assert.ok(store.getRepair(created.resourceId)?.submittedAt);
+  assert.deepEqual(store.getRepair(created.resourceId)?.workItems, [{ categoryCode: 'wheel_tire', actionCode: 'replace', quantity: 1, lineAmountKrw: 175000 }]);
   await assert.rejects(() => store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'center_verified', expectedRevision: 6 }, idempotencyKey: 'transition-015', bodyHash: 'f' }), (error: unknown) => error instanceof DomainCommandError && error.code === 'SUBSIDY_DECISION_REQUIRED');
   const verified = await store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'center_verified', expectedRevision: 6, subsidyDecisionId: 'decision-1', subsidyAccountId: 'account-1' }, idempotencyKey: 'transition-016', bodyHash: 'g' });
   assert.equal(verified.status, 'center_verified');

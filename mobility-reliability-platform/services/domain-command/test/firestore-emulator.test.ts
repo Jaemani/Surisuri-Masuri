@@ -120,7 +120,7 @@ describe('Firestore command adapter', () => {
     const scheduledAt = new Date(Date.now() + 86_400_000).toISOString();
     await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3, scheduledAt }, 'complete-03');
     await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'in_progress', expectedRevision: 4 }, 'complete-04');
-    await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'repairer_submitted', expectedRevision: 5, billedAmountKrw: 170000 }, 'complete-05');
+    await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'repairer_submitted', expectedRevision: 5, billedAmountKrw: 170000, workItems: [{ categoryCode: 'brakes', actionCode: 'repair', quantity: 1, lineAmountKrw: 170000 }] }, 'complete-05');
     await db.doc(`tenants/${tenantId}/subsidyAccounts/account-1`).set({ tenant_id: tenantId, account_id: 'account-1', person_id: 'person-1', policy_version_id: 'policy-1', allocated_krw: 500000, adjustment_krw: 0, reserved_krw: 0, executed_krw: 0, available_krw: 500000, reserved_by_work_order: {}, status: 'active' });
     await transition(worker, { repairRequestId: created.resourceId, toStatus: 'center_verified', expectedRevision: 6, subsidyDecisionId: 'decision-1', subsidyAccountId: 'account-1' }, 'complete-06');
     const completed = await transition(worker, { repairRequestId: created.resourceId, toStatus: 'completed', expectedRevision: 7 }, 'complete-07');
@@ -130,5 +130,9 @@ describe('Firestore command adapter', () => {
     expect(repairs.docs[0]?.data()).toMatchObject({ repair_id: completed.eventId, work_order_id: created.resourceId, tenant_id: tenantId, device_id: 'device-1', repair_station_id: 'station-1', repairer_membership_uid: 'repairer-1', status: 'completed', billed_amount_krw: 170000, source_quality: 'verified' });
     expect(repairs.docs[0]?.data()).not.toHaveProperty('issue_summary');
     expect(repairs.docs[0]?.data()).not.toHaveProperty('memo');
+    const items = await repairs.docs[0]!.ref.collection('items').get();
+    expect(items.size).toBe(1);
+    expect(items.docs[0]?.data()).toMatchObject({ tenant_id: tenantId, repair_id: completed.eventId, category_code: 'brakes', action_code: 'repair', quantity: 1, line_amount_krw: 170000, source_quality: 'verified' });
+    expect(items.docs[0]?.data()).not.toHaveProperty('detail_text');
   });
 });
