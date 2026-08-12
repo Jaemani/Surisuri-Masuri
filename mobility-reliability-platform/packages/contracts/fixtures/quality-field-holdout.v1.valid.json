@@ -40,13 +40,15 @@
     "pseudonymousGroupId": "grp_0123456789abcdef0123456789abcdef",
     "labelId": "123e4567-e89b-42d3-a456-426614174003",
     "labelState": "known",
+    "expectedLabel": "mobility_aid_likely",
+    "labelSource": "human_review",
     "labelFinalizedAt": "2026-09-10T07:00:00Z",
     "capturedAt": "2026-09-01T01:00:00Z",
     "sampleCount": 12,
     "telemetrySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "featureSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "consentProofDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-    "evaluationEligible": true,
+    "labelEligible": true,
     "trainingEligible": false
   }]
 }

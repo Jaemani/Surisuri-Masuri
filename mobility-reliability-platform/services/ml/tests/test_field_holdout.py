@@ -57,7 +57,8 @@ def test_trace_count_label_freeze_and_time_are_verified() -> None:
 def test_review_state_cannot_enter_metric_evaluation() -> None:
     manifest = fixture()
     manifest["traces"][0]["labelState"] = "review_required"
-    with pytest.raises(DatasetValidationError, match="evaluationEligible:label_state"):
+    manifest["traces"][0]["expectedLabel"] = None
+    with pytest.raises(DatasetValidationError, match="labelEligible:const"):
         validate_field_holdout(manifest)
 
 

@@ -90,11 +90,11 @@ def validate_field_holdout(manifest: Mapping[str, Any]) -> None:
             raise DatasetValidationError(
                 f"quality-field-holdout.v1 trace[{index}].labelFinalizedAt:after_freeze"
             )
-        eligible = trace.get("evaluationEligible")
+        eligible = trace.get("labelEligible")
         label_state = trace.get("labelState")
         if eligible is not (label_state == "known"):
             raise DatasetValidationError(
-                f"quality-field-holdout.v1 trace[{index}].evaluationEligible:label_state"
+                f"quality-field-holdout.v1 trace[{index}].labelEligible:label_state"
             )
     if len(groups) == 0:
         raise DatasetValidationError("quality-field-holdout.v1 groups:missing")

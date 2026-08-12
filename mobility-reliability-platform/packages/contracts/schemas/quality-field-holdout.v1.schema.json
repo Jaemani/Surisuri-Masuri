@@ -64,22 +64,28 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["traceId", "telemetryBatchId", "pseudonymousGroupId", "labelId", "labelState", "labelFinalizedAt", "capturedAt", "sampleCount", "telemetrySha256", "featureSha256", "consentProofDigest", "evaluationEligible", "trainingEligible"],
+        "required": ["traceId", "telemetryBatchId", "pseudonymousGroupId", "labelId", "labelState", "expectedLabel", "labelSource", "labelFinalizedAt", "capturedAt", "sampleCount", "telemetrySha256", "featureSha256", "consentProofDigest", "labelEligible", "trainingEligible"],
         "properties": {
           "traceId": { "type": "string", "format": "uuid" },
           "telemetryBatchId": { "type": "string", "format": "uuid" },
           "pseudonymousGroupId": { "type": "string", "pattern": "^grp_[a-f0-9]{32,64}$" },
           "labelId": { "type": "string", "format": "uuid" },
           "labelState": { "enum": ["known", "review_required", "abstained"] },
+          "expectedLabel": { "type": ["string", "null"], "enum": ["mobility_aid_likely", "vehicle_likely", "stationary", "gps_noise_or_insufficient", null] },
+          "labelSource": { "enum": ["human_review", "device_annotation"] },
           "labelFinalizedAt": { "type": "string", "format": "date-time" },
           "capturedAt": { "type": "string", "format": "date-time" },
           "sampleCount": { "type": "integer", "minimum": 1, "maximum": 500 },
           "telemetrySha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "featureSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "consentProofDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-          "evaluationEligible": { "type": "boolean" },
+          "labelEligible": { "type": "boolean" },
           "trainingEligible": { "const": false }
-        }
+        },
+        "allOf": [
+          { "if": { "properties": { "labelState": { "const": "known" } } }, "then": { "properties": { "expectedLabel": { "enum": ["mobility_aid_likely", "vehicle_likely", "stationary", "gps_noise_or_insufficient"] }, "labelEligible": { "const": true } } } },
+          { "if": { "properties": { "labelState": { "enum": ["review_required", "abstained"] } } }, "then": { "properties": { "expectedLabel": { "type": "null" }, "labelEligible": { "const": false } } } }
+        ]
       }
     }
   }
