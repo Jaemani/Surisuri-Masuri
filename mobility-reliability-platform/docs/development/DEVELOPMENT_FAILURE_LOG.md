@@ -233,3 +233,22 @@ trace source·benchmark eligibility, 중복 trace/batch identity를 전부 대�
 - 수정: duplicate key를 `repairId:repairItemId`로 고정하고 같은 repair 안의 실제 duplicate만 거부하는 회귀 test 추가
 - 영향: 미커밋 local 구현에서만 발견. production·실사용자 영향 없음
 - 검증: domain-command emulator command/projection 10 scenarios 통과
+
+## DEVFAIL-20260813-05 — device state JSON 계약과 projector 입력 shape 불일치
+
+- 상태: `resolved-local`
+- 발견일·해결일: 2026-08-13
+- 환경·데이터: WSL2 / local synthetic contract fixture·unit test
+- 실제 사용자·기관 영향: 없음
+- 인시던트 분류: 비해당. 미커밋 병렬 구현 통합 중 발견했다.
+
+### 문제
+
+초기 `device-state-event.v1` 계약은 UUID identity, `recordedAt`, event별 repair/component/inspection/session reference를 요구했지만, 동시에 작성된 pure projector는 임의 문자열 identity와 다른 payload field를 받았다. 개별 작업만 보면 schema fixture와 TypeScript build가 각각 통과할 수 있어도 실제 계약 JSON은 projector에서 `EVENT_KEYS_INVALID`로 전부 거부됐다.
+
+### 정정·검증
+
+- JSON Schema를 단일 입력 기준으로 삼아 projector와 tests를 같은 exact keys와 event별 payload로 맞췄다.
+- `schemaVersion=device-state-event.v1`, UUID tenant/device/event/reference, `sourceQuality=verified`, `recordedAt >= occurredAt`를 projector에서도 검증한다.
+- `part.replaced`만 explicit component state를 만들고 `repair.recorded`는 repair reference만 반영한다.
+- Contract 32 fixture cases와 domain-command local 32 tests가 통과했으며 raw coordinates·extra free text·unverified source·잘못된 version을 fail-closed한다.
