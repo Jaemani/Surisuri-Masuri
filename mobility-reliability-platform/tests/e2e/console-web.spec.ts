@@ -32,4 +32,20 @@ test.describe('institution console web presentation and repair operations', () =
     await expect(page.getByText('파트너 배정 단계로 변경되었습니다.')).toBeVisible();
     await expect(page.getByText('수리사 처리 대기')).toBeVisible();
   });
+
+  test('opens a device record with verified repair history and operational actions', async ({ page }) => {
+    await page.goto('/');
+
+    await page.getByRole('button', { name: /기기 관리 4/ }).click();
+    await expect(page.getByRole('heading', { name: '기기 관리' })).toBeVisible();
+    await page.getByRole('button', { name: 'MOB-24018 상세 보기' }).click();
+
+    await expect(page.getByRole('heading', { name: '기기 타임라인' })).toBeVisible();
+    await expect(page.getByText('타이어 점검을 완료했어요')).toBeVisible();
+    await expect(page.getByRole('button', { name: /예방점검 열기/ })).toBeVisible();
+    await expect(page.getByText(/원본 이동경로|원시 위치|좌표/)).toHaveCount(0);
+    await expect(page).toHaveScreenshot('console-device-timeline.png', {
+      animations: 'disabled',
+    });
+  });
 });

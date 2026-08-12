@@ -82,6 +82,20 @@ describe('Firestore purpose-limited projection adapter', () => {
     await expect(store.getConsoleProjection(actor(tenantId, ['beneficiary'], 'beneficiary-1', 'person-1'), 'dashboard')).rejects.toMatchObject({ code: 'ROLE_FORBIDDEN' });
   });
 
+  emulatorTest('console devices include only compact verified repair archive timeline entries', async () => {
+    const tenantId = `tenant-${randomUUID()}`; await seed(tenantId);
+    const output = await new FirestoreProductProjectionStore(db).getConsoleProjection(actor(tenantId, ['case_worker'], 'worker-1'), 'devices') as Array<Record<string, unknown>>;
+    expect(output).toHaveLength(1);
+    const device = output[0]!;
+    expect(device).toMatchObject({ id: 'MOB-1', user: '이용자 C-1042', model: '나래 EV-2', timeline: expect.any(Array) });
+    expect(device.timeline).toEqual([
+      { id: 'repair-repair-verified-1', date: '2026. 08. 13.', title: '수리를 완료했어요', detail: '브레이크 수리 · 수리 항목 1개', tone: 'success' },
+      { id: 'repair-history-1', date: '2026. 07. 30.', title: '수리를 완료했어요', detail: '브레이크 조정 · 수리 항목 1개', tone: 'success' },
+    ]);
+    const serialized = JSON.stringify(device);
+    for (const sentinel of ['SENSITIVE-COMPLETED-ISSUE', 'SENSITIVE-REPAIRER-UID', 'SENSITIVE-ITEM-TEXT', 'SENSITIVE-STORAGE', 'SENSITIVE-RAW-GPS', '180000', '70000']) expect(serialized).not.toContain(sentinel);
+  });
+
   emulatorTest('console projections do not expose operational free text or contact labels', async () => {
     const tenantId = `tenant-${randomUUID()}`; await seed(tenantId);
     const store = new FirestoreProductProjectionStore(db);

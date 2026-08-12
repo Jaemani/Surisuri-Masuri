@@ -118,3 +118,4 @@
 | [HR-20260811-03](./HR-20260811-03-r07-feature-rules-baseline.md) | R07 feature contract·rules baseline | `draft` |
 | [HR-20260813-04](./HR-20260813-04-mobile-ui-audit.md) | 현재 Android 모바일 흐름 UX·접근성 감사 | `draft` |
 | [HR-20260813-05](./HR-20260813-05-domain-command-boundary.md) | 수리·지원금 Firebase Domain Command 경계 | `draft` |
+| [HR-20260813-18](./HR-20260813-18-console-completed-repair-timeline.md) | 복지관 콘솔 완료 수리 타임라인 설계 점검 | `generated` |

@@ -1,7 +1,7 @@
 import { Timestamp, getFirestore, type DocumentData, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { DomainCommandError } from './canonical.js';
 import { DeviceTimelineProjectionError, replayDeviceRepairTimeline, type VerifiedRepairHeader, type VerifiedRepairItem } from './device-timeline-projector.js';
-import type { ConsoleProjectionName, MobileProductSnapshot, ProductProjectionStore } from './projection-types.js';
+import type { ConsoleDeviceRecord, ConsoleDeviceTimelineEntry, ConsoleProjectionName, DeviceTimelineEntry, MobileProductSnapshot, ProductProjectionStore } from './projection-types.js';
 import type { ActorContext, RepairStatus } from './types.js';
 
 const MAX_PROJECTION_DOCUMENTS = 200;
@@ -90,11 +90,13 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
     const needsAssignments = ['users', 'devices'].includes(projection);
     const needsDevices = ['dashboard', 'users', 'devices', 'repairs', 'inspections'].includes(projection);
     const needsRepairs = ['dashboard', 'repairs', 'ledger', 'partners'].includes(projection);
-    const [people, assignments, devices, repairs] = await Promise.all([
+    const needsRepairArchive = projection === 'devices';
+    const [people, assignments, devices, repairs, repairArchive] = await Promise.all([
       needsPeople ? this.collection(tenant, 'people') : [],
       needsAssignments ? this.collection(tenant, 'deviceAssignments') : [],
       needsDevices ? this.collection(tenant, 'devices') : [],
       needsRepairs ? this.collection(tenant, 'repairWorkOrders') : [],
+      needsRepairArchive ? this.collection(tenant, 'repairs') : [],
     ]);
     repairs.forEach(assertValidRepairDocument);
     const names = new Map(people.map((doc) => [doc.id, `이용자 ${optionalString(doc.data(), 'public_code') ?? shortCode(doc.id)}`]));
@@ -109,11 +111,19 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
       const device = assignment ? deviceById.get(String(assignment.data().device_id)) : undefined;
       return { name: names.get(person.id) ?? `이용자 ${shortCode(person.id)}`, code: optionalString(person.data(), 'public_code') ?? shortCode(person.id), relation: '본인', device: device ? optionalString(device.data(), 'public_code') ?? shortCode(device.id) : '미배정', status: person.data().status === 'active' ? '정상' : '확인 필요', last: dateLabel(person.data().updated_at, '기록 없음'), color: ['peach', 'blue', 'lilac', 'mint', 'yellow'][index % 5] };
     });
-    if (projection === 'devices') return devices.map((device) => {
+    if (projection === 'devices') {
+      const repairArchiveItems = (await Promise.all(repairArchive.map(async (repair) => ({
+        repair,
+        items: await this.bounded(repair.ref.collection('items').limit(21).get(), 'completed repair items', actor.tenantId, 20),
+      })))).flatMap(({ repair, items }) => items.map((item) => ({ repair, item })));
+      return devices.map((device): ConsoleDeviceRecord => {
       const assignment = activeAssignments.find((doc) => doc.data().device_id === device.id);
       const status = consoleDeviceStatus(device.data()?.status);
-      return { id: optionalString(device.data(), 'public_code') ?? shortCode(device.id), user: assignment ? names.get(String(assignment.data().person_id)) ?? `이용자 ${shortCode(String(assignment.data().person_id))}` : '미배정', model: deviceName(device.data()), health: status.health, battery: optionalString(device.data(), 'battery_label') ?? '—', mileage: distanceLabel(device.data()?.odometer_m), inspection: dateLabel(device.data()?.next_inspection_at, '미정'), state: status.state };
-    });
+        const deviceRepairs = repairArchive.filter((repair) => repair.data().device_id === device.id);
+        const deviceItems = repairArchiveItems.filter(({ repair }) => repair.data().device_id === device.id);
+        return { id: optionalString(device.data(), 'public_code') ?? shortCode(device.id), user: assignment ? names.get(String(assignment.data().person_id)) ?? `이용자 ${shortCode(String(assignment.data().person_id))}` : '미배정', model: deviceName(device.data()), health: status.health, battery: optionalString(device.data(), 'battery_label') ?? '—', mileage: distanceLabel(device.data()?.odometer_m), inspection: dateLabel(device.data()?.next_inspection_at, '미정'), state: status.state, timeline: this.consoleDeviceTimeline(deviceRepairs, deviceItems, device, actor.tenantId) };
+      });
+    }
     if (projection === 'repairs') {
       const partners = await this.collection(tenant, 'repairStations');
       for (const partner of partners) partnerById.set(partner.id, publicPartnerName(partner));
@@ -183,6 +193,32 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
     tenantId: string,
   ) {
     try {
+      const completed = this.replayedDeviceRepairEntries(repairs, nestedItems, device, tenantId);
+      return [...completed, { id: `device-${device.id}`, date: dateLabel(device.data()?.created_at, '등록일 미확인'), title: '내 기기를 등록했어요', detail: deviceName(device.data()), tone: 'blue' as const }].slice(0, 5);
+    } catch (error) {
+      if (error instanceof DeviceTimelineProjectionError) {
+        throw new DomainCommandError('CORRUPT_DEVICE_TIMELINE', `Completed repair history cannot be projected: ${error.code}.`, 500);
+      }
+      throw error;
+    }
+  }
+
+  private consoleDeviceTimeline(
+    repairs: QueryDocumentSnapshot[],
+    nestedItems: Array<{ repair: QueryDocumentSnapshot; item: QueryDocumentSnapshot }>,
+    device: FirebaseFirestore.DocumentSnapshot,
+    tenantId: string,
+  ): ConsoleDeviceTimelineEntry[] {
+    return this.replayedDeviceRepairEntries(repairs, nestedItems, device, tenantId).map((entry) => ({ ...entry, tone: 'success' as const }));
+  }
+
+  private replayedDeviceRepairEntries(
+    repairs: QueryDocumentSnapshot[],
+    nestedItems: Array<{ repair: QueryDocumentSnapshot; item: QueryDocumentSnapshot }>,
+    device: FirebaseFirestore.DocumentSnapshot,
+    tenantId: string,
+  ): DeviceTimelineEntry[] {
+    try {
       const headers: VerifiedRepairHeader[] = repairs.map((repair) => ({
         repairId: requiredString(repair.data(), 'repair_id', 'CORRUPT_COMPLETED_REPAIR'),
         tenantId: requiredString(repair.data(), 'tenant_id', 'CORRUPT_COMPLETED_REPAIR'),
@@ -201,14 +237,13 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
         sourceQuality: item.data().source_quality,
       }));
       const replay = replayDeviceRepairTimeline({ tenantId, deviceId: device.id, repairs: headers, items });
-      const completed = replay.entries.reverse().slice(0, 4).map((entry) => ({
+      return replay.entries.slice().reverse().slice(0, 4).map((entry) => ({
         id: entry.id,
         date: dateLabel(entry.occurredAt, '날짜 미확인'),
         title: entry.title,
         detail: `${entry.detail} · 수리 항목 ${entry.itemCount}개`,
         tone: 'teal' as const,
       }));
-      return [...completed, { id: `device-${device.id}`, date: dateLabel(device.data()?.created_at, '등록일 미확인'), title: '내 기기를 등록했어요', detail: deviceName(device.data()), tone: 'blue' as const }].slice(0, 5);
     } catch (error) {
       if (error instanceof DeviceTimelineProjectionError) {
         throw new DomainCommandError('CORRUPT_DEVICE_TIMELINE', `Completed repair history cannot be projected: ${error.code}.`, 500);

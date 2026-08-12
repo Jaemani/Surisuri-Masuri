@@ -22,6 +22,16 @@ export type DeviceRecord = {
   mileage: string
   inspection: string
   state: string
+  timeline: DeviceTimelineItem[]
+}
+
+/** A safe, read-only event for the device detail timeline. */
+export type DeviceTimelineItem = {
+  id: string
+  date: string
+  title: string
+  detail: string
+  tone: 'success' | 'warning' | 'info'
 }
 
 export type RepairRecord = {
@@ -273,10 +283,38 @@ const demoUsers: UserRecord[] = [
 ]
 
 const demoDevices: DeviceRecord[] = [
-  { id: 'MOB-24018', user: '김서윤', model: '나래 EV-2', health: '양호', battery: '78%', mileage: '1,284 km', inspection: '2026. 09. 03', state: '정상' },
-  { id: 'MOB-23991', user: '박정호', model: '오르빗 S1', health: '점검 권장', battery: '42%', mileage: '2,810 km', inspection: '2026. 08. 16', state: '주의' },
-  { id: 'MOB-23874', user: '이경자', model: '나래 EV-2', health: '데이터 부족', battery: '61%', mileage: '—', inspection: '2026. 08. 14', state: '대기' },
-  { id: 'MOB-23703', user: '최민수', model: '모빌리티 K3', health: '양호', battery: '88%', mileage: '948 km', inspection: '2026. 09. 22', state: '정상' },
+  {
+    id: 'MOB-24018', user: '김서윤', model: '나래 EV-2', health: '양호', battery: '78%', mileage: '1,284 km', inspection: '2026. 09. 03', state: '정상',
+    timeline: [
+      { id: 'MOB-24018-repair-1', date: '2026. 08. 08', title: '타이어 점검을 완료했어요', detail: '바퀴·타이어 점검 기록', tone: 'success' },
+      { id: 'MOB-24018-inspection-1', date: '2026. 08. 07', title: '예방점검 일정을 확인했어요', detail: '다음 점검일 2026. 09. 03', tone: 'info' },
+      { id: 'MOB-24018-device-1', date: '2024. 04. 05', title: '기기를 등록했어요', detail: '나래 EV-2', tone: 'info' },
+    ],
+  },
+  {
+    id: 'MOB-23991', user: '박정호', model: '오르빗 S1', health: '점검 권장', battery: '42%', mileage: '2,810 km', inspection: '2026. 08. 16', state: '주의',
+    timeline: [
+      { id: 'MOB-23991-alert-1', date: '2026. 08. 13', title: '점검을 권장해요', detail: '조향부 진동 증가가 확인됐어요', tone: 'warning' },
+      { id: 'MOB-23991-repair-1', date: '2026. 08. 13', title: '수리 요청을 접수했어요', detail: '주행 중 좌측 쏠림', tone: 'info' },
+      { id: 'MOB-23991-device-1', date: '2023. 10. 18', title: '기기를 등록했어요', detail: '오르빗 S1', tone: 'info' },
+    ],
+  },
+  {
+    id: 'MOB-23874', user: '이경자', model: '나래 EV-2', health: '데이터 부족', battery: '61%', mileage: '—', inspection: '2026. 08. 14', state: '대기',
+    timeline: [
+      { id: 'MOB-23874-sync-1', date: '2026. 08. 11', title: '주행 기록 동기화를 기다리고 있어요', detail: '최근 3일의 기록이 필요해요', tone: 'warning' },
+      { id: 'MOB-23874-repair-1', date: '2026. 08. 12', title: '수리 요청을 접수했어요', detail: '충전 단자 접촉 불량', tone: 'info' },
+      { id: 'MOB-23874-device-1', date: '2023. 08. 22', title: '기기를 등록했어요', detail: '나래 EV-2', tone: 'info' },
+    ],
+  },
+  {
+    id: 'MOB-23703', user: '최민수', model: '모빌리티 K3', health: '양호', battery: '88%', mileage: '948 km', inspection: '2026. 09. 22', state: '정상',
+    timeline: [
+      { id: 'MOB-23703-repair-1', date: '2026. 08. 12', title: '수리 확인을 완료했어요', detail: '등받이 고정 레버를 교체했어요', tone: 'success' },
+      { id: 'MOB-23703-inspection-1', date: '2026. 08. 10', title: '정기 점검 일정을 등록했어요', detail: '다음 점검일 2026. 09. 22', tone: 'info' },
+      { id: 'MOB-23703-device-1', date: '2024. 01. 15', title: '기기를 등록했어요', detail: '모빌리티 K3', tone: 'info' },
+    ],
+  },
 ]
 
 const demoRepairs: RepairRecord[] = [
@@ -498,9 +536,20 @@ const parseUsers: ProjectionParser<UserRecord[]> = (value) => arrayOf(value, (it
   return { name: stringAt(record, 'name'), code: stringAt(record, 'code'), relation: stringAt(record, 'relation'), device: stringAt(record, 'device'), status: stringAt(record, 'status'), last: stringAt(record, 'last'), color: enumAt(record, 'color', ['peach', 'blue', 'lilac', 'mint', 'yellow']) }
 })
 
+const parseDeviceTimeline: ProjectionParser<DeviceTimelineItem[]> = (value) => arrayOf(value, (item) => {
+  const timeline = asRecord(item)
+  return {
+    id: stringAt(timeline, 'id'),
+    date: stringAt(timeline, 'date'),
+    title: stringAt(timeline, 'title'),
+    detail: stringAt(timeline, 'detail'),
+    tone: enumAt(timeline, 'tone', ['success', 'warning', 'info']),
+  }
+})
+
 const parseDevices: ProjectionParser<DeviceRecord[]> = (value) => arrayOf(value, (item) => {
   const record = asRecord(item)
-  return { id: stringAt(record, 'id'), user: stringAt(record, 'user'), model: stringAt(record, 'model'), health: stringAt(record, 'health'), battery: stringAt(record, 'battery'), mileage: stringAt(record, 'mileage'), inspection: stringAt(record, 'inspection'), state: stringAt(record, 'state') }
+  return { id: stringAt(record, 'id'), user: stringAt(record, 'user'), model: stringAt(record, 'model'), health: stringAt(record, 'health'), battery: stringAt(record, 'battery'), mileage: stringAt(record, 'mileage'), inspection: stringAt(record, 'inspection'), state: stringAt(record, 'state'), timeline: parseDeviceTimeline(record.timeline) }
 })
 
 const parseRepairs: ProjectionParser<RepairRecord[]> = (value) => arrayOf(value, (item) => {

@@ -42,6 +42,16 @@ describe('DemoOperationsRepository', () => {
     expect(second[0].issue).toBe('주행 중 좌측 쏠림')
   })
 
+  it('returns device timelines as isolated synthetic read models', async () => {
+    const repository = new DemoOperationsRepository()
+    const first = await repository.listDevices()
+    expect(first[0]?.timeline.length).toBeGreaterThan(0)
+    first[0]!.timeline[0]!.title = 'mutated outside repository'
+
+    const second = await repository.listDevices()
+    expect(second[0]!.timeline[0]!.title).not.toBe('mutated outside repository')
+  })
+
   it('advances a repair deterministically and leaves an auditable ledger projection intact', async () => {
     const repository = new DemoOperationsRepository()
     const result = await repository.advanceRepair({
@@ -136,6 +146,34 @@ describe('FirebaseOperationsRepository', () => {
     const repository = new FirebaseOperationsRepository(dependencies(fetch as typeof globalThis.fetch))
 
     await expect(repository.listRepairs()).rejects.toMatchObject({ code: 'INVALID_PROJECTION' })
+  })
+
+  it('parses a device timeline projection with exact safe fields', async () => {
+    const timeline = [{ id: 'event-1', date: '2026. 08. 13', title: '수리 기록을 확인했어요', detail: '브레이크 수리', tone: 'success' }]
+    const fetch = async () => json([{
+      id: 'MOB-1', user: '이용자 C-1042', model: 'EV-2', health: '양호', battery: '78%', mileage: '128 km', inspection: '2026. 09. 03', state: '정상', timeline,
+    }])
+    const repository = new FirebaseOperationsRepository(dependencies(fetch as typeof globalThis.fetch))
+
+    await expect(repository.listDevices()).resolves.toEqual([{
+      id: 'MOB-1', user: '이용자 C-1042', model: 'EV-2', health: '양호', battery: '78%', mileage: '128 km', inspection: '2026. 09. 03', state: '정상', timeline,
+    }])
+  })
+
+  it.each([
+    { label: 'timeline is missing', timeline: undefined },
+    { label: 'timeline is not an array', timeline: {} },
+    { label: 'timeline tone is unsupported', timeline: [{ id: 'event-1', date: '2026. 08. 13', title: '수리 기록', detail: '브레이크 수리', tone: 'teal' }] },
+    { label: 'timeline detail is missing', timeline: [{ id: 'event-1', date: '2026. 08. 13', title: '수리 기록', tone: 'success' }] },
+  ])('fails closed when $label', async ({ timeline }) => {
+    const device = {
+      id: 'MOB-1', user: '이용자 C-1042', model: 'EV-2', health: '양호', battery: '78%', mileage: '128 km', inspection: '2026. 09. 03', state: '정상',
+      ...(timeline === undefined ? {} : { timeline }),
+    }
+    const fetch = async () => json([device])
+    const repository = new FirebaseOperationsRepository(dependencies(fetch as typeof globalThis.fetch))
+
+    await expect(repository.listDevices()).rejects.toMatchObject({ code: 'INVALID_PROJECTION' })
   })
 
   it('propagates a command rejection with its backend code and never retries as a direct write', async () => {

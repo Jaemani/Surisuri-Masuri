@@ -39,6 +39,7 @@
 | WSL과 실기기에서 어떻게 실행하는가 | [WSL Runbook](./development/WSL_RUNBOOK.md) | 앱·서비스별 README |
 | 모바일 UI를 웹에서 어떻게 빠르게 확인하는가 | [Web·Playwright Runbook](./development/WEB_PLAYWRIGHT_RUNBOOK.md) | [ADR-0042](./decisions/ADR-0042-web-ui-preview-boundary.md), [현재 모바일 UX 감사](./reports/human/HR-20260813-04-mobile-ui-audit.md) |
 | 모바일과 복지관 대시보드는 각각 무엇을 보여주는가 | [제품 경험 방향](./plans/PRODUCT_EXPERIENCE_DIRECTION.md) | [현재 모바일 UX 감사](./reports/human/HR-20260813-04-mobile-ui-audit.md), [콘솔 README](../apps/console/README.md) |
+| 복지관 콘솔 완료 수리 타임라인은 무엇을 읽는가 | [ADR-0051](./decisions/ADR-0051-console-completed-repair-timeline-read-time-replay.md) | [R09](./reports/fixed/2026-09-15.md), [UPD-20260813-21](./product-updates/UPD-20260813-21-console-completed-repair-timeline-plan.md) |
 | 모바일·콘솔을 Firebase에 어떻게 연결하는가 | [Firebase 제품 연결 handoff](./handoffs/FIREBASE_PRODUCT_CONNECTION.md) | [Domain Command README](../services/domain-command/README.md), [ADR-0043](./decisions/ADR-0043-welfare-center-repair-operations-product-core.md) |
 | telemetry orphan·stale receipt를 어떻게 분류하는가 | [Reconciliation Runbook](./development/TELEMETRY_RECONCILIATION_RUNBOOK.md) | [ADR-0017](./decisions/ADR-0017-fenced-ingest-recovery.md) |
 

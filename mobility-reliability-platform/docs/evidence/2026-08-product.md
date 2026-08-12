@@ -1,5 +1,18 @@
 # 2026년 8월 제품 증거
 
+## EVD-20260813-017 — console 완료 수리 타임라인
+
+- 생성: 2026-08-13 / Codex 작업 실행
+- 환경·데이터: local / Firestore Emulator / synthetic / web visual
+- 출처: domain-command `devices` projection, console repository·기기 관리 UI, Playwright snapshot
+- 상태: generated / 사람 검토 대기
+- 확인 항목: verified completed repair/items의 기기별 bounded read, 기존 순서 독립 replay 재사용, tenant/device/identity/source 검증, strict console decoder, 민감값 미노출, 기기 선택→상태·타임라인→운영 CTA
+- 검증: domain-command local 20 passed, Emulator 11 passed, console 16 passed/typecheck/build, Playwright console 3 passed, docs 227 files
+- 시각 증거: `tests/e2e/console-web.spec.ts-snapshots/console-device-timeline-console-chromium-linux.png`
+- Product Design 확인: 1440×1024에서 목록/상세 균형과 기기 상태→검증 이력→다음 조치 위계를 확인했다. screenshot만으로 실제 복지관 이해도·키보드 전체 순서·screen reader 접근성을 증명하지 않는다.
+- 현재 증명하지 않는 것: production Firebase, 실제 복지관 사용, field 수리·데이터 이관, component lifecycle, async current projection
+- 사용처: [UPD-20260813-21](../product-updates/UPD-20260813-21-console-completed-repair-timeline-plan.md), [HR-20260813-18](../reports/human/HR-20260813-18-console-completed-repair-timeline.md), [R09](../reports/fixed/2026-09-15.md)
+
 ## EVD-20260813-015 — 모바일 주행 종료 저장 확인
 
 - 생성: 2026-08-13 / Codex 작업 실행
