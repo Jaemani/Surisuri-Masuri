@@ -24,14 +24,22 @@ R07-B의 현재 결과는 다음이다.
 - `quality-baseline-result.v1`의 synthetic-only provenance, split metric, confusion matrix와 prediction feature hash
 - feature record와 baseline 결과를 Python에서 repository-owned JSON Schema로 재검증하는 fail-closed gate
 
-아직 R07-A의 결과가 아닌 것은 다음이다.
+R07-C에서 추가로 구현된 범위는 다음이다.
 
-- PyTorch 학습, 모델 성능, calibration 또는 confusion matrix
+- 13개 coordinate-free feature를 사용하는 292 parameter PyTorch CPU 후보
+- frozen group-time split과 train-only normalization
+- deterministic algorithm·single thread·seed `20260813`
+- model state SHA-256와 좌표 없는 prediction lineage
+- rules baseline과 동일 test split의 비교 및 deployment `defer` 결정
+
+아직 R07 전체의 결과가 아닌 것은 다음이다.
+
+- field 성능, calibration 또는 field confusion matrix
 - 실제 Android/iPhone 위치 수집 성능과 배터리 측정
 - 복지관 pilot, 실제 사용자 데이터, legacy 수리데이터 이관
 - ONNX/mobile inference, Firebase/production 배포
 
-R07-A 코드 기준점은 commit `a20a85b`이며 R07-B 코드 기준점은 commit `a9b20d9`다. 전체 인계는 이 Runbook을 포함한 최신
+R07-A 코드 기준점은 commit `a20a85b`, R07-B는 commit `a9b20d9`, R07-C PyTorch 후보는 commit `aefbedb`다. 전체 인계는 이 Runbook을 포함한 최신
 `main`의 clean commit을 사용하고 `rtk git log -1 --oneline`으로 확인한다. 계획
 월(M4/R07-A)과 실제 실행일·검증 결과를 섞지 않는다.
 
@@ -223,6 +231,8 @@ rtk uv --directory services/ml run --locked --extra dev pytest -q
 - synthetic rules baseline이 이미 완전 분리되어 있으므로 후보 결과와 무관하게 deployment는 `defer`다.
 - ONNX는 실제 field holdout 또는 rules 대비 의미 있는 오류 개선 근거가 생긴 뒤 진행한다.
 
+이 후보의 존재를 “PyTorch 모델이 규칙보다 우월하다”, “고장을 예측한다” 또는 “모바일 배포를 완료했다”로 표현하지 않는다. 합성 generator에서 rules test macro-F1이 이미 1.0이어서 모델 선택에 필요한 오류 차이가 없다. 현재 결정과 상세 근거는 [ADR-0046](../decisions/ADR-0046-defer-r07-onnx-after-synthetic-candidate.md)과 [제품 업데이트](../product-updates/UPD-20260813-16-r07-pytorch-candidate.md)에 있다.
+
 ## 10. 인계 체크리스트
 
 - [ ] `a20a85b` 또는 그 후속 commit을 기준으로 clean checkout을 만들었다.
@@ -235,6 +245,9 @@ rtk uv --directory services/ml run --locked --extra dev pytest -q
 - [ ] seed, schema version, split strategy, dataset SHA-256을 인계 메모에 남겼다.
 - [ ] 실제 사용자·현장·모델 성능·배포 상태를 R07-A 완료로 표현하지 않았다.
 - [ ] R07-B synthetic baseline 수치를 현장·실기기 성능으로 표현하지 않았다.
+- [ ] R07-C 후보를 field 성능 또는 ONNX/mobile 완료로 표현하지 않았다.
+- [ ] field holdout 또는 rules 오류 개선 근거가 없으면 R08 ONNX를 계획 상태로 유지했다.
 
 관련 결정: [ADR-0040](../decisions/ADR-0040-r07-quality-dataset-contract.md)
 관련 결정: [ADR-0041](../decisions/ADR-0041-r07-feature-and-rules-contract.md)
+관련 결정: [ADR-0046](../decisions/ADR-0046-defer-r07-onnx-after-synthetic-candidate.md)

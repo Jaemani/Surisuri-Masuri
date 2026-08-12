@@ -12,9 +12,8 @@
 
 - 2026년 5월 1일 ~ 2026년 12월 31일
 - 기술 정기리포트: 매월 2회, 총 16회
-- 현재 상태: 신규 코드베이스에서 foreground GPS native smoke, background GPS
-  source/static gate와 local telemetry 원장·수집 경계를 구현 중. Store·staging 배포와
-  background 실기기 수명주기는 미검증
+- 현재 상태: local synthetic 제품에서 수리 접수→복지관 배정→수리사 QR 대조·native 일정→복수 구조화 작업 제출→복지관 검증 대기 흐름이 연결됐다. SQLite GPS outbox, telemetry 수집·복구 경계, 지원금 원장과 R07 PyTorch 평가 후보도 구현돼 있다.
+- 미검증 상태: Firebase production·staging 연결, 실제 기관·수리사·지원금 처리, Android/iPhone QR·일정·background lifecycle, 야외 GPS와 field holdout. 합성 기준선만으로 ONNX 배포를 진행하지 않는다.
 
 ## 목표 제품
 
