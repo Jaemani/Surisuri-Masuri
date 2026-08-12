@@ -226,7 +226,7 @@ function inspectionDecision(code: unknown) { return ({ healthy: '양호', review
 function inspectionConfidence(band: unknown) { return ({ high: '높음', medium: '보통', low: '낮음', insufficient_data: '데이터 부족' } as Record<string, string>)[String(band)] ?? '데이터 부족'; }
 function reportTitle(type: unknown) { return ({ monthly_operations: '기관 월간 운영 리포트', subsidy_audit: '수리 지원금 집행 현황', inspection_priority: '예방점검 우선순위 목록' } as Record<string, string>)[String(type)] ?? '운영 보고서'; }
 function reportTypeLabel(type: unknown) { return ({ monthly_operations: '월간 운영', subsidy_audit: '재정·감사', inspection_priority: '점검 운영' } as Record<string, string>)[String(type)] ?? '운영'; }
-function publicDevice(device: QueryDocumentSnapshot | undefined) { return device ? optionalString(device.data(), 'public_code') ?? shortCode(device.id) : '기기 미확인'; }
+function publicDevice(device: FirebaseFirestore.DocumentSnapshot | undefined) { return device ? optionalString(device.data(), 'public_code') ?? shortCode(device.id) : '기기 미확인'; }
 function shortCode(value: string) { return value.slice(-8).toUpperCase(); }
 function safeMoney(value: unknown) { return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0; }
 function nullableMoney(value: unknown): number | null { return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null; }
