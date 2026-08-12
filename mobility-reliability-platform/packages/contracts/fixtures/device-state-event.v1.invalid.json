@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "device-state-event.v1",
+  "eventId": "f1a4ef7b-fb6f-47cf-919c-8734e469d2b1",
+  "eventType": "trip.summarized",
+  "tenantId": "09460fa5-dc3c-4c14-9c00-d1956206292c",
+  "deviceId": "cd230e0f-a01c-47e5-830d-3a1330e591d6",
+  "occurredAt": "2026-08-13T09:00:00Z",
+  "recordedAt": "2026-08-13T09:12:30Z",
+  "sourceQuality": "verified",
+  "payload": {
+    "sessionId": "0a7299a5-3f18-4f47-b0c8-6f1d9ef5ee60",
+    "distanceMeters": 1870,
+    "rawCoordinates": [37.5665, 126.978]
+  }
+}

@@ -1,5 +1,17 @@
 # 2026년 8월 제품 증거
 
+## EVD-20260813-018 — device current-state deterministic pure replay
+
+- 생성: 2026-08-13 / Codex 작업 실행
+- 환경·데이터: local / synthetic / contract fixture
+- 출처: `device-state-event.v1`, domain-command pure projector와 unit test
+- 상태: generated / 사람 검토 대기
+- 확인 항목: normalized repair·explicit part/component·inspection·trip summary event의 canonical replay, projector version/checkpoint value, output checksum, out-of-order와 `asOf`, fail-closed validation
+- 검증: contract 32 fixture cases, domain-command local 32 passed / 11 skipped
+- privacy·안전 경계: raw GPS·좌표·PII·UID·지원금 account가 state/checkpoint/log에 없음; 명시적 linkage 없는 category/action은 component 상태를 만들지 않음
+- 현재 증명하지 않는 것: Firestore shadow/checkpoint/pointer·async worker, production Firebase, 실제 복지관·field 성과, legacy import, 전체 component lifecycle
+- 사용처: [UPD-20260813-22](../product-updates/UPD-20260813-22-device-current-state-replay-plan.md), [R09](../reports/fixed/2026-09-15.md)
+
 ## EVD-20260813-017 — console 완료 수리 타임라인
 
 - 생성: 2026-08-13 / Codex 작업 실행

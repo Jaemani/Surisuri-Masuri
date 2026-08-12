@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/device-state-event.v1.schema.json",
+  "title": "DeviceStateEventV1",
+  "description": "A privacy-minimised immutable event accepted by the device current-state projector.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "eventType",
+    "tenantId",
+    "deviceId",
+    "occurredAt",
+    "recordedAt",
+    "sourceQuality",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "device-state-event.v1" },
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "repair.recorded",
+        "part.replaced",
+        "inspection.completed",
+        "trip.summarized"
+      ]
+    },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "deviceId": { "type": "string", "format": "uuid" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "sourceQuality": { "const": "verified" },
+    "payload": { "type": "object" }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "eventType": { "const": "repair.recorded" },
+        "payload": { "$ref": "#/$defs/repairRecordedPayload" }
+      }
+    },
+    {
+      "properties": {
+        "eventType": { "const": "part.replaced" },
+        "payload": { "$ref": "#/$defs/partReplacedPayload" }
+      }
+    },
+    {
+      "properties": {
+        "eventType": { "const": "inspection.completed" },
+        "payload": { "$ref": "#/$defs/inspectionCompletedPayload" }
+      }
+    },
+    {
+      "properties": {
+        "eventType": { "const": "trip.summarized" },
+        "payload": { "$ref": "#/$defs/tripSummarizedPayload" }
+      }
+    }
+  ],
+  "$defs": {
+    "repairRecordedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repairId"],
+      "properties": {
+        "repairId": { "type": "string", "format": "uuid" }
+      }
+    },
+    "partReplacedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repairId", "componentId", "category", "action"],
+      "properties": {
+        "repairId": { "type": "string", "format": "uuid" },
+        "componentId": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "category": {
+          "type": "string",
+          "enum": ["battery", "brake", "controller", "motor", "seat_frame", "wheel_tire"]
+        },
+        "action": { "type": "string", "const": "replaced" }
+      }
+    },
+    "inspectionCompletedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inspectionId", "outcome"],
+      "properties": {
+        "inspectionId": { "type": "string", "format": "uuid" },
+        "outcome": { "type": "string", "enum": ["pass", "attention_required", "action_required"] }
+      }
+    },
+    "tripSummarizedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "distanceMeters"],
+      "properties": {
+        "sessionId": { "type": "string", "format": "uuid" },
+        "distanceMeters": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      }
+    }
+  }
+}

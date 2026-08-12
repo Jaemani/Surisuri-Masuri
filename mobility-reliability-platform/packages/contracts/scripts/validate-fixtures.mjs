@@ -207,6 +207,18 @@ const cases = [
     fixture: 'fixtures/domain-event.invalid.json',
     expected: false,
   },
+  {
+    name: 'valid device state event v1',
+    schema: 'schemas/device-state-event.v1.schema.json',
+    fixture: 'fixtures/device-state-event.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid device state event v1 rejects raw coordinates',
+    schema: 'schemas/device-state-event.v1.schema.json',
+    fixture: 'fixtures/device-state-event.v1.invalid.json',
+    expected: false,
+  },
 ]
 
 for (const testCase of cases) {
