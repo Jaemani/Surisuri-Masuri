@@ -89,7 +89,7 @@ export class FirestoreDomainCommandStore implements CommandStore {
       if (!repairSnapshot.exists) throw new DomainCommandError('REPAIR_NOT_FOUND', 'Repair request not found.', 404);
       const current = this.decodeRepair(repairSnapshot.data());
       if (current.tenantId !== input.actor.tenantId) throw new DomainCommandError('REPAIR_NOT_FOUND', 'Repair request not found.', 404);
-      await this.assertRepairActor(tx, input.actor, current);
+      await this.assertRepairActor(tx, input.actor, current, input.command);
 
       if (input.command.toStatus === 'assigned') {
         if (!input.command.repairStationId) throw new DomainCommandError('REPAIR_STATION_REQUIRED', 'An assigned repair needs a repair station.');
@@ -204,7 +204,11 @@ export class FirestoreDomainCommandStore implements CommandStore {
     if (forward.empty && reverse.empty) throw new DomainCommandError('GUARDIAN_RELATIONSHIP_REQUIRED', 'No active guardian relationship authorizes this request.', 403);
   }
 
-  private async assertRepairActor(tx: Transaction, actor: ActorContext, workOrder: RepairWorkOrder) {
+  private async assertRepairActor(tx: Transaction, actor: ActorContext, workOrder: RepairWorkOrder, command: TransitionRepairRequestCommand) {
+    if (['scheduled', 'in_progress', 'repairer_submitted'].includes(command.toStatus)) {
+      if (!actor.roles.includes('repairer') || workOrder.repairerFirebaseUid !== actor.uid) throw new DomainCommandError('REPAIR_ASSIGNMENT_REQUIRED', 'This repair is not assigned to the authenticated repairer.', 403);
+      return;
+    }
     if (actor.roles.some((role) => role === 'case_worker' || role === 'tenant_admin')) return;
     if (actor.roles.includes('repairer')) {
       if (workOrder.repairerFirebaseUid !== actor.uid) throw new DomainCommandError('REPAIR_ASSIGNMENT_REQUIRED', 'This repair is not assigned to the authenticated repairer.', 403);
@@ -242,6 +246,7 @@ export class FirestoreDomainCommandStore implements CommandStore {
       ...(data.requested_amount_krw === undefined ? {} : { requestedAmountKrw: data.requested_amount_krw }),
       ...(data.repair_station_id === undefined ? {} : { repairStationId: data.repair_station_id }),
       ...(data.repairer_firebase_uid === undefined ? {} : { repairerFirebaseUid: data.repairer_firebase_uid }),
+      ...(data.scheduled_at === undefined ? {} : { scheduledAt: this.iso(data.scheduled_at) }),
       ...(data.subsidy_account_id === undefined ? {} : { subsidyAccountId: data.subsidy_account_id }),
       ...(data.billed_amount_krw === undefined ? {} : { billedAmountKrw: data.billed_amount_krw }),
       ...(data.submitted_at === undefined ? {} : { submittedAt: this.iso(data.submitted_at) }),
@@ -263,7 +268,7 @@ export class FirestoreDomainCommandStore implements CommandStore {
   }
 
   private repairData(workOrder: RepairWorkOrder): Record<string, unknown> {
-    return compact({ schema_version: 1, work_order_id: workOrder.id, tenant_id: workOrder.tenantId, requester_person_id: workOrder.beneficiaryId, device_id: workOrder.deviceId, issue_summary: workOrder.issueSummary, public_funding_involved: workOrder.publicFundingInvolved, requested_amount_krw: workOrder.requestedAmountKrw, repair_station_id: workOrder.repairStationId, repairer_firebase_uid: workOrder.repairerFirebaseUid, subsidy_account_id: workOrder.subsidyAccountId, billed_amount_krw: workOrder.billedAmountKrw, submitted_at: workOrder.submittedAt ? Timestamp.fromDate(new Date(workOrder.submittedAt)) : undefined, subsidy_decision_id: workOrder.subsidyDecisionId, status: workOrder.status, revision: workOrder.revision, created_by: workOrder.createdByUid, updated_by: workOrder.updatedByUid, created_at: Timestamp.fromDate(new Date(workOrder.createdAt)), updated_at: Timestamp.fromDate(new Date(workOrder.updatedAt)), source: 'native' });
+    return compact({ schema_version: 1, work_order_id: workOrder.id, tenant_id: workOrder.tenantId, requester_person_id: workOrder.beneficiaryId, device_id: workOrder.deviceId, issue_summary: workOrder.issueSummary, public_funding_involved: workOrder.publicFundingInvolved, requested_amount_krw: workOrder.requestedAmountKrw, repair_station_id: workOrder.repairStationId, repairer_firebase_uid: workOrder.repairerFirebaseUid, scheduled_at: workOrder.scheduledAt ? Timestamp.fromDate(new Date(workOrder.scheduledAt)) : undefined, subsidy_account_id: workOrder.subsidyAccountId, billed_amount_krw: workOrder.billedAmountKrw, submitted_at: workOrder.submittedAt ? Timestamp.fromDate(new Date(workOrder.submittedAt)) : undefined, subsidy_decision_id: workOrder.subsidyDecisionId, status: workOrder.status, revision: workOrder.revision, created_by: workOrder.createdByUid, updated_by: workOrder.updatedByUid, created_at: Timestamp.fromDate(new Date(workOrder.createdAt)), updated_at: Timestamp.fromDate(new Date(workOrder.updatedAt)), source: 'native' });
   }
 
   private completedRepairData(workOrder: RepairWorkOrder, repairId: string): Record<string, unknown> {

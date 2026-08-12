@@ -39,9 +39,9 @@ export interface TransitionRepairRequestCommand {
   expectedRevision: number;
   repairStationId?: string;
   repairerFirebaseUid?: string;
+  scheduledAt?: string;
   subsidyAccountId?: string;
   billedAmountKrw?: number;
-  submittedAt?: string;
   subsidyDecisionId?: string;
   note?: string;
 }
@@ -68,6 +68,7 @@ export interface RepairWorkOrder {
   requestedAmountKrw?: number;
   repairStationId?: string;
   repairerFirebaseUid?: string;
+  scheduledAt?: string;
   subsidyAccountId?: string;
   billedAmountKrw?: number;
   submittedAt?: string;

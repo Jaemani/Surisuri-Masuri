@@ -7,6 +7,7 @@ import type { ActorContext } from '../src/types.js';
 const worker: ActorContext = { uid: 'worker-1', tenantId: 'tenant-a', roles: ['case_worker'] };
 const repairer: ActorContext = { uid: 'repairer-1', tenantId: 'tenant-a', roles: ['repairer'] };
 const ledgerScope = { accountId: 'account-1', personId: 'person-1', policyVersionId: 'policy-2026', reasonCode: 'repair_support' };
+const futureAppointment = () => new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
 function createCommand(publicFundingInvolved = true) {
   return { beneficiaryId: 'person-1', deviceId: 'device-1', issueSummary: '주행 중 좌측 쏠림', publicFundingInvolved, ...(publicFundingInvolved ? { requestedAmountKrw: 180000 } : {}) };
@@ -50,15 +51,25 @@ test('repairer submission and center verification preserve required evidence', a
   const store = new InMemoryCommandStore();
   const created = await createRequest(store);
   await store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'under_review', expectedRevision: 1 }, idempotencyKey: 'transition-010', bodyHash: 'a' });
-  await store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'assigned', expectedRevision: 2, repairStationId: 'station-1' }, idempotencyKey: 'transition-011', bodyHash: 'b' });
-  await store.transitionRepair({ actor: repairer, command: { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3 }, idempotencyKey: 'transition-012', bodyHash: 'c' });
+  await store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'assigned', expectedRevision: 2, repairStationId: 'station-1', repairerFirebaseUid: 'repairer-1' }, idempotencyKey: 'transition-011', bodyHash: 'b' });
+  await store.transitionRepair({ actor: repairer, command: { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3, scheduledAt: futureAppointment() }, idempotencyKey: 'transition-012', bodyHash: 'c' });
   await store.transitionRepair({ actor: repairer, command: { repairRequestId: created.resourceId, toStatus: 'in_progress', expectedRevision: 4 }, idempotencyKey: 'transition-013', bodyHash: 'd' });
-  const submitted = await store.transitionRepair({ actor: repairer, command: { repairRequestId: created.resourceId, toStatus: 'repairer_submitted', expectedRevision: 5, billedAmountKrw: 175000, submittedAt: '2026-08-13T06:00:00.000Z' }, idempotencyKey: 'transition-014', bodyHash: 'e' });
+  const submitted = await store.transitionRepair({ actor: repairer, command: { repairRequestId: created.resourceId, toStatus: 'repairer_submitted', expectedRevision: 5, billedAmountKrw: 175000 }, idempotencyKey: 'transition-014', bodyHash: 'e' });
   assert.equal(submitted.status, 'repairer_submitted');
+  assert.ok(store.getRepair(created.resourceId)?.submittedAt);
   await assert.rejects(() => store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'center_verified', expectedRevision: 6 }, idempotencyKey: 'transition-015', bodyHash: 'f' }), (error: unknown) => error instanceof DomainCommandError && error.code === 'SUBSIDY_DECISION_REQUIRED');
   const verified = await store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'center_verified', expectedRevision: 6, subsidyDecisionId: 'decision-1', subsidyAccountId: 'account-1' }, idempotencyKey: 'transition-016', bodyHash: 'g' });
   assert.equal(verified.status, 'center_verified');
   assert.equal(store.getEvents().length, 7);
+});
+
+test('repairer-only transitions cannot use a mixed operational role to bypass assignment', async () => {
+  const store = new InMemoryCommandStore();
+  const created = await createRequest(store);
+  await store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'under_review', expectedRevision: 1 }, idempotencyKey: 'mixed-001', bodyHash: 'a' });
+  await store.transitionRepair({ actor: worker, command: { repairRequestId: created.resourceId, toStatus: 'assigned', expectedRevision: 2, repairStationId: 'station-1', repairerFirebaseUid: 'repairer-1' }, idempotencyKey: 'mixed-002', bodyHash: 'b' });
+  const mixedActor: ActorContext = { uid: 'repairer-other', tenantId: 'tenant-a', roles: ['case_worker', 'repairer'] };
+  await assert.rejects(() => store.transitionRepair({ actor: mixedActor, command: { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3, scheduledAt: futureAppointment() }, idempotencyKey: 'mixed-003', bodyHash: 'c' }), (error: unknown) => error instanceof DomainCommandError && error.code === 'REPAIR_ASSIGNMENT_REQUIRED');
 });
 
 test('subsidy reservation and execution update one auditable balance', async () => {

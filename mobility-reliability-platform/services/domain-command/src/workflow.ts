@@ -53,18 +53,40 @@ export function normalizeTransitionCommand(input: unknown): TransitionRepairRequ
   const repairRequestId = safeId(value.repairRequestId, 'repairRequestId');
   const toStatus = value.toStatus;
   if (typeof toStatus !== 'string' || !allStatuses.has(toStatus as RepairStatus)) throw new DomainCommandError('INVALID_REPAIR_STATUS', 'toStatus is not a supported repair status.');
+  assertTransitionFields(value, toStatus as RepairStatus);
   if (!Number.isSafeInteger(value.expectedRevision) || (value.expectedRevision as number) < 1) throw new DomainCommandError('INVALID_EXPECTED_REVISION', 'expectedRevision must be a positive integer.');
   const command: TransitionRepairRequestCommand = { repairRequestId, toStatus: toStatus as RepairStatus, expectedRevision: value.expectedRevision as number };
   for (const [key, field] of [['repairStationId', 'repairStationId'], ['repairerFirebaseUid', 'repairerFirebaseUid'], ['subsidyAccountId', 'subsidyAccountId'], ['subsidyDecisionId', 'subsidyDecisionId']] as const) {
     if (value[key] !== undefined) (command as unknown as Record<string, unknown>)[field] = safeId(value[key], field);
   }
   if (value.billedAmountKrw !== undefined) command.billedAmountKrw = positiveKrw(value.billedAmountKrw, 'billedAmountKrw');
-  if (value.submittedAt !== undefined) {
-    if (typeof value.submittedAt !== 'string' || Number.isNaN(Date.parse(value.submittedAt))) throw new DomainCommandError('INVALID_SUBMITTED_AT', 'submittedAt must be an ISO timestamp.');
-    command.submittedAt = new Date(value.submittedAt).toISOString();
+  if (value.scheduledAt !== undefined) {
+    if (typeof value.scheduledAt !== 'string' || Number.isNaN(Date.parse(value.scheduledAt))) throw new DomainCommandError('INVALID_SCHEDULED_AT', 'scheduledAt must be an ISO timestamp.');
+    command.scheduledAt = new Date(value.scheduledAt).toISOString();
   }
   if (value.note !== undefined) command.note = safeText(value.note, 'note', 1000);
   return command;
+}
+
+const transitionFieldAllowlist: Record<RepairStatus, ReadonlySet<string>> = {
+  requested: new Set(['repairRequestId', 'toStatus', 'expectedRevision']),
+  under_review: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'note']),
+  assigned: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'repairStationId', 'repairerFirebaseUid', 'note']),
+  scheduled: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'scheduledAt']),
+  in_progress: new Set(['repairRequestId', 'toStatus', 'expectedRevision']),
+  repairer_submitted: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'billedAmountKrw']),
+  needs_correction: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'note']),
+  center_verified: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'subsidyAccountId', 'subsidyDecisionId', 'note']),
+  completed: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'note']),
+  reopened: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'note']),
+  rejected: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'note']),
+  cancelled: new Set(['repairRequestId', 'toStatus', 'expectedRevision', 'note']),
+};
+
+function assertTransitionFields(value: Record<string, unknown>, toStatus: RepairStatus) {
+  const allowed = transitionFieldAllowlist[toStatus];
+  const disallowed = Object.keys(value).filter((key) => !allowed.has(key));
+  if (disallowed.length > 0) throw new DomainCommandError('UNEXPECTED_COMMAND_FIELD', `The ${toStatus} transition contains unsupported fields.`);
 }
 
 export function normalizeSubsidyCommand(input: unknown): AppendSubsidyTransactionCommand {
@@ -142,6 +164,11 @@ export function transitionRepairWorkOrder(input: {
   now: Date;
 }): { workOrder: RepairWorkOrder; eventType: string; actorRole: Role } {
   if (input.current.revision !== input.command.expectedRevision) throw new DomainCommandError('REVISION_CONFLICT', 'The repair request changed; reload before trying again.', 409);
+  if (['scheduled', 'in_progress', 'repairer_submitted'].includes(input.command.toStatus)
+    && (!input.actor.roles.includes('repairer') || input.current.repairerFirebaseUid !== input.actor.uid)) {
+    throw new DomainCommandError('REPAIR_ASSIGNMENT_REQUIRED', 'This repair is not assigned to the authenticated repairer.', 403);
+  }
+  const now = input.now.toISOString();
   const roles = input.actor.roles.filter((role) => ['beneficiary', 'guardian', 'case_worker', 'repairer', 'tenant_admin'].includes(role));
   let actorRole: Role | undefined;
   let lastError: unknown;
@@ -156,7 +183,7 @@ export function transitionRepairWorkOrder(input: {
           ...(input.command.repairStationId ?? input.current.repairStationId ? { repairStationId: input.command.repairStationId ?? input.current.repairStationId } : {}),
           ...(input.command.repairerFirebaseUid ?? input.current.repairerFirebaseUid ? { repairerFirebaseUid: input.command.repairerFirebaseUid ?? input.current.repairerFirebaseUid } : {}),
           ...(input.command.billedAmountKrw ?? input.current.billedAmountKrw ? { billedAmountKrw: input.command.billedAmountKrw ?? input.current.billedAmountKrw } : {}),
-          ...(input.command.submittedAt ?? input.current.submittedAt ? { submittedAt: input.command.submittedAt ?? input.current.submittedAt } : {}),
+          ...(input.command.toStatus === 'repairer_submitted' || input.current.submittedAt ? { submittedAt: input.command.toStatus === 'repairer_submitted' ? now : input.current.submittedAt! } : {}),
           ...(input.command.subsidyDecisionId ?? input.current.subsidyDecisionId ? { subsidyDecisionId: input.command.subsidyDecisionId ?? input.current.subsidyDecisionId } : {}),
         },
       });
@@ -171,7 +198,13 @@ export function transitionRepairWorkOrder(input: {
     if (message === 'REPAIR_STATION_REQUIRED' || message === 'BILLED_AMOUNT_REQUIRED' || message === 'SUBMITTED_AT_REQUIRED' || message === 'SUBSIDY_DECISION_REQUIRED') throw new DomainCommandError(message, 'The transition is missing a required work-order field.');
     throw new DomainCommandError('REPAIR_TRANSITION_FORBIDDEN', 'This membership cannot perform that repair transition.', 403);
   }
-  const now = input.now.toISOString();
+  if (input.command.toStatus === 'scheduled') {
+    if (!input.command.scheduledAt) throw new DomainCommandError('SCHEDULED_AT_REQUIRED', 'A scheduled repair needs an appointment time.');
+    const scheduledAt = Date.parse(input.command.scheduledAt);
+    const earliest = input.now.getTime() - 15 * 60 * 1000;
+    const latest = input.now.getTime() + 180 * 24 * 60 * 60 * 1000;
+    if (scheduledAt < earliest || scheduledAt > latest) throw new DomainCommandError('SCHEDULED_AT_OUT_OF_RANGE', 'The appointment time is outside the supported scheduling window.');
+  }
   const next: RepairWorkOrder = {
     ...input.current,
     status: input.command.toStatus,
@@ -180,9 +213,10 @@ export function transitionRepairWorkOrder(input: {
     updatedAt: now,
     ...(input.command.repairStationId === undefined ? {} : { repairStationId: input.command.repairStationId }),
     ...(input.command.repairerFirebaseUid === undefined ? {} : { repairerFirebaseUid: input.command.repairerFirebaseUid }),
+    ...(input.command.scheduledAt === undefined ? {} : { scheduledAt: input.command.scheduledAt }),
     ...(input.command.subsidyAccountId === undefined ? {} : { subsidyAccountId: input.command.subsidyAccountId }),
     ...(input.command.billedAmountKrw === undefined ? {} : { billedAmountKrw: input.command.billedAmountKrw }),
-    ...(input.command.submittedAt === undefined ? {} : { submittedAt: input.command.submittedAt }),
+    ...(input.command.toStatus === 'repairer_submitted' ? { submittedAt: now } : {}),
     ...(input.command.subsidyDecisionId === undefined ? {} : { subsidyDecisionId: input.command.subsidyDecisionId }),
     ...(input.command.subsidyAccountId === undefined ? {} : { subsidyAccountId: input.command.subsidyAccountId }),
   };

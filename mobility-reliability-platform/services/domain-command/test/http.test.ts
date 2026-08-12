@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { createRepairRequestHandler } from '../src/http.js';
+import { createRepairRequestHandler, transitionRepairRequestHandler } from '../src/http.js';
 import { bodyHash } from '../src/canonical.js';
 import { InMemoryCommandStore } from '../src/store.js';
 import type { ActorContext } from '../src/types.js';
@@ -34,5 +34,19 @@ describe('HTTP trust boundary', () => {
     expect(result.statusCode).toBe(201);
     expect(result.payload).toMatchObject({ commandType: 'create_repair_request', tenantId: 'tenant-a', status: 'requested' });
     expect(bodyHash({ tenantId: 'tenant-a', ...command })).toHaveLength(64);
+  });
+
+  test('rejects transition over-posting and client-controlled submission time', async () => {
+    const store = new InMemoryCommandStore();
+    const created = await store.createRepair({ actor, command: { beneficiaryId: 'person-1', deviceId: 'device-1', issueSummary: '브레이크 점검', publicFundingInvolved: false }, idempotencyKey: 'seed-transition', bodyHash: 'seed' });
+    const request = (body: Record<string, unknown>) => ({ method: 'POST', headers: { authorization: 'Bearer token', 'x-firebase-appcheck': 'app-check', 'idempotency-key': `transition-${String(body.toStatus)}` }, body: { tenantId: 'tenant-a', repairRequestId: created.resourceId, expectedRevision: 1, ...body } });
+
+    const reassignment = makeResponse();
+    await transitionRepairRequestHandler(request({ toStatus: 'scheduled', scheduledAt: new Date(Date.now() + 86_400_000).toISOString(), repairerFirebaseUid: 'attacker' }), reassignment.response, { store, resolveActor: async () => ({ ...actor, roles: ['repairer'], uid: 'repairer-1' }) });
+    expect(reassignment.result).toMatchObject({ statusCode: 400, payload: { error: { code: 'UNEXPECTED_COMMAND_FIELD' } } });
+
+    const forgedTime = makeResponse();
+    await transitionRepairRequestHandler(request({ toStatus: 'repairer_submitted', billedAmountKrw: 10000, submittedAt: '2020-01-01T00:00:00.000Z' }), forgedTime.response, { store, resolveActor: async () => ({ ...actor, roles: ['repairer'], uid: 'repairer-1' }) });
+    expect(forgedTime.result).toMatchObject({ statusCode: 400, payload: { error: { code: 'UNEXPECTED_COMMAND_FIELD' } } });
   });
 });

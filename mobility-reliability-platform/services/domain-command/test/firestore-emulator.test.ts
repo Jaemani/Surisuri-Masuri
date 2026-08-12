@@ -78,7 +78,10 @@ describe('Firestore command adapter', () => {
     await store.transitionRepair({ actor: actor(tenantId, 'case_worker'), command: { repairRequestId: created.resourceId, toStatus: 'under_review', expectedRevision: 1 }, idempotencyKey: 'transition-emulator-01', bodyHash: '1' });
     await store.transitionRepair({ actor: actor(tenantId, 'case_worker'), command: { repairRequestId: created.resourceId, toStatus: 'assigned', expectedRevision: 2, repairStationId: 'station-1', repairerFirebaseUid: 'repairer-1' }, idempotencyKey: 'transition-emulator-02', bodyHash: '2' });
     await expect(store.transitionRepair({ actor: actor(tenantId, 'repairer', 'repairer-other'), command: { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3 }, idempotencyKey: 'transition-emulator-03', bodyHash: '3' })).rejects.toMatchObject({ code: 'REPAIR_ASSIGNMENT_REQUIRED' });
-    await store.transitionRepair({ actor: actor(tenantId, 'repairer', 'repairer-1'), command: { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3 }, idempotencyKey: 'transition-emulator-04', bodyHash: '4' });
+    const scheduledAt = new Date(Date.now() + 86_400_000).toISOString();
+    await store.transitionRepair({ actor: actor(tenantId, 'repairer', 'repairer-1'), command: { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3, scheduledAt }, idempotencyKey: 'transition-emulator-04', bodyHash: '4' });
+    const scheduledWorkOrder = await db.doc(`tenants/${tenantId}/repairWorkOrders/${created.resourceId}`).get();
+    expect((scheduledWorkOrder.get('scheduled_at') as Timestamp).toMillis()).toBe(new Date(scheduledAt).getTime());
 
     const scope = { accountId: 'account-1', personId: 'person-1', policyVersionId: 'policy-1', reasonCode: 'repair_support' };
     const append = async (command: AppendSubsidyTransactionCommand, key: string) => store.appendSubsidy({ actor: actor(tenantId, 'case_worker'), command, idempotencyKey: key, bodyHash: bodyHash(command) });
@@ -114,9 +117,10 @@ describe('Firestore command adapter', () => {
     await transition(worker, { repairRequestId: created.resourceId, toStatus: 'under_review', expectedRevision: 1 }, 'complete-01');
     await expect(transition(worker, { repairRequestId: created.resourceId, toStatus: 'assigned', expectedRevision: 2, repairStationId: 'missing-station', repairerFirebaseUid: 'repairer-1' }, 'complete-invalid-station')).rejects.toMatchObject({ code: 'REPAIR_STATION_NOT_FOUND' });
     await transition(worker, { repairRequestId: created.resourceId, toStatus: 'assigned', expectedRevision: 2, repairStationId: 'station-1', repairerFirebaseUid: 'repairer-1' }, 'complete-02');
-    await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3 }, 'complete-03');
+    const scheduledAt = new Date(Date.now() + 86_400_000).toISOString();
+    await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3, scheduledAt }, 'complete-03');
     await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'in_progress', expectedRevision: 4 }, 'complete-04');
-    await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'repairer_submitted', expectedRevision: 5, billedAmountKrw: 170000, submittedAt: '2026-08-13T03:00:00.000Z' }, 'complete-05');
+    await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'repairer_submitted', expectedRevision: 5, billedAmountKrw: 170000 }, 'complete-05');
     await db.doc(`tenants/${tenantId}/subsidyAccounts/account-1`).set({ tenant_id: tenantId, account_id: 'account-1', person_id: 'person-1', policy_version_id: 'policy-1', allocated_krw: 500000, adjustment_krw: 0, reserved_krw: 0, executed_krw: 0, available_krw: 500000, reserved_by_work_order: {}, status: 'active' });
     await transition(worker, { repairRequestId: created.resourceId, toStatus: 'center_verified', expectedRevision: 6, subsidyDecisionId: 'decision-1', subsidyAccountId: 'account-1' }, 'complete-06');
     const completed = await transition(worker, { repairRequestId: created.resourceId, toStatus: 'completed', expectedRevision: 7 }, 'complete-07');
