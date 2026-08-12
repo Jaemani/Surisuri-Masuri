@@ -7,6 +7,7 @@ export { InMemoryCommandStore } from './store.js';
 export { FirestoreDomainCommandStore } from './firebase-store.js';
 export { resolveActorContext, createRepairRequestHandler, transitionRepairRequestHandler, appendSubsidyTransactionHandler } from './http.js';
 export { FirestoreProductProjectionStore } from './projection-store.js';
+export * from './device-timeline-projector.js';
 export { getMobileProductSnapshotHandler, getConsoleOperationsSnapshotHandler } from './projection-http.js';
 export * from './projection-types.js';
 export * from './types.js';

@@ -7,7 +7,7 @@ type LocationPermissionState =
   | 'denied_can_ask'
   | 'denied_blocked';
 
-type TripSessionSummary = {
+export type TripSessionSummary = {
   sessionId: string;
   startedAt: string;
   endedAt: string | null;
@@ -37,6 +37,7 @@ export type TripRecorderState = {
   backgroundAvailable: boolean;
   captureMode: CaptureMode | null;
   activeSession: TripSessionSummary | null;
+  lastCompletedSession: TripSessionSummary | null;
   pendingUploadCount: number;
   errorCode: 'database_unavailable' | 'location_services_disabled' | 'capture_failed' | null;
 };
@@ -48,6 +49,7 @@ const previewInitialState: TripRecorderState = {
   backgroundAvailable: false,
   captureMode: null,
   activeSession: null,
+  lastCompletedSession: null,
   pendingUploadCount: 0,
   errorCode: null,
 };
@@ -90,7 +92,16 @@ export function useTripRecorder() {
   }, []);
 
   const stop = useCallback(async () => {
-    setState(previewInitialState);
+    setState((current) => current.activeSession
+      ? {
+          ...previewInitialState,
+          lastCompletedSession: {
+            ...current.activeSession,
+            endedAt: '2026-08-13T01:55:00+09:00',
+            state: 'stopped',
+          },
+        }
+      : previewInitialState);
   }, []);
 
   const enableBackground = useCallback(async () => undefined, []);

@@ -31,6 +31,8 @@ import {
   MAX_FUTURE_CLOCK_SKEW_MILLISECONDS,
 } from './samplePolicy';
 
+export type { TripSessionSummary } from './database';
+
 type RecorderPhase =
   | 'initializing'
   | 'idle'
@@ -48,6 +50,7 @@ export type TripRecorderState = {
   backgroundAvailable: boolean;
   captureMode: CaptureMode | null;
   activeSession: TripSessionSummary | null;
+  lastCompletedSession: TripSessionSummary | null;
   pendingUploadCount: number;
   errorCode: 'database_unavailable' | 'location_services_disabled' | 'capture_failed' | null;
 };
@@ -59,6 +62,7 @@ const initialState: TripRecorderState = {
   backgroundAvailable: false,
   captureMode: null,
   activeSession: null,
+  lastCompletedSession: null,
   pendingUploadCount: 0,
   errorCode: null,
 };
@@ -150,6 +154,7 @@ export function useTripRecorder() {
         backgroundAvailable,
         captureMode,
         activeSession,
+        lastCompletedSession: current.lastCompletedSession,
         pendingUploadCount,
         errorCode:
           backgroundTaskFailed || backgroundRecoveryFailed ? 'capture_failed' : null,
@@ -494,13 +499,14 @@ export function useTripRecorder() {
     try {
       await stopBackgroundLocation();
       await writeQueueRef.current;
-      await stopTripSession(state.activeSession.sessionId, 'user_stopped');
+      const stopped = await stopTripSession(state.activeSession.sessionId, 'user_stopped');
       const pendingUploadCount = await getPendingUploadCount();
       setState((current) => ({
         ...current,
         phase: 'idle',
         captureMode: null,
         activeSession: null,
+        lastCompletedSession: stopped,
         pendingUploadCount,
         errorCode: null,
       }));

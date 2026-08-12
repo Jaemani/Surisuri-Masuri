@@ -1,5 +1,6 @@
 import { Timestamp, getFirestore, type DocumentData, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { DomainCommandError } from './canonical.js';
+import { DeviceTimelineProjectionError, replayDeviceRepairTimeline, type VerifiedRepairHeader, type VerifiedRepairItem } from './device-timeline-projector.js';
 import type { ConsoleProjectionName, MobileProductSnapshot, ProductProjectionStore } from './projection-types.js';
 import type { ActorContext, RepairStatus } from './types.js';
 
@@ -37,8 +38,15 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
     if (matchingAssignments.length !== 1) throw new DomainCommandError('AMBIGUOUS_DEVICE_ASSIGNMENT', 'More than one active device assignment is available.', 409);
     const assignment = matchingAssignments[0]!;
     const deviceId = requiredString(assignment.data(), 'device_id', 'CORRUPT_DEVICE_ASSIGNMENT');
-    const device = await tenant.collection('devices').doc(deviceId).get();
+    const [device, completedRepairs] = await Promise.all([
+      tenant.collection('devices').doc(deviceId).get(),
+      this.bounded(tenant.collection('repairs').where('device_id', '==', deviceId).limit(MAX_PROJECTION_DOCUMENTS + 1).get(), 'completed repairs', actor.tenantId),
+    ]);
     this.assertTenantDoc(device.data(), actor.tenantId, 'DEVICE_NOT_FOUND');
+    const completedRepairItems = (await Promise.all(completedRepairs.map(async (repair) => ({
+      repair,
+      items: await this.bounded(repair.ref.collection('items').limit(21).get(), 'completed repair items', actor.tenantId, 20),
+    })))).flatMap(({ repair, items }) => items.map((item) => ({ repair, item })));
 
     const ownOrders = workOrders.filter((doc) => doc.data().requester_person_id === actor.personId && doc.data().device_id === deviceId).sort(byUpdatedDesc);
     ownOrders.forEach(assertValidRepairDocument);
@@ -60,7 +68,7 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
         registrationNumber: optionalString(device.data(), 'public_code') ?? '등록번호 미확인',
         registeredAt: yearLabel(device.data()?.commissioned_at ?? device.data()?.created_at, '등록일 미확인'),
         status: mobileDeviceStatus(device.data()?.status),
-        timeline: this.mobileTimeline(ownOrders, device),
+        timeline: this.mobileTimeline(completedRepairs, completedRepairItems, device, actor.tenantId),
       },
       subsidy: {
         program: optionalString(accountData, 'program_name') ?? '전동보장구 수리 지원금',
@@ -168,9 +176,45 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
     return { id: workOrder.id, title: requiredString(workOrder.data(), 'issue_summary', 'CORRUPT_REPAIR_DOCUMENT'), createdAt: dateLabel(workOrder.data().created_at, '접수일 미확인'), status: mobileRepairStatus(workOrder.data().status), repairer: station?.exists ? optionalString(station.data(), 'display_name') ?? '배정된 수리센터' : '복지관에서 수리센터를 확인 중', visitAt: dateLabel(workOrder.data().scheduled_at, '일정 협의 필요') };
   }
 
-  private mobileTimeline(orders: QueryDocumentSnapshot[], device: FirebaseFirestore.DocumentSnapshot) {
-    const repairItems = orders.slice(0, 4).map((order) => ({ id: `repair-${order.id}`, date: dateLabel(order.data().updated_at ?? order.data().created_at, '날짜 미확인'), title: timelineTitle(order.data().status), detail: requiredString(order.data(), 'issue_summary', 'CORRUPT_REPAIR_DOCUMENT'), tone: order.data().status === 'completed' ? 'teal' as const : 'orange' as const }));
-    return [...repairItems, { id: `device-${device.id}`, date: dateLabel(device.data()?.created_at, '등록일 미확인'), title: '내 기기를 등록했어요', detail: deviceName(device.data()), tone: 'blue' as const }].slice(0, 5);
+  private mobileTimeline(
+    repairs: QueryDocumentSnapshot[],
+    nestedItems: Array<{ repair: QueryDocumentSnapshot; item: QueryDocumentSnapshot }>,
+    device: FirebaseFirestore.DocumentSnapshot,
+    tenantId: string,
+  ) {
+    try {
+      const headers: VerifiedRepairHeader[] = repairs.map((repair) => ({
+        repairId: requiredString(repair.data(), 'repair_id', 'CORRUPT_COMPLETED_REPAIR'),
+        tenantId: requiredString(repair.data(), 'tenant_id', 'CORRUPT_COMPLETED_REPAIR'),
+        deviceId: requiredString(repair.data(), 'device_id', 'CORRUPT_COMPLETED_REPAIR'),
+        occurredAt: requiredIso(repair.data(), 'occurred_at', 'CORRUPT_COMPLETED_REPAIR'),
+        status: repair.data().status,
+        sourceQuality: repair.data().source_quality,
+      }));
+      const items: VerifiedRepairItem[] = nestedItems.map(({ repair, item }) => ({
+        repairItemId: requiredString(item.data(), 'repair_item_id', 'CORRUPT_COMPLETED_REPAIR_ITEM'),
+        tenantId: requiredString(item.data(), 'tenant_id', 'CORRUPT_COMPLETED_REPAIR_ITEM'),
+        repairId: requiredString(repair.data(), 'repair_id', 'CORRUPT_COMPLETED_REPAIR_ITEM'),
+        categoryCode: item.data().category_code,
+        actionCode: item.data().action_code,
+        quantity: item.data().quantity,
+        sourceQuality: item.data().source_quality,
+      }));
+      const replay = replayDeviceRepairTimeline({ tenantId, deviceId: device.id, repairs: headers, items });
+      const completed = replay.entries.reverse().slice(0, 4).map((entry) => ({
+        id: entry.id,
+        date: dateLabel(entry.occurredAt, '날짜 미확인'),
+        title: entry.title,
+        detail: `${entry.detail} · 수리 항목 ${entry.itemCount}개`,
+        tone: 'teal' as const,
+      }));
+      return [...completed, { id: `device-${device.id}`, date: dateLabel(device.data()?.created_at, '등록일 미확인'), title: '내 기기를 등록했어요', detail: deviceName(device.data()), tone: 'blue' as const }].slice(0, 5);
+    } catch (error) {
+      if (error instanceof DeviceTimelineProjectionError) {
+        throw new DomainCommandError('CORRUPT_DEVICE_TIMELINE', `Completed repair history cannot be projected: ${error.code}.`, 500);
+      }
+      throw error;
+    }
   }
 
   private consoleRepair(repair: QueryDocumentSnapshot, names: Map<string, string>, devices: Map<string, QueryDocumentSnapshot>, partners: Map<string, string>) {
@@ -210,6 +254,7 @@ function byUpdatedDesc(a: QueryDocumentSnapshot, b: QueryDocumentSnapshot) { ret
 function optionalString(data: DocumentData | undefined, field: string): string | undefined { const value = data?.[field]; return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
 function requiredString(data: DocumentData | undefined, field: string, code: string): string { const value = optionalString(data, field); if (!value) throw new DomainCommandError(code, `Projection field ${field} is invalid.`, 500); return value; }
 function requiredPositiveInteger(data: DocumentData | undefined, field: string, code: string): number { const value = data?.[field]; if (!Number.isSafeInteger(value) || value < 1) throw new DomainCommandError(code, `Projection field ${field} is invalid.`, 500); return value; }
+function requiredIso(data: DocumentData | undefined, field: string, code: string): string { const millis = timestampMillis(data?.[field]); if (!millis) throw new DomainCommandError(code, `Projection field ${field} is invalid.`, 500); return new Date(millis).toISOString(); }
 function timestampMillis(value: unknown): number { if (value instanceof Timestamp) return value.toMillis(); if (typeof value === 'string') { const parsed = Date.parse(value); return Number.isNaN(parsed) ? 0 : parsed; } return 0; }
 function dateLabel(value: unknown, fallback: string) { const millis = timestampMillis(value); return millis ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(millis) : fallback; }
 function dateTimeLabel(value: unknown, fallback: string) { const millis = timestampMillis(value); return millis ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(millis) : fallback; }
@@ -236,7 +281,6 @@ function moneyLabel(value: unknown) { return `₩${safeMoney(value).toLocaleStri
 function distanceLabel(value: unknown) { return Number.isFinite(value) && (value as number) >= 0 ? `${Math.round((value as number) / 1000).toLocaleString('ko-KR')} km` : '—'; }
 function mobileRepairStatus(status: unknown): 'received' | 'assigned' | 'visit_scheduled' | 'completed' { if (status === 'completed') return 'completed'; if (status === 'scheduled' || status === 'in_progress' || status === 'repairer_submitted' || status === 'center_verified') return 'visit_scheduled'; if (status === 'assigned') return 'assigned'; return 'received'; }
 function consoleStage(status: RepairStatus): 'new' | 'assigned' | 'submitted' | 'verified' { if (status === 'repairer_submitted' || status === 'needs_correction') return 'submitted'; if (status === 'center_verified' || status === 'completed') return 'verified'; if (status === 'assigned' || status === 'scheduled' || status === 'in_progress') return 'assigned'; return 'new'; }
-function timelineTitle(status: unknown) { if (status === 'completed') return '수리를 완료했어요'; if (status === 'rejected') return '수리 요청을 처리할 수 없어요'; if (status === 'cancelled') return '수리 요청을 취소했어요'; if (status === 'center_verified') return '복지관 검증을 마쳤어요'; if (status === 'assigned' || status === 'scheduled') return '수리센터가 배정됐어요'; return '수리 요청을 접수했어요'; }
 function transactionLabel(type: unknown) { return ({ allocation: '지원금 배정', reservation: '수리 지원금 예약', execution: '수리 지원금 집행', release: '예약 해제', reversal: '집행 취소', adjustment: '지원금 조정' } as Record<string, string>)[String(type)] ?? '지원금 변동'; }
 function ledgerState(type: unknown): '예약' | '집행 완료' | '예약 취소' { return type === 'execution' ? '집행 완료' : type === 'release' || type === 'reversal' ? '예약 취소' : '예약'; }
 function reportState(status: unknown) { return status === 'completed' ? '발행 완료' : status === 'running' ? '검토 중' : '초안'; }

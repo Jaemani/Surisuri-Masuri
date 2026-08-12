@@ -15,6 +15,9 @@ test.describe('mobile web visual preview', () => {
     await expect(page.getByText('이동 사용량을 기록하고 있어요')).toBeVisible();
     await expect(page.getByRole('button', { name: '이동 마치기' })).toBeVisible();
     await expect(page).toHaveScreenshot('mobile-recording.png', { animations: 'disabled' });
+    await page.getByRole('button', { name: '이동 마치기' }).click();
+    await expect(page.getByText('방금 이동 기록을 저장했어요')).toBeVisible();
+    await expect(page.getByText('휴대폰에 안전하게 보관됨', { exact: false })).toBeVisible();
   });
 
   test('covers repair request, support, and repairer workspaces', async ({ page }) => {
@@ -41,6 +44,12 @@ test.describe('mobile web visual preview', () => {
     await page.getByRole('button', { name: '복지지원' }).click();
     await expect(page.getByRole('button', { name: '복지지원' })).toHaveAttribute('aria-label', '복지지원');
     await expect(page.getByText('전동보장구 수리 지원금')).toBeVisible();
+
+    await page.getByRole('button', { name: '내 기기' }).click();
+    await expect(page.getByRole('heading', { name: '내 기기' })).toBeVisible();
+    await expect(page.getByText('기기 타임라인', { exact: true })).toBeVisible();
+    await expect(page.getByText('브레이크 수리 · 수리 항목 1개')).toBeVisible();
+    await expect(page).toHaveScreenshot('mobile-device-timeline.png', { animations: 'disabled', fullPage: true });
 
     await page.getByRole('button', { name: '설정·알림' }).click();
     await expect(page.getByRole('button', { name: '설정·알림' })).toHaveAttribute('aria-label', '설정·알림');

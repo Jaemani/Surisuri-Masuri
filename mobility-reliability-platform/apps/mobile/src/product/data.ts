@@ -29,8 +29,8 @@ export const demoTimeline: DeviceTimelineItem[] = [
   {
     id: 'timeline-2',
     date: '2026. 07. 28',
-    title: '정기 점검을 마쳤어요',
-    detail: '브레이크와 타이어 상태 양호',
+    title: '수리를 완료했어요',
+    detail: '브레이크 수리 · 수리 항목 1개',
     tone: 'teal',
   },
   {

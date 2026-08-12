@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 
 import { useTripRecorder } from './src/telemetry/useTripRecorder';
 import { RepairerScreen } from './src/product/components/RepairerScreen';
@@ -31,6 +31,10 @@ export default function App() {
   };
 
   const stopWithConfirmation = () => {
+    if (Platform.OS === 'web') {
+      void recorder.stop();
+      return;
+    }
     Alert.alert('이동 기록을 마칠까요?', '마친 뒤에도 지금까지의 기록은 내 기기에서 확인할 수 있어요.', [
       { text: '계속 기록', style: 'cancel' },
       { text: '기록 마치기', style: 'destructive', onPress: () => void recorder.stop() },
@@ -66,6 +70,7 @@ export default function App() {
         {activeTab === 'home' ? (
           <UserHomeScreen
             state={recorder.state}
+            lastCompletedSession={recorder.state.lastCompletedSession}
             displayName={view.displayName}
             request={view.repairRequest}
             device={view.device}

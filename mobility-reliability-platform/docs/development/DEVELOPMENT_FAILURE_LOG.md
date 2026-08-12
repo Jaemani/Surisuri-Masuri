@@ -225,3 +225,11 @@ trace source·benchmark eligibility, 중복 trace/batch identity를 전부 대�
 - 제품 업데이트: [UPD-20260723-17](../product-updates/UPD-20260723-17-android-background-native-smoke.md)
 - 증거: [EVD-20260723-051](../evidence/2026-07.md#evd-20260723-051--android-background-gps-native-lifecycle-smoke와-cold-launch-복구)
 - 사람 대상 리포트: [HR-20260723-42](../reports/human/HR-20260723-42-android-background-native-smoke.md)
+# DEVFAIL-20260813-04 — completed repair item ID를 tenant 전역 identity로 잘못 해석
+
+- 발생 환경: WSL2 / Firestore Emulator / local synthetic fixture
+- 증상: 각 repair 하위 collection에서 합법적으로 반복되는 `item-01`이 replay에서 duplicate로 거부됨
+- 원인: projector가 item document identity의 scope를 repair subcollection이 아니라 tenant 전체로 계산함
+- 수정: duplicate key를 `repairId:repairItemId`로 고정하고 같은 repair 안의 실제 duplicate만 거부하는 회귀 test 추가
+- 영향: 미커밋 local 구현에서만 발견. production·실사용자 영향 없음
+- 검증: domain-command emulator command/projection 10 scenarios 통과

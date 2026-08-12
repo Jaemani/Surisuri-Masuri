@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { TripRecorderState } from '../../telemetry/useTripRecorder';
+import type { TripSessionSummary } from '../../telemetry/useTripRecorder';
 import { RepairIntakeForm } from './RepairIntakeForm';
 import { formatMoney, getRepairProgress, getSubsidyProgressPercent, getSubsidyRemaining, repairProgressSteps } from '../state';
 import type { CreateRepairRequestInput, DeviceSummary, RepairWorkOrder, SubsidySummary } from '../types';
@@ -15,6 +16,7 @@ type RecorderActions = {
 
 type HomeProps = RecorderActions & {
   state: TripRecorderState;
+  lastCompletedSession: TripSessionSummary | null;
   displayName: string;
   request: RepairWorkOrder | null;
   device: DeviceSummary;
@@ -33,7 +35,7 @@ function friendlyError(state: TripRecorderState) {
   return null;
 }
 
-export function UserHomeScreen({ state, displayName, request, device, subsidy, onStart, onResume, onStop, onOpenRepairs }: HomeProps) {
+export function UserHomeScreen({ state, lastCompletedSession, displayName, request, device, subsidy, onStart, onResume, onStop, onOpenRepairs }: HomeProps) {
   const busy = isBusy(state);
   const error = friendlyError(state);
   const isRecording = state.phase === 'recording';
@@ -126,6 +128,14 @@ export function UserHomeScreen({ state, displayName, request, device, subsidy, o
         <Text style={screenStyles.privacyTitle}>내 기록은 안전하게 보관돼요</Text>
         <Text style={screenStyles.privacyText}>이동 기록은 먼저 휴대폰에 저장되고, 필요한 내용만 서비스에 전달돼요.</Text>
       </Card>
+      {lastCompletedSession ? <View accessibilityLabel="최근 이동 기록 저장 완료"><Card style={screenStyles.savedTripCard}>
+        <View style={screenStyles.savedTripIcon}><Text style={screenStyles.savedTripIconText}>✓</Text></View>
+        <View style={screenStyles.savedTripCopy}>
+          <Text style={screenStyles.savedTripTitle}>방금 이동 기록을 저장했어요</Text>
+          <Text style={screenStyles.savedTripText}>{formatSessionTime(lastCompletedSession)} · 휴대폰에 안전하게 보관됨</Text>
+          <Text style={screenStyles.savedTripHint}>{state.pendingUploadCount > 0 ? '연결되면 기관에 전달할게요.' : '필요한 내용만 점검 안내에 사용해요.'}</Text>
+        </View>
+      </Card></View> : null}
     </ScrollView>
   );
 }
@@ -178,12 +188,12 @@ export function UserRepairScreen({ request, onCreateRequest, onRefresh, isDemo =
 export function UserDeviceScreen({ device, onOpenRepairs }: { device: DeviceSummary; onOpenRepairs: () => void }) {
   return (
     <ScrollView contentContainerStyle={screenStyles.content} showsVerticalScrollIndicator={false}>
-      <View style={screenStyles.pageHeader}><Text style={screenStyles.pageTitle}>내 기기</Text><Text style={screenStyles.pageSubtitle}>내 이동을 함께하는 기기의 기록을 한눈에 확인해요.</Text></View>
+      <View style={screenStyles.pageHeader}><Text accessibilityRole="header" style={screenStyles.pageTitle}>내 기기</Text><Text style={screenStyles.pageSubtitle}>내 이동을 함께하는 기기의 기록을 한눈에 확인해요.</Text></View>
       <Card style={screenStyles.deviceCard}><View style={screenStyles.deviceVisual}><Text style={screenStyles.deviceGlyph}>♿</Text></View><View style={screenStyles.deviceDetails}><StatusPill label={device.status === 'healthy' ? '정상 작동' : '확인 필요'} tone={device.status === 'healthy' ? 'teal' : 'orange'} /><Text style={screenStyles.deviceName}>{device.name}</Text><Text style={screenStyles.deviceNumber}>등록번호 {device.registrationNumber} · {device.registeredAt}</Text></View></Card>
-      <SectionHeading title="기기 타임라인" action="전체 보기" onAction={() => undefined} />
+      <SectionHeading title="기기 타임라인" />
       <Card style={screenStyles.timelineCard}>{device.timeline.map((item, index) => <View key={item.id} style={screenStyles.timelineRow}><View style={screenStyles.timelineRail}><View style={[screenStyles.timelineDot, stylesByTone[item.tone]]} />{index < device.timeline.length - 1 ? <View style={screenStyles.timelineLine} /> : null}</View><View style={screenStyles.timelineCopy}><Text style={screenStyles.timelineDate}>{item.date}</Text><Text style={screenStyles.timelineTitle}>{item.title}</Text><Text style={screenStyles.timelineDetail}>{item.detail}</Text></View></View>)}</Card>
       <Card style={screenStyles.actionCard}><View><Text style={screenStyles.actionTitle}>기기 상태가 걱정되나요?</Text><Text style={screenStyles.actionText}>간단한 증상을 남기고 도움을 받아보세요.</Text></View><ProductButton label="수리 도움" onPress={onOpenRepairs} variant="secondary" /></Card>
-      <DemoBadge label="기기 이력은 검토용 데모 데이터입니다" />
+      {device.id.startsWith('demo-') ? <DemoBadge label="기기 이력은 검토용 데모 데이터입니다" /> : null}
     </ScrollView>
   );
 }
@@ -285,6 +295,13 @@ const screenStyles = StyleSheet.create({
   privacyCard: { backgroundColor: '#EEF5F1', borderColor: '#DDECE4' },
   privacyTitle: { color: colors.ink, fontSize: 15, fontWeight: '800' },
   privacyText: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 6 },
+  savedTripCard: { alignItems: 'flex-start', backgroundColor: '#E8F4EF', borderColor: '#D4EAE2', flexDirection: 'row', marginBottom: 18, padding: 16 },
+  savedTripIcon: { alignItems: 'center', backgroundColor: '#B7E0D2', borderRadius: 18, height: 36, justifyContent: 'center', marginRight: 11, width: 36 },
+  savedTripIconText: { color: colors.tealDark, fontSize: 20, fontWeight: '800' },
+  savedTripCopy: { flex: 1 },
+  savedTripTitle: { color: colors.ink, fontSize: 15, fontWeight: '800' },
+  savedTripText: { color: colors.tealDark, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  savedTripHint: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 3 },
   pressed: { opacity: 0.72 },
   pageHeader: { marginBottom: 24 },
   pageTitle: { color: colors.ink, fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
@@ -387,6 +404,14 @@ const screenStyles = StyleSheet.create({
   devSwitchTitle: { color: colors.ink, fontSize: 14, fontWeight: '800' },
   devSwitchText: { color: colors.muted, fontSize: 12, marginTop: 4 },
 });
+
+function formatSessionTime(session: TripSessionSummary) {
+  const started = Date.parse(session.startedAt);
+  const ended = session.endedAt ? Date.parse(session.endedAt) : Number.NaN;
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return '이동 기록 1건';
+  const minutes = Math.max(1, Math.round((ended - started) / 60_000));
+  return `${minutes}분 동안 기록`;
+}
 
 const stylesByTone = {
   teal: screenStyles.timelineDotTeal,

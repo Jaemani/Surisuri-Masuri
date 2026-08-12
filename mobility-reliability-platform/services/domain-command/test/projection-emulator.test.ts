@@ -24,6 +24,10 @@ async function seed(tenantId: string) {
   await tenant.collection('deviceAssignments').doc('assignment-1').set({ tenant_id: tenantId, assignment_id: 'assignment-1', person_id: 'person-1', device_id: 'device-1', status: 'active', valid_from: Timestamp.fromMillis(Date.now() - 60_000) });
   await tenant.collection('repairStations').doc('station-1').set({ tenant_id: tenantId, repair_station_id: 'station-1', display_name: '한마음 모빌리티', contact_label: 'SENSITIVE-PARTNER-CONTACT', status: 'active' });
   await tenant.collection('repairWorkOrders').doc('work-1').set({ tenant_id: tenantId, work_order_id: 'work-1', requester_person_id: 'person-1', device_id: 'device-1', issue_summary: 'SENSITIVE-RAW-ISSUE', issue_category_label: '브레이크', status: 'assigned', repair_station_id: 'station-1', repairer_firebase_uid: 'repairer-1', requested_amount_krw: 180000, subsidy_account_id: 'account-1', revision: 3, created_at: now, updated_at: now });
+  await tenant.collection('repairs').doc('history-1').set({ tenant_id: tenantId, repair_id: 'history-1', work_order_id: 'work-old', device_id: 'device-1', occurred_at: Timestamp.fromDate(new Date('2026-07-30T00:00:00.000Z')), recorded_at: now, status: 'completed', source_quality: 'verified', billed_amount_krw: 70000 });
+  await tenant.collection('repairs').doc('history-1').collection('items').doc('item-01').set({ tenant_id: tenantId, repair_id: 'history-1', repair_item_id: 'item-01', category_code: 'brakes', action_code: 'adjust', quantity: 1, line_amount_krw: 70000, source_quality: 'verified' });
+  await tenant.collection('repairs').doc('repair-verified-1').set({ tenant_id: tenantId, repair_id: 'repair-verified-1', work_order_id: 'work-completed', device_id: 'device-1', status: 'completed', occurred_at: now, source_quality: 'verified', issue_summary: 'SENSITIVE-COMPLETED-ISSUE', repairer_membership_uid: 'SENSITIVE-REPAIRER-UID' });
+  await tenant.collection('repairs').doc('repair-verified-1').collection('items').doc('item-01').set({ tenant_id: tenantId, repair_id: 'repair-verified-1', repair_item_id: 'item-01', category_code: 'brakes', action_code: 'repair', quantity: 1, source_quality: 'verified', detail_text: 'SENSITIVE-ITEM-TEXT' });
   await tenant.collection('subsidyAccounts').doc('account-1').set({ tenant_id: tenantId, account_id: 'account-1', person_id: 'person-1', status: 'active', allocated_krw: 300000, adjustment_krw: 0, reserved_krw: 180000, executed_krw: 0, available_krw: 120000 });
   await tenant.collection('subsidyAccounts').doc('account-1').collection('transactions').doc('tx-1').set({ tenant_id: tenantId, transaction_id: 'tx-1', work_order_id: 'work-1', transaction_type: 'reservation', amount_krw: 180000, actor_label: 'SENSITIVE-ACTOR-NAME', occurred_at: now });
   await tenant.collection('inspections').doc('inspection-1').set({ tenant_id: tenantId, inspection_id: 'inspection-1', person_id: 'person-1', device_id: 'device-1', reason_code: 'routine_cycle', reason_summary: 'SENSITIVE-INSPECTION-NOTE', decision_code: 'review', confidence_band: 'low', scheduled_at: now });
@@ -39,9 +43,11 @@ describe('Firestore purpose-limited projection adapter', () => {
     if (!('device' in snapshot)) throw new Error('expected beneficiary projection');
     expect(snapshot.repairRequest).toMatchObject({ id: 'work-1', title: 'SENSITIVE-RAW-ISSUE', status: 'assigned' });
     expect(snapshot.device).toMatchObject({ id: 'device-1', registrationNumber: 'MOB-1' });
+    expect(snapshot.device.timeline).toEqual(expect.arrayContaining([expect.objectContaining({ title: '수리를 완료했어요', detail: '브레이크 조정 · 수리 항목 1개' })]));
+    expect(snapshot.device.timeline[0]).toMatchObject({ title: '수리를 완료했어요', detail: '브레이크 수리 · 수리 항목 1개', tone: 'teal' });
     expect(snapshot.subsidy).toMatchObject({ used: 180000, total: 300000 });
     const serialized = JSON.stringify(snapshot);
-    for (const sentinel of ['SENSITIVE-NAME', 'SENSITIVE-PHONE', 'SENSITIVE-ADDRESS', 'SENSITIVE-STORAGE', 'SENSITIVE-RAW-GPS', 'repairer_firebase_uid']) expect(serialized).not.toContain(sentinel);
+    for (const sentinel of ['SENSITIVE-NAME', 'SENSITIVE-PHONE', 'SENSITIVE-ADDRESS', 'SENSITIVE-STORAGE', 'SENSITIVE-RAW-GPS', 'SENSITIVE-COMPLETED-ISSUE', 'SENSITIVE-REPAIRER-UID', 'SENSITIVE-ITEM-TEXT', 'repairer_firebase_uid']) expect(serialized).not.toContain(sentinel);
   });
 
   emulatorTest('repairer receives only its assigned job and no subsidy detail', async () => {

@@ -1,5 +1,16 @@
 # 2026년 8월 제품 증거
 
+## EVD-20260813-015 — 모바일 주행 종료 저장 확인
+
+- 생성: 2026-08-13 / Codex 작업 실행
+- 환경·데이터: local / synthetic / Expo Web preview
+- 출처: 현재 작업 트리, `pnpm --filter @mobility-reliability/mobile typecheck`, `pnpm exec playwright test tests/e2e/mobile-web.spec.ts --project=mobile-chromium`
+- 상태: generated / 사람 검토 대기
+- 확인 항목: 시작→기록 중→종료 후 `방금 이동 기록을 저장했어요`와 `휴대폰에 안전하게 보관됨` 표시
+- 증명: 종료 직후 사용자에게 보존 결과가 보이는 UI 상태 전이
+- 한계: 실제 Android/iPhone OS 종료, background location, Firebase ACK, 거리 계산과 현장 사용을 증명하지 않음
+- 사용처: [UPD-20260813-19](../product-updates/UPD-20260813-19-mobile-session-completion-summary.md), [ADR-0049](../decisions/ADR-0049-mobile-session-completion-summary.md), [HR-20260813-05](../reports/human/HR-20260813-05-mobile-session-summary.md)
+
 ## EVD-20260813-001 — 제품 중심 모바일과 수리·지원금 도메인 기반
 
 - 상태: generated / 사람 검토 대기
@@ -151,3 +162,12 @@
 - 결과 계약: `trainingPerformed=false`, `deploymentAuthorized=false`, `deploymentDecision=defer`, `evaluation_only_no_deployment`
 - privacy 경계: result에 pseudonymous group, consent digest, feature values, raw samples·coordinates, Firebase/Storage identity 없음
 - 제한: 생성 batch 하나로 evaluation 경계를 검증했으며 실제 field metric, 동의, 참가자 수, 모델 효용, confidence interval, ONNX·모바일·production 배포 증거가 아님
+
+# EVD-20260813-16 — 완료 수리 archive 기기 타임라인 replay
+
+- 분류: `LOCAL_TEST`, `LOCAL_EMULATOR`, `SYNTHETIC`, `WEB_VISUAL`
+- 확인 항목: 입력 순서 독립 replay와 checksum, as-of 제외, duplicate/device/tenant/source/category/action/quantity fail-closed, verified repair/items 기반 beneficiary timeline, 민감값 미노출
+- 검증: domain-command pure tests 7개 포함 local suite, Firestore Emulator command/projection 10 scenarios, mobile 21 files / 258 tests, Playwright mobile 2 flows
+- 시각 증거: `tests/e2e/mobile-web.spec.ts-snapshots/mobile-device-timeline-mobile-chromium-linux.png`
+- Product Design 확인: 390×844 snapshot에서 기기 요약→타임라인→수리 도움 위계와 하단 tab 상태를 확인; screenshot만으로 native 접근성·TalkBack/VoiceOver는 확인하지 못함
+- 제한: read-time completed-repair slice이며 전체 Digital Twin, async current projection, legacy import, 부품 lifecycle, 실제 수리·사용자·production 배포가 아님
