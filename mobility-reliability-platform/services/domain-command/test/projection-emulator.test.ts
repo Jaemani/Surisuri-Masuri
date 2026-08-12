@@ -23,7 +23,7 @@ async function seed(tenantId: string) {
   await tenant.collection('devices').doc('device-1').set({ tenant_id: tenantId, device_id: 'device-1', public_code: 'MOB-1', manufacturer: '나래', model_name: 'EV-2', status: 'active', created_at: now, object_path: 'SENSITIVE-STORAGE', latitude: 37.1 });
   await tenant.collection('deviceAssignments').doc('assignment-1').set({ tenant_id: tenantId, assignment_id: 'assignment-1', person_id: 'person-1', device_id: 'device-1', status: 'active', valid_from: Timestamp.fromMillis(Date.now() - 60_000) });
   await tenant.collection('repairStations').doc('station-1').set({ tenant_id: tenantId, repair_station_id: 'station-1', display_name: '한마음 모빌리티', contact_label: 'SENSITIVE-PARTNER-CONTACT', status: 'active' });
-  await tenant.collection('repairWorkOrders').doc('work-1').set({ tenant_id: tenantId, work_order_id: 'work-1', requester_person_id: 'person-1', device_id: 'device-1', issue_summary: 'SENSITIVE-RAW-ISSUE', issue_category_label: '브레이크', status: 'assigned', repair_station_id: 'station-1', repairer_firebase_uid: 'repairer-1', requested_amount_krw: 180000, revision: 3, created_at: now, updated_at: now });
+  await tenant.collection('repairWorkOrders').doc('work-1').set({ tenant_id: tenantId, work_order_id: 'work-1', requester_person_id: 'person-1', device_id: 'device-1', issue_summary: 'SENSITIVE-RAW-ISSUE', issue_category_label: '브레이크', status: 'assigned', repair_station_id: 'station-1', repairer_firebase_uid: 'repairer-1', requested_amount_krw: 180000, subsidy_account_id: 'account-1', revision: 3, created_at: now, updated_at: now });
   await tenant.collection('subsidyAccounts').doc('account-1').set({ tenant_id: tenantId, account_id: 'account-1', person_id: 'person-1', status: 'active', allocated_krw: 300000, adjustment_krw: 0, reserved_krw: 180000, executed_krw: 0, available_krw: 120000 });
   await tenant.collection('subsidyAccounts').doc('account-1').collection('transactions').doc('tx-1').set({ tenant_id: tenantId, transaction_id: 'tx-1', work_order_id: 'work-1', transaction_type: 'reservation', amount_krw: 180000, actor_label: 'SENSITIVE-ACTOR-NAME', occurred_at: now });
   await tenant.collection('inspections').doc('inspection-1').set({ tenant_id: tenantId, inspection_id: 'inspection-1', person_id: 'person-1', device_id: 'device-1', reason_code: 'routine_cycle', reason_summary: 'SENSITIVE-INSPECTION-NOTE', decision_code: 'review', confidence_band: 'low', scheduled_at: now });
@@ -52,11 +52,17 @@ describe('Firestore purpose-limited projection adapter', () => {
     if (!('repairJobs' in snapshot)) throw new Error('expected repairer projection');
     expect(snapshot.repairJobs).toHaveLength(1);
     expect(snapshot.repairJobs[0]?.id).toBe('work-1');
-    expect(snapshot.repairJobs[0]?.issue).toBe('브레이크');
+    expect(snapshot.repairJobs[0]).toEqual({
+      id: 'work-1', revision: 3, status: 'assigned', customerLabel: '이용자 C-1042',
+      device: { publicCode: 'MOB-1', model: '나래 EV-2' }, issue: '브레이크',
+      scheduledAt: null, scheduleLabel: '일정 협의 필요', priority: 'scheduled',
+      billedAmountKrw: null, submittedAt: null, allowedActions: ['schedule'],
+    });
+    expect(Object.keys(snapshot.repairJobs[0]!).sort()).toEqual(['allowedActions', 'billedAmountKrw', 'customerLabel', 'device', 'id', 'issue', 'priority', 'revision', 'scheduleLabel', 'scheduledAt', 'status', 'submittedAt'].sort());
     expect(JSON.stringify(snapshot)).not.toContain('account-1');
     expect(snapshot).not.toHaveProperty('device');
     expect(snapshot).not.toHaveProperty('subsidy');
-    expect(JSON.stringify(snapshot)).not.toContain('SENSITIVE-RAW-ISSUE');
+    for (const sentinel of ['SENSITIVE-RAW-ISSUE', 'SENSITIVE-NAME', 'SENSITIVE-PHONE', 'SENSITIVE-ADDRESS', 'repairer-1', 'person-1', '180000']) expect(JSON.stringify(snapshot)).not.toContain(sentinel);
   });
 
   emulatorTest('operator sees bounded institution DTO while non-operator is denied', async () => {

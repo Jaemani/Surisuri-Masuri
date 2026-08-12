@@ -8,6 +8,7 @@ const MAX_LEDGER_TRANSACTIONS = 200;
 const activeRepairStatuses = new Set<RepairStatus>(['requested', 'under_review', 'assigned', 'scheduled', 'in_progress', 'repairer_submitted', 'needs_correction', 'center_verified', 'reopened']);
 const terminalRepairStatuses = new Set<RepairStatus>(['completed', 'rejected', 'cancelled']);
 const allRepairStatuses = new Set<RepairStatus>([...activeRepairStatuses, ...terminalRepairStatuses]);
+const repairerVisibleStatuses = new Set<RepairStatus>(['assigned', 'scheduled', 'in_progress', 'repairer_submitted', 'needs_correction', 'center_verified']);
 
 export class FirestoreProductProjectionStore implements ProductProjectionStore {
   constructor(private readonly db: Firestore = getFirestore()) {}
@@ -119,10 +120,13 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
   }
 
   private async repairerSnapshot(actor: ActorContext, tenant: FirebaseFirestore.DocumentReference): Promise<MobileProductSnapshot> {
-    const [jobs, tenantDoc] = await Promise.all([this.collection(tenant, 'repairWorkOrders'), tenant.get()]);
+    const [jobs, tenantDoc] = await Promise.all([
+      this.bounded(tenant.collection('repairWorkOrders').where('repairer_firebase_uid', '==', actor.uid).limit(MAX_PROJECTION_DOCUMENTS + 1).get(), 'assigned repair work orders', actor.tenantId),
+      tenant.get(),
+    ]);
     this.assertTenantDoc(tenantDoc.data(), actor.tenantId, 'TENANT_NOT_FOUND');
     jobs.forEach(assertValidRepairDocument);
-    const assigned = jobs.filter((doc) => doc.data().repairer_firebase_uid === actor.uid && activeRepairStatuses.has(doc.data().status));
+    const assigned = jobs.filter((doc) => repairerVisibleStatuses.has(doc.data().status));
     const referencedPeople = [...new Set(assigned.map((job) => requiredString(job.data(), 'requester_person_id', 'CORRUPT_REPAIR_DOCUMENT')))];
     const referencedDevices = [...new Set(assigned.map((job) => requiredString(job.data(), 'device_id', 'CORRUPT_REPAIR_DOCUMENT')))];
     const [people, devices] = await Promise.all([
@@ -133,7 +137,27 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
     for (const device of devices) this.assertTenantDoc(device.data(), actor.tenantId, 'DEVICE_NOT_FOUND');
     const names = new Map(people.map((doc) => [doc.id, `이용자 ${optionalString(doc.data(), 'public_code') ?? shortCode(doc.id)}`]));
     const deviceById = new Map(devices.map((doc) => [doc.id, doc]));
-    return { roleSession: { role: 'repairer', displayName: displayNameOf(tenantDoc.data(), '수리 파트너'), isDemo: false }, repairJobs: assigned.map((job) => ({ id: job.id, customer: `${names.get(String(job.data().requester_person_id)) ?? '이용자'} 님`, device: deviceName(deviceById.get(String(job.data().device_id))?.data()), issue: safeOperationalIssue(job.data()), due: dateLabel(job.data().scheduled_at, '일정 협의 필요'), priority: isToday(job.data().scheduled_at) ? 'today' : 'scheduled' })) };
+    return {
+      roleSession: { role: 'repairer', displayName: displayNameOf(tenantDoc.data(), '수리 파트너'), isDemo: false },
+      repairJobs: assigned.sort(byUpdatedDesc).map((job) => {
+        const status = job.data().status as 'assigned' | 'scheduled' | 'in_progress' | 'repairer_submitted' | 'needs_correction' | 'center_verified';
+        const device = deviceById.get(String(job.data().device_id));
+        return {
+          id: job.id,
+          revision: requiredPositiveInteger(job.data(), 'revision', 'CORRUPT_REPAIR_DOCUMENT'),
+          status,
+          customerLabel: names.get(String(job.data().requester_person_id)) ?? '이용자',
+          device: { publicCode: publicDevice(device), model: deviceName(device?.data()) },
+          issue: safeOperationalIssue(job.data()),
+          scheduledAt: isoLabel(job.data().scheduled_at),
+          scheduleLabel: dateTimeLabel(job.data().scheduled_at, '일정 협의 필요'),
+          priority: isToday(job.data().scheduled_at) ? 'today' : 'scheduled',
+          billedAmountKrw: nullableMoney(job.data().billed_amount_krw),
+          submittedAt: isoLabel(job.data().submitted_at),
+          allowedActions: repairerAllowedActions(status),
+        };
+      }),
+    };
   }
 
   private async mobileWorkOrder(tenant: FirebaseFirestore.DocumentReference, workOrder: QueryDocumentSnapshot) {
@@ -187,6 +211,8 @@ function requiredString(data: DocumentData | undefined, field: string, code: str
 function requiredPositiveInteger(data: DocumentData | undefined, field: string, code: string): number { const value = data?.[field]; if (!Number.isSafeInteger(value) || value < 1) throw new DomainCommandError(code, `Projection field ${field} is invalid.`, 500); return value; }
 function timestampMillis(value: unknown): number { if (value instanceof Timestamp) return value.toMillis(); if (typeof value === 'string') { const parsed = Date.parse(value); return Number.isNaN(parsed) ? 0 : parsed; } return 0; }
 function dateLabel(value: unknown, fallback: string) { const millis = timestampMillis(value); return millis ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(millis) : fallback; }
+function dateTimeLabel(value: unknown, fallback: string) { const millis = timestampMillis(value); return millis ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(millis) : fallback; }
+function isoLabel(value: unknown): string | null { const millis = timestampMillis(value); return millis ? new Date(millis).toISOString() : null; }
 function yearLabel(value: unknown, fallback: string) { const millis = timestampMillis(value); return millis ? `${new Date(millis).getUTCFullYear()}년 등록` : fallback; }
 function displayNameOf(data: DocumentData | undefined, fallback: string) { return optionalString(data, 'display_name') ?? fallback; }
 function deviceName(data: DocumentData | undefined) { const manufacturer = optionalString(data, 'manufacturer'); const model = optionalString(data, 'model_name'); return [manufacturer, model].filter(Boolean).join(' ') || '전동보장구'; }
@@ -202,6 +228,7 @@ function reportTypeLabel(type: unknown) { return ({ monthly_operations: '월간 
 function publicDevice(device: QueryDocumentSnapshot | undefined) { return device ? optionalString(device.data(), 'public_code') ?? shortCode(device.id) : '기기 미확인'; }
 function shortCode(value: string) { return value.slice(-8).toUpperCase(); }
 function safeMoney(value: unknown) { return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0; }
+function nullableMoney(value: unknown): number | null { return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null; }
 function safeSignedMoney(value: unknown) { return Number.isSafeInteger(value) ? value as number : 0; }
 function safeCount(value: unknown) { return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0; }
 function moneyLabel(value: unknown) { return `₩${safeMoney(value).toLocaleString('ko-KR')}`; }
@@ -213,3 +240,4 @@ function transactionLabel(type: unknown) { return ({ allocation: '지원금 배�
 function ledgerState(type: unknown): '예약' | '집행 완료' | '예약 취소' { return type === 'execution' ? '집행 완료' : type === 'release' || type === 'reversal' ? '예약 취소' : '예약'; }
 function reportState(status: unknown) { return status === 'completed' ? '발행 완료' : status === 'running' ? '검토 중' : '초안'; }
 function isToday(value: unknown) { const millis = timestampMillis(value); if (!millis) return false; const now = new Date(); const date = new Date(millis); return now.getUTCFullYear() === date.getUTCFullYear() && now.getUTCMonth() === date.getUTCMonth() && now.getUTCDate() === date.getUTCDate(); }
+function repairerAllowedActions(status: RepairStatus): Array<'schedule' | 'start' | 'submit' | 'resume'> { if (status === 'assigned') return ['schedule']; if (status === 'scheduled') return ['start']; if (status === 'in_progress') return ['submit']; if (status === 'needs_correction') return ['resume']; return []; }

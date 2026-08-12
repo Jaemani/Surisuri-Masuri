@@ -7,7 +7,20 @@ export interface MobileBeneficiarySnapshot {
 
 export interface MobileRepairerSnapshot {
   roleSession: { role: 'repairer'; displayName: string; isDemo: false };
-  repairJobs: Array<{ id: string; customer: string; device: string; issue: string; due: string; priority: 'today' | 'scheduled' }>;
+  repairJobs: Array<{
+    id: string;
+    revision: number;
+    status: 'assigned' | 'scheduled' | 'in_progress' | 'repairer_submitted' | 'needs_correction' | 'center_verified';
+    customerLabel: string;
+    device: { publicCode: string; model: string };
+    issue: string;
+    scheduledAt: string | null;
+    scheduleLabel: string;
+    priority: 'today' | 'scheduled';
+    billedAmountKrw: number | null;
+    submittedAt: string | null;
+    allowedActions: Array<'schedule' | 'start' | 'submit' | 'resume'>;
+  }>;
 }
 
 export type MobileProductSnapshot = MobileBeneficiarySnapshot | MobileRepairerSnapshot;
