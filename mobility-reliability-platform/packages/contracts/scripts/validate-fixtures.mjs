@@ -231,6 +231,18 @@ const cases = [
     fixture: 'fixtures/legacy-device-event-dry-run.v1.invalid.json',
     expected: false,
   },
+  {
+    name: 'valid reliability baseline result v1',
+    schema: 'schemas/reliability-baseline-result.v1.schema.json',
+    fixture: 'fixtures/reliability-baseline-result.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid reliability baseline result v1 rejects field claims, metrics on abstention, and deployment',
+    schema: 'schemas/reliability-baseline-result.v1.schema.json',
+    fixture: 'fixtures/reliability-baseline-result.v1.invalid.json',
+    expected: false,
+  },
 ]
 
 for (const testCase of cases) {

@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "reliability-baseline-result.v1",
+  "evaluationId": "d2e9a00e-3fcc-42e1-a6b4-4e3112c8709f",
+  "generatedAt": "2026-08-13T12:00:00Z",
+  "evaluationScope": "synthetic_only",
+  "sourceKind": "synthetic",
+  "trainingPerformed": false,
+  "datasetVersion": "reliability-dataset.r10.synthetic.v1",
+  "datasetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outcomeDefinitionVersion": "time-to-inspection-outcome.v1",
+  "splitStrategy": "device-group-time-holdout.v1",
+  "timeWindows": {
+    "train": { "startAt": "2024-01-01T00:00:00Z", "endAt": "2024-12-31T23:59:59Z" },
+    "validation": { "startAt": "2025-01-01T00:00:00Z", "endAt": "2025-12-31T23:59:59Z" },
+    "test": { "startAt": "2026-01-01T00:00:00Z", "endAt": "2026-06-30T23:59:59Z" }
+  },
+  "groupLeakageDetected": false,
+  "counts": {
+    "devices": 100,
+    "observations": 100,
+    "observedOutcomes": 40,
+    "censored": 60,
+    "abstained": 20,
+    "countsReconciled": true
+  },
+  "methods": {
+    "fixedInterval": {
+      "method": "fixed_interval",
+      "threshold": { "intervalDays": 180 },
+      "components": [
+        {
+          "component": "battery",
+          "sampleCount": 80,
+          "eventCount": 18,
+          "censoredCount": 62,
+          "minimumSampleCount": 20,
+          "minimumEventCount": 10,
+          "status": "evaluated",
+          "abstention": false,
+          "dueCount": 25,
+          "confusion": { "truePositive": 12, "falsePositive": 13, "trueNegative": 49, "falseNegative": 6 },
+          "sensitivity": 0.666666666667,
+          "specificity": 0.790322580645,
+          "brierScore": 0.2375
+        },
+        {
+          "component": "brake",
+          "sampleCount": 20,
+          "eventCount": 2,
+          "censoredCount": 18,
+          "minimumSampleCount": 20,
+          "minimumEventCount": 10,
+          "status": "data_insufficient",
+          "abstention": true,
+          "abstentionReason": "insufficient_events"
+        }
+      ]
+    },
+    "cumulativeDistance": {
+      "method": "cumulative_distance",
+      "threshold": { "distanceMeters": 1000000 },
+      "components": [{
+        "component": "battery",
+        "sampleCount": 80,
+        "eventCount": 18,
+        "censoredCount": 62,
+        "minimumSampleCount": 20,
+        "minimumEventCount": 10,
+        "status": "evaluated",
+        "abstention": false,
+        "dueCount": 21,
+        "confusion": { "truePositive": 11, "falsePositive": 10, "trueNegative": 52, "falseNegative": 7 },
+        "sensitivity": 0.611111111111,
+        "specificity": 0.838709677419,
+        "brierScore": 0.2125
+      }]
+    },
+    "kaplanMeier": {
+      "method": "kaplan_meier",
+      "threshold": { "horizonDays": 30, "riskThreshold": 0.5 },
+      "components": [{
+        "component": "battery",
+        "sampleCount": 80,
+        "eventCount": 18,
+        "censoredCount": 62,
+        "minimumSampleCount": 20,
+        "minimumEventCount": 10,
+        "status": "evaluated",
+        "abstention": false,
+        "dueCount": 0,
+        "confusion": { "truePositive": 0, "falsePositive": 0, "trueNegative": 62, "falseNegative": 18 },
+        "sensitivity": 0,
+        "specificity": 1,
+        "brierScore": 0.18,
+        "survivalProbabilityAtHorizon": 0.91
+      }]
+    }
+  },
+  "limitations": [
+    "synthetic_data_only",
+    "no_field_performance",
+    "no_component_inference_without_explicit_linkage",
+    "not_for_safety_critical_failure_prediction"
+  ],
+  "deploymentAuthorized": false,
+  "deploymentDecision": "defer"
+}

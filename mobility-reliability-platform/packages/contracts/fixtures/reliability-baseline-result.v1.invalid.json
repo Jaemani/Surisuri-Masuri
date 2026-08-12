@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "reliability-baseline-result.v1",
+  "evaluationId": "d2e9a00e-3fcc-42e1-a6b4-4e3112c8709f",
+  "generatedAt": "2026-08-13T12:00:00Z",
+  "evaluationScope": "field",
+  "sourceKind": "synthetic",
+  "trainingPerformed": true,
+  "datasetVersion": "reliability-dataset.r10.synthetic.v1",
+  "datasetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outcomeDefinitionVersion": "time-to-inspection-outcome.v1",
+  "splitStrategy": "device-group-time-holdout.v1",
+  "timeWindows": {
+    "train": { "startAt": "2024-01-01T00:00:00Z", "endAt": "2024-12-31T23:59:59Z" },
+    "validation": { "startAt": "2025-01-01T00:00:00Z", "endAt": "2025-12-31T23:59:59Z" },
+    "test": { "startAt": "2026-01-01T00:00:00Z", "endAt": "2026-06-30T23:59:59Z" }
+  },
+  "groupLeakageDetected": false,
+  "counts": { "devices": 1, "observations": 1, "observedOutcomes": 1, "censored": 0, "abstained": 0, "countsReconciled": true },
+  "methods": {
+    "fixedInterval": { "method": "fixed_interval", "threshold": { "intervalDays": 180 }, "components": [{ "component": "battery", "sampleCount": 1, "eventCount": 0, "censoredCount": 1, "minimumSampleCount": 20, "minimumEventCount": 10, "status": "data_insufficient", "abstention": true, "abstentionReason": "insufficient_events", "brierScore": 0.1 }] },
+    "cumulativeDistance": { "method": "cumulative_distance", "threshold": { "distanceMeters": 1000000 }, "components": [{ "component": "battery", "sampleCount": 1, "eventCount": 0, "censoredCount": 1, "minimumSampleCount": 20, "minimumEventCount": 10, "status": "data_insufficient", "abstention": true, "abstentionReason": "insufficient_events" }] },
+    "kaplanMeier": { "method": "kaplan_meier", "threshold": { "horizonDays": 30, "riskThreshold": 0.5 }, "components": [{ "component": "battery", "sampleCount": 1, "eventCount": 0, "censoredCount": 1, "minimumSampleCount": 20, "minimumEventCount": 10, "status": "data_insufficient", "abstention": true, "abstentionReason": "insufficient_events" }] }
+  },
+  "limitations": ["synthetic_data_only"],
+  "deploymentAuthorized": true,
+  "deploymentDecision": "defer",
+  "rawCoordinates": [37.5665, 126.978]
+}

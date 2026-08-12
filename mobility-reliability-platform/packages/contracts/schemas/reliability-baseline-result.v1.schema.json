@@ -1,0 +1,267 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/reliability-baseline-result.v1.schema.json",
+  "title": "ReliabilityBaselineResultV1",
+  "description": "Aggregate synthetic-only time-to-inspection baseline evaluation. It cannot authorize field use or deployment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "evaluationId",
+    "generatedAt",
+    "evaluationScope",
+    "sourceKind",
+    "trainingPerformed",
+    "datasetVersion",
+    "datasetHash",
+    "outcomeDefinitionVersion",
+    "splitStrategy",
+    "timeWindows",
+    "groupLeakageDetected",
+    "counts",
+    "methods",
+    "limitations",
+    "deploymentAuthorized",
+    "deploymentDecision"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "reliability-baseline-result.v1" },
+    "evaluationId": { "type": "string", "format": "uuid" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "evaluationScope": { "const": "synthetic_only" },
+    "sourceKind": { "const": "synthetic" },
+    "trainingPerformed": { "const": false },
+    "datasetVersion": { "const": "reliability-dataset.r10.synthetic.v1" },
+    "datasetHash": { "$ref": "#/$defs/sha256" },
+    "outcomeDefinitionVersion": { "const": "time-to-inspection-outcome.v1" },
+    "splitStrategy": { "const": "device-group-time-holdout.v1" },
+    "timeWindows": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["train", "validation", "test"],
+      "properties": {
+        "train": { "$ref": "#/$defs/timeWindow" },
+        "validation": { "$ref": "#/$defs/timeWindow" },
+        "test": { "$ref": "#/$defs/timeWindow" }
+      }
+    },
+    "groupLeakageDetected": { "const": false },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "devices",
+        "observations",
+        "observedOutcomes",
+        "censored",
+        "abstained",
+        "countsReconciled"
+      ],
+      "properties": {
+        "devices": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "observations": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "observedOutcomes": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "censored": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "abstained": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "countsReconciled": { "const": true }
+      }
+    },
+    "methods": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fixedInterval", "cumulativeDistance", "kaplanMeier"],
+      "properties": {
+        "fixedInterval": {
+          "allOf": [
+            { "$ref": "#/$defs/methodResult" },
+            {
+              "type": "object",
+              "properties": {
+                "method": { "const": "fixed_interval" },
+                "threshold": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["intervalDays"],
+                  "properties": {
+                    "intervalDays": { "type": "integer", "minimum": 1, "maximum": 3650 }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "cumulativeDistance": {
+          "allOf": [
+            { "$ref": "#/$defs/methodResult" },
+            {
+              "type": "object",
+              "properties": {
+                "method": { "const": "cumulative_distance" },
+                "threshold": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["distanceMeters"],
+                  "properties": {
+                    "distanceMeters": { "type": "integer", "minimum": 1, "maximum": 100000000 }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "kaplanMeier": {
+          "allOf": [
+            { "$ref": "#/$defs/methodResult" },
+            {
+              "type": "object",
+              "properties": {
+                "method": { "const": "kaplan_meier" },
+                "threshold": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["horizonDays", "riskThreshold"],
+                  "properties": {
+                    "horizonDays": { "type": "integer", "minimum": 1, "maximum": 365 },
+                    "riskThreshold": { "type": "number", "minimum": 0, "maximum": 1 }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "synthetic_data_only",
+          "no_field_performance",
+          "no_component_inference_without_explicit_linkage",
+          "missing_distance_requires_abstention",
+          "not_for_safety_critical_failure_prediction"
+        ]
+      }
+    },
+    "deploymentAuthorized": { "const": false },
+    "deploymentDecision": { "const": "defer" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "timeWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startAt", "endAt"],
+      "properties": {
+        "startAt": { "type": "string", "format": "date-time" },
+        "endAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "componentCode": {
+      "type": "string",
+      "enum": ["battery", "brake", "controller", "motor", "seat_frame", "wheel_tire"]
+    },
+    "confusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["truePositive", "falsePositive", "trueNegative", "falseNegative"],
+      "properties": {
+        "truePositive": { "type": "integer", "minimum": 0 },
+        "falsePositive": { "type": "integer", "minimum": 0 },
+        "trueNegative": { "type": "integer", "minimum": 0 },
+        "falseNegative": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "componentResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component",
+        "sampleCount",
+        "eventCount",
+        "censoredCount",
+        "minimumSampleCount",
+        "minimumEventCount",
+        "status",
+        "abstention"
+      ],
+      "properties": {
+        "component": { "$ref": "#/$defs/componentCode" },
+        "sampleCount": { "type": "integer", "minimum": 0 },
+        "eventCount": { "type": "integer", "minimum": 0 },
+        "censoredCount": { "type": "integer", "minimum": 0 },
+        "minimumSampleCount": { "type": "integer", "minimum": 1 },
+        "minimumEventCount": { "type": "integer", "minimum": 1 },
+        "status": { "type": "string", "enum": ["evaluated", "data_insufficient"] },
+        "abstention": { "type": "boolean" },
+        "abstentionReason": {
+          "type": "string",
+          "enum": ["insufficient_events", "insufficient_samples", "data_quality_insufficient"]
+        },
+        "dueCount": { "type": "integer", "minimum": 0 },
+        "confusion": { "$ref": "#/$defs/confusion" },
+        "sensitivity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "specificity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "brierScore": { "type": "number", "minimum": 0, "maximum": 1 },
+        "survivalProbabilityAtHorizon": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "evaluated" } }, "required": ["status"] },
+          "then": {
+            "required": ["dueCount", "confusion", "sensitivity", "specificity", "brierScore"],
+            "properties": {
+              "abstention": { "const": false },
+              "dueCount": { "type": "integer", "minimum": 0 },
+              "confusion": { "$ref": "#/$defs/confusion" },
+              "sensitivity": { "type": "number", "minimum": 0, "maximum": 1 },
+              "specificity": { "type": "number", "minimum": 0, "maximum": 1 },
+              "brierScore": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "status": { "const": "data_insufficient" } },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["abstentionReason"],
+            "properties": {
+              "abstention": { "const": true },
+              "abstentionReason": {
+                "type": "string",
+                "enum": ["insufficient_events", "insufficient_samples", "data_quality_insufficient"]
+              },
+              "dueCount": false,
+              "confusion": false,
+              "sensitivity": false,
+              "specificity": false,
+              "brierScore": false,
+              "survivalProbabilityAtHorizon": false
+            }
+          }
+        }
+      ]
+    },
+    "methodResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "threshold", "components"],
+      "properties": {
+        "method": { "type": "string" },
+        "threshold": { "type": "object" },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/componentResult" }
+        }
+      }
+    }
+  }
+}
