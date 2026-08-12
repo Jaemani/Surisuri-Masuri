@@ -80,3 +80,5 @@ docs/
 전체 기준 문서와 읽는 순서는 [문서 인덱스](docs/INDEX.md)에서 확인합니다. 상세 범위는 [프로젝트 헌장](docs/PROJECT_CHARTER.md), 월별 게이트는 [8개월 로드맵](docs/ROADMAP.md), 시스템 경계는 [아키텍처](docs/architecture/SYSTEM_ARCHITECTURE.md)를 따릅니다.
 
 Firebase 제품 연결을 이어서 구현할 때는 [command·projection handoff](docs/handoffs/FIREBASE_PRODUCT_CONNECTION.md)를 먼저 확인합니다.
+
+QR camera, native 방문 일정과 복수 수리항목 흐름을 Android·iPhone에서 확인할 때는 [모바일 제품 실기기 smoke](docs/development/MOBILE_PRODUCT_DEVICE_SMOKE.md)를 사용합니다. 체크 결과는 실제 기기 실행 뒤에만 채웁니다.
