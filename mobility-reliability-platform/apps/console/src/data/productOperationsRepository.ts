@@ -34,6 +34,8 @@ export type RepairRecord = {
   amount: string
   stage: WorkflowStage
   priority: '높음' | '보통' | '낮음'
+  /** Server projection revision. Required for a production status transition. */
+  revision: number
 }
 
 export type LedgerEntry = {
@@ -119,6 +121,62 @@ export type RepairAdvanceCommand = {
   actorId: string
 }
 
+export type DomainRepairStatus =
+  | 'requested'
+  | 'under_review'
+  | 'assigned'
+  | 'scheduled'
+  | 'in_progress'
+  | 'repairer_submitted'
+  | 'needs_correction'
+  | 'center_verified'
+  | 'completed'
+  | 'reopened'
+  | 'rejected'
+  | 'cancelled'
+
+/**
+ * Explicit domain command used by a real operations screen. `actorId` is
+ * deliberately absent: the command API derives it from the ID token.
+ */
+export type RepairTransitionCommand = {
+  repairRequestId: string
+  expectedRevision: number
+  toStatus: DomainRepairStatus
+  repairStationId?: string
+  repairerFirebaseUid?: string
+  subsidyAccountId?: string
+  billedAmountKrw?: number
+  submittedAt?: string
+  subsidyDecisionId?: string
+  note?: string
+}
+
+export type SubsidyTransactionType = 'allocation' | 'reservation' | 'execution' | 'release' | 'adjustment' | 'reversal'
+
+export type SubsidyCommand = {
+  accountId: string
+  personId: string
+  policyVersionId: string
+  transactionType: SubsidyTransactionType
+  amountKrw: number
+  workOrderId?: string
+  reversesTransactionId?: string
+  reasonCode: string
+  note?: string
+}
+
+export type CommandReceipt = {
+  commandType: 'create_repair_request' | 'transition_repair_request' | 'append_subsidy_transaction'
+  tenantId: string
+  resourceId: string
+  eventId: string
+  revision?: number
+  status?: DomainRepairStatus
+  transactionId?: string
+  idempotent?: boolean
+}
+
 export type RepairTransitionResult = {
   repair: RepairRecord
   repairs: RepairRecord[]
@@ -148,6 +206,8 @@ export interface ProductOperationsRepository {
   listReports(): Promise<ReportRecord[]>
   listServices(): Promise<ServiceStatusRecord[]>
   advanceRepair(command: RepairAdvanceCommand): Promise<RepairTransitionResult>
+  transitionRepair(command: RepairTransitionCommand): Promise<CommandReceipt>
+  appendSubsidyTransaction(command: SubsidyCommand): Promise<CommandReceipt>
 }
 
 export class NotConfiguredError extends Error {
@@ -156,6 +216,24 @@ export class NotConfiguredError extends Error {
   constructor(operation: string) {
     super(`NOT_CONFIGURED: Firebase Operations Repository is not configured for ${operation}.`)
     this.name = 'NotConfiguredError'
+  }
+}
+
+export type OperationsRepositoryErrorCode =
+  | 'NOT_CONFIGURED'
+  | 'AUTH_REQUIRED'
+  | 'APP_CHECK_REQUIRED'
+  | 'NETWORK_FAILURE'
+  | 'REQUEST_REJECTED'
+  | 'INVALID_PROJECTION'
+  | 'INVALID_COMMAND_RESULT'
+  | 'INVALID_COMMAND'
+
+/** A typed, non-demo failure. Production callers must not silently fall back. */
+export class OperationsRepositoryError extends Error {
+  constructor(readonly code: OperationsRepositoryErrorCode | string, message: string, readonly status?: number) {
+    super(message)
+    this.name = 'OperationsRepositoryError'
   }
 }
 
@@ -199,10 +277,10 @@ const demoDevices: DeviceRecord[] = [
 ]
 
 const demoRepairs: RepairRecord[] = [
-  { id: 'SR-2026-081', user: '박정호', device: 'MOB-23991', issue: '주행 중 좌측 쏠림', request: '오늘 08:35', partner: '미배정', amount: '₩180,000', stage: 'new', priority: '높음' },
-  { id: 'SR-2026-079', user: '이경자', device: 'MOB-23874', issue: '충전 단자 접촉 불량', request: '어제 16:10', partner: '한마음 모빌리티', amount: '₩95,000', stage: 'assigned', priority: '보통' },
-  { id: 'SR-2026-074', user: '최민수', device: 'MOB-23703', issue: '등받이 고정 레버 교체', request: '08. 10. 11:22', partner: '케어휠 수리소', amount: '₩72,000', stage: 'submitted', priority: '보통' },
-  { id: 'SR-2026-069', user: '김서윤', device: 'MOB-24018', issue: '타이어 마모 점검', request: '08. 08. 14:05', partner: '한마음 모빌리티', amount: '₩58,000', stage: 'verified', priority: '낮음' },
+  { id: 'SR-2026-081', user: '박정호', device: 'MOB-23991', issue: '주행 중 좌측 쏠림', request: '오늘 08:35', partner: '미배정', amount: '₩180,000', stage: 'new', priority: '높음', revision: 1 },
+  { id: 'SR-2026-079', user: '이경자', device: 'MOB-23874', issue: '충전 단자 접촉 불량', request: '어제 16:10', partner: '한마음 모빌리티', amount: '₩95,000', stage: 'assigned', priority: '보통', revision: 3 },
+  { id: 'SR-2026-074', user: '최민수', device: 'MOB-23703', issue: '등받이 고정 레버 교체', request: '08. 10. 11:22', partner: '케어휠 수리소', amount: '₩72,000', stage: 'submitted', priority: '보통', revision: 4 },
+  { id: 'SR-2026-069', user: '김서윤', device: 'MOB-24018', issue: '타이어 마모 점검', request: '08. 08. 14:05', partner: '한마음 모빌리티', amount: '₩58,000', stage: 'verified', priority: '낮음', revision: 5 },
 ]
 
 const demoLedger: LedgerEntry[] = [
@@ -263,26 +341,270 @@ export class DemoOperationsRepository implements ProductOperationsRepository {
     const nextStage = index >= 0 && index < order.length - 1 ? order[index + 1] : null
     if (!nextStage) return { repair: clone(repair), repairs: clone(this.repairs), ledger: clone(this.ledger), nextStage: null }
 
-    const updated = { ...repair, stage: nextStage, partner: nextStage === 'assigned' ? '한마음 모빌리티' : repair.partner }
+    const updated = { ...repair, stage: nextStage, partner: nextStage === 'assigned' ? '한마음 모빌리티' : repair.partner, revision: repair.revision + 1 }
     this.repairs = this.repairs.map((item) => item.id === updated.id ? updated : item)
     return { repair: clone(updated), repairs: clone(this.repairs), ledger: clone(this.ledger), nextStage }
   }
+
+  async transitionRepair(command: RepairTransitionCommand): Promise<CommandReceipt> {
+    const repair = this.repairs.find((item) => item.id === command.repairRequestId)
+    if (!repair) throw new Error(`REPAIR_NOT_FOUND: ${command.repairRequestId}`)
+    if (repair.revision !== command.expectedRevision) throw new OperationsRepositoryError('REQUEST_REJECTED', 'REVISION_CONFLICT: reload before changing this repair.', 409)
+    return { commandType: 'transition_repair_request', tenantId: 'demo-tenant', resourceId: repair.id, eventId: `demo-event-${repair.id}-${repair.revision + 1}`, revision: repair.revision + 1, status: command.toStatus }
+  }
+
+  async appendSubsidyTransaction(command: SubsidyCommand): Promise<CommandReceipt> {
+    return { commandType: 'append_subsidy_transaction', tenantId: 'demo-tenant', resourceId: command.accountId, eventId: `demo-ledger-${command.accountId}`, transactionId: `demo-tx-${command.accountId}` }
+  }
 }
 
-/** Firebase adapter seam. It will call the Domain Command API once configured;
- * it deliberately contains no Firestore client and performs no direct writes. */
+/** Firebase Auth/App Check values are injected at the app composition root.
+ * This module deliberately has no Firebase client, Firestore SDK, or direct
+ * write capability. */
+export interface OperationsTokenProvider {
+  tenantId: string
+  getIdToken(): Promise<string>
+  getAppCheckToken(): Promise<string>
+}
+
+export interface OperationsApiEndpoints {
+  projections: {
+    dashboard: string
+    users: string
+    devices: string
+    repairs: string
+    ledger: string
+    inspections: string
+    partners: string
+    reports: string
+    services: string
+  }
+  transitionRepairRequest: string
+  appendSubsidyTransaction: string
+}
+
+export interface FirebaseOperationsRepositoryDependencies {
+  tokens: OperationsTokenProvider
+  endpoints: OperationsApiEndpoints
+  fetch?: typeof fetch
+  /** Injectable for deterministic tests. Production defaults to crypto.randomUUID(). */
+  createIdempotencyKey?: () => string
+}
+
+type ProjectionParser<T> = (value: unknown) => T
+
+const optional = <T,>(key: string, value: T | undefined): Record<string, T> => value === undefined ? {} : { [key]: value }
+
+const asRecord = (value: unknown, code = 'INVALID_PROJECTION'): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new OperationsRepositoryError(code, 'The server response does not match the expected projection.')
+  return value as Record<string, unknown>
+}
+
+const stringAt = (value: Record<string, unknown>, key: string): string => {
+  if (typeof value[key] !== 'string') throw new OperationsRepositoryError('INVALID_PROJECTION', `Projection field ${key} must be a string.`)
+  return value[key]
+}
+
+const numberAt = (value: Record<string, unknown>, key: string): number => {
+  if (typeof value[key] !== 'number' || !Number.isFinite(value[key])) throw new OperationsRepositoryError('INVALID_PROJECTION', `Projection field ${key} must be a finite number.`)
+  return value[key]
+}
+
+const enumAt = <T extends string>(value: Record<string, unknown>, key: string, allowed: readonly T[]): T => {
+  const candidate = stringAt(value, key)
+  if (!allowed.includes(candidate as T)) throw new OperationsRepositoryError('INVALID_PROJECTION', `Projection field ${key} has an unsupported value.`)
+  return candidate as T
+}
+
+const arrayOf = <T,>(value: unknown, parse: ProjectionParser<T>): T[] => {
+  if (!Array.isArray(value)) throw new OperationsRepositoryError('INVALID_PROJECTION', 'The server response must be an array projection.')
+  return value.map(parse)
+}
+
+const parseDashboard: ProjectionParser<DashboardData> = (value) => {
+  const record = asRecord(value)
+  const metrics = arrayOf(record.metrics, (item): DashboardMetric => {
+    const itemRecord = asRecord(item)
+    return { label: stringAt(itemRecord, 'label'), value: stringAt(itemRecord, 'value'), suffix: stringAt(itemRecord, 'suffix'), trend: stringAt(itemRecord, 'trend'), tone: enumAt(itemRecord, 'tone', ['orange', 'purple', 'green', 'blue']), icon: enumAt(itemRecord, 'icon', ['repair', 'check', 'money', 'device']) }
+  })
+  const attention = arrayOf(record.attention, (item): DashboardAttention => {
+    const itemRecord = asRecord(item)
+    return { icon: enumAt(itemRecord, 'icon', ['repair', 'check', 'device']), color: enumAt(itemRecord, 'color', ['orange', 'purple', 'blue']), title: stringAt(itemRecord, 'title'), description: stringAt(itemRecord, 'description'), time: stringAt(itemRecord, 'time'), action: stringAt(itemRecord, 'action'), destination: enumAt(itemRecord, 'destination', ['repairs', 'inspections', 'devices']) }
+  })
+  const weeklyBars = arrayOf(record.weeklyBars, (item): DashboardBar => {
+    const itemRecord = asRecord(item)
+    const active = itemRecord.active
+    const muted = itemRecord.muted
+    if (active !== undefined && typeof active !== 'boolean') throw new OperationsRepositoryError('INVALID_PROJECTION', 'Projection field active must be boolean.')
+    if (muted !== undefined && typeof muted !== 'boolean') throw new OperationsRepositoryError('INVALID_PROJECTION', 'Projection field muted must be boolean.')
+    return { day: stringAt(itemRecord, 'day'), value: numberAt(itemRecord, 'value'), ...optional('active', active), ...optional('muted', muted) }
+  })
+  return { metrics, attention, weeklyBars, weeklyChange: stringAt(record, 'weeklyChange') }
+}
+
+const parseUsers: ProjectionParser<UserRecord[]> = (value) => arrayOf(value, (item) => {
+  const record = asRecord(item)
+  return { name: stringAt(record, 'name'), code: stringAt(record, 'code'), relation: stringAt(record, 'relation'), device: stringAt(record, 'device'), status: stringAt(record, 'status'), last: stringAt(record, 'last'), color: enumAt(record, 'color', ['peach', 'blue', 'lilac', 'mint', 'yellow']) }
+})
+
+const parseDevices: ProjectionParser<DeviceRecord[]> = (value) => arrayOf(value, (item) => {
+  const record = asRecord(item)
+  return { id: stringAt(record, 'id'), user: stringAt(record, 'user'), model: stringAt(record, 'model'), health: stringAt(record, 'health'), battery: stringAt(record, 'battery'), mileage: stringAt(record, 'mileage'), inspection: stringAt(record, 'inspection'), state: stringAt(record, 'state') }
+})
+
+const parseRepairs: ProjectionParser<RepairRecord[]> = (value) => arrayOf(value, (item) => {
+  const record = asRecord(item)
+  return { id: stringAt(record, 'id'), user: stringAt(record, 'user'), device: stringAt(record, 'device'), issue: stringAt(record, 'issue'), request: stringAt(record, 'request'), partner: stringAt(record, 'partner'), amount: stringAt(record, 'amount'), stage: enumAt(record, 'stage', ['new', 'assigned', 'submitted', 'verified']), priority: enumAt(record, 'priority', ['높음', '보통', '낮음']), revision: numberAt(record, 'revision') }
+})
+
+const parseLedger: ProjectionParser<LedgerEntry[]> = (value) => arrayOf(value, (item) => {
+  const record = asRecord(item)
+  return { date: stringAt(record, 'date'), id: stringAt(record, 'id'), user: stringAt(record, 'user'), item: stringAt(record, 'item'), amount: stringAt(record, 'amount'), state: enumAt(record, 'state', ['예약', '집행 완료', '예약 취소']), actor: stringAt(record, 'actor') }
+})
+
+const parseInspections: ProjectionParser<InspectionRecord[]> = (value) => arrayOf(value, (item) => {
+  const record = asRecord(item)
+  return { user: stringAt(record, 'user'), device: stringAt(record, 'device'), due: stringAt(record, 'due'), reason: stringAt(record, 'reason'), score: stringAt(record, 'score'), confidence: stringAt(record, 'confidence') }
+})
+
+const parsePartners: ProjectionParser<PartnerRecord[]> = (value) => arrayOf(value, (item) => {
+  const record = asRecord(item)
+  return { name: stringAt(record, 'name'), contact: stringAt(record, 'contact'), active: stringAt(record, 'active'), completed: stringAt(record, 'completed'), sla: stringAt(record, 'sla'), tone: enumAt(record, 'tone', ['success', 'warning']) }
+})
+
+const parseReports: ProjectionParser<ReportRecord[]> = (value) => arrayOf(value, (item) => {
+  const record = asRecord(item)
+  return { title: stringAt(record, 'title'), type: stringAt(record, 'type'), date: stringAt(record, 'date'), state: stringAt(record, 'state'), facts: stringAt(record, 'facts') }
+})
+
+const parseServices: ProjectionParser<ServiceStatusRecord[]> = (value) => arrayOf(value, (item) => {
+  const record = asRecord(item)
+  return { name: stringAt(record, 'name'), detail: stringAt(record, 'detail'), value: stringAt(record, 'value'), status: stringAt(record, 'status'), tone: enumAt(record, 'tone', ['success', 'warning']) }
+})
+
+const parseCommandReceipt: ProjectionParser<CommandReceipt> = (value) => {
+  const record = asRecord(value, 'INVALID_COMMAND_RESULT')
+  const commandType = enumAt(record, 'commandType', ['create_repair_request', 'transition_repair_request', 'append_subsidy_transaction'] as const)
+  const status = record.status
+  const revision = record.revision
+  const transactionId = record.transactionId
+  const idempotent = record.idempotent
+  if (status !== undefined && !['requested', 'under_review', 'assigned', 'scheduled', 'in_progress', 'repairer_submitted', 'needs_correction', 'center_verified', 'completed', 'reopened', 'rejected', 'cancelled'].includes(String(status))) throw new OperationsRepositoryError('INVALID_COMMAND_RESULT', 'Command response status is unsupported.')
+  if (revision !== undefined && (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1)) throw new OperationsRepositoryError('INVALID_COMMAND_RESULT', 'Command response revision is invalid.')
+  if (transactionId !== undefined && typeof transactionId !== 'string') throw new OperationsRepositoryError('INVALID_COMMAND_RESULT', 'Command response transactionId is invalid.')
+  if (idempotent !== undefined && typeof idempotent !== 'boolean') throw new OperationsRepositoryError('INVALID_COMMAND_RESULT', 'Command response idempotent is invalid.')
+  return { commandType, tenantId: stringAt(record, 'tenantId'), resourceId: stringAt(record, 'resourceId'), eventId: stringAt(record, 'eventId'), ...optional('status', status as DomainRepairStatus | undefined), ...optional('revision', revision as number | undefined), ...optional('transactionId', transactionId as string | undefined), ...optional('idempotent', idempotent as boolean | undefined) }
+}
+
+/**
+ * Production adapter for server-owned read projections and Domain Command HTTP
+ * functions. A non-2xx response, invalid DTO, missing token, or network error
+ * is an explicit failure; it never substitutes synthetic data.
+ */
 export class FirebaseOperationsRepository implements ProductOperationsRepository {
-  private fail<T>(operation: string): Promise<T> { return Promise.reject(new NotConfiguredError(operation)) }
-  loadDashboard() { return this.fail<DashboardData>('loadDashboard') }
-  listUsers() { return this.fail<UserRecord[]>('listUsers') }
-  listDevices() { return this.fail<DeviceRecord[]>('listDevices') }
-  listRepairs() { return this.fail<RepairRecord[]>('listRepairs') }
-  listLedger() { return this.fail<LedgerEntry[]>('listLedger') }
-  listInspections() { return this.fail<InspectionRecord[]>('listInspections') }
-  listPartners() { return this.fail<PartnerRecord[]>('listPartners') }
-  listReports() { return this.fail<ReportRecord[]>('listReports') }
-  listServices() { return this.fail<ServiceStatusRecord[]>('listServices') }
-  advanceRepair(_command: RepairAdvanceCommand) { return this.fail<RepairTransitionResult>('advanceRepair') }
+  constructor(private readonly dependencies?: FirebaseOperationsRepositoryDependencies) {}
+
+  loadDashboard() { return this.read('loadDashboard', 'dashboard', parseDashboard) }
+  listUsers() { return this.read('listUsers', 'users', parseUsers) }
+  listDevices() { return this.read('listDevices', 'devices', parseDevices) }
+  listRepairs() { return this.read('listRepairs', 'repairs', parseRepairs) }
+  listLedger() { return this.read('listLedger', 'ledger', parseLedger) }
+  listInspections() { return this.read('listInspections', 'inspections', parseInspections) }
+  listPartners() { return this.read('listPartners', 'partners', parsePartners) }
+  listReports() { return this.read('listReports', 'reports', parseReports) }
+  listServices() { return this.read('listServices', 'services', parseServices) }
+
+  async advanceRepair(_command: RepairAdvanceCommand): Promise<RepairTransitionResult> {
+    throw new OperationsRepositoryError('INVALID_COMMAND', 'The production console must collect an explicit target status, current revision, and any required assignment or subsidy fields before it transitions a repair.')
+  }
+
+  async transitionRepair(command: RepairTransitionCommand): Promise<CommandReceipt> {
+    return this.command('transitionRepairRequest', {
+      repairRequestId: command.repairRequestId,
+      expectedRevision: command.expectedRevision,
+      toStatus: command.toStatus,
+      ...optional('repairStationId', command.repairStationId),
+      ...optional('repairerFirebaseUid', command.repairerFirebaseUid),
+      ...optional('subsidyAccountId', command.subsidyAccountId),
+      ...optional('billedAmountKrw', command.billedAmountKrw),
+      ...optional('submittedAt', command.submittedAt),
+      ...optional('subsidyDecisionId', command.subsidyDecisionId),
+      ...optional('note', command.note),
+    })
+  }
+
+  async appendSubsidyTransaction(command: SubsidyCommand): Promise<CommandReceipt> {
+    return this.command('appendSubsidyTransaction', {
+      accountId: command.accountId,
+      personId: command.personId,
+      policyVersionId: command.policyVersionId,
+      transactionType: command.transactionType,
+      amountKrw: command.amountKrw,
+      reasonCode: command.reasonCode,
+      ...optional('workOrderId', command.workOrderId),
+      ...optional('reversesTransactionId', command.reversesTransactionId),
+      ...optional('note', command.note),
+    })
+  }
+
+  private configuration(operation: string): FirebaseOperationsRepositoryDependencies {
+    if (!this.dependencies) throw new NotConfiguredError(operation)
+    return this.dependencies
+  }
+
+  private async read<T>(operation: string, projection: keyof OperationsApiEndpoints['projections'], parse: ProjectionParser<T>): Promise<T> {
+    const config = this.configuration(operation)
+    return this.request<T>(config.endpoints.projections[projection], 'GET', undefined, parse, operation)
+  }
+
+  private async command(endpoint: 'transitionRepairRequest' | 'appendSubsidyTransaction', body: Record<string, unknown>): Promise<CommandReceipt> {
+    const config = this.configuration(endpoint)
+    return this.request(config.endpoints[endpoint], 'POST', { tenantId: config.tokens.tenantId, ...body }, parseCommandReceipt, endpoint, this.idempotencyKey(config))
+  }
+
+  private async request<T>(url: string, method: 'GET' | 'POST', body: Record<string, unknown> | undefined, parse: ProjectionParser<T>, operation: string, idempotencyKey?: string): Promise<T> {
+    if (!url) throw new NotConfiguredError(operation)
+    const config = this.configuration(operation)
+    const [idToken, appCheckToken] = await Promise.all([config.tokens.getIdToken(), config.tokens.getAppCheckToken()])
+    if (!idToken) throw new OperationsRepositoryError('AUTH_REQUIRED', 'A Firebase ID token is required before accessing operations data.', 401)
+    if (!appCheckToken) throw new OperationsRepositoryError('APP_CHECK_REQUIRED', 'A Firebase App Check token is required before accessing operations data.', 401)
+    const headers: Record<string, string> = { Authorization: `Bearer ${idToken}`, 'X-Firebase-AppCheck': appCheckToken, 'X-Tenant-Id': config.tokens.tenantId, Accept: 'application/json' }
+    if (body) headers['Content-Type'] = 'application/json'
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey
+    let response: Response
+    try {
+      response = await (config.fetch ?? globalThis.fetch)(url, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) })
+    } catch {
+      throw new OperationsRepositoryError('NETWORK_FAILURE', `The ${operation} request could not reach the operations API.`)
+    }
+    const payload = await response.json().catch(() => undefined)
+    if (!response.ok) {
+      const error = payload && typeof payload === 'object' && 'error' in payload ? (payload as { error?: unknown }).error : undefined
+      const errorRecord = error && typeof error === 'object' ? error as Record<string, unknown> : undefined
+      const code = typeof errorRecord?.code === 'string' ? errorRecord.code : 'REQUEST_REJECTED'
+      const message = typeof errorRecord?.message === 'string' ? errorRecord.message : `The ${operation} request was rejected.`
+      throw new OperationsRepositoryError(code, message, response.status)
+    }
+    return parse(payload)
+  }
+
+  private idempotencyKey(config: FirebaseOperationsRepositoryDependencies): string {
+    const key = config.createIdempotencyKey?.() ?? globalThis.crypto?.randomUUID?.()
+    if (!key || typeof key !== 'string') throw new OperationsRepositoryError('NOT_CONFIGURED', 'A cryptographically unique idempotency key provider is required for operations commands.')
+    return key
+  }
 }
 
-export const createProductOperationsRepository = (): ProductOperationsRepository => new DemoOperationsRepository()
+export type ProductOperationsRepositorySource = 'demo' | 'firebase'
+
+/**
+ * Demo remains opt-in by composition, never as an error fallback. When the
+ * production source is selected, missing HTTP/token configuration stays a
+ * visible `NOT_CONFIGURED` error rather than exposing synthetic records.
+ */
+export const createProductOperationsRepository = (
+  source: ProductOperationsRepositorySource = 'demo',
+  dependencies?: FirebaseOperationsRepositoryDependencies,
+): ProductOperationsRepository => source === 'firebase'
+  ? new FirebaseOperationsRepository(dependencies)
+  : new DemoOperationsRepository()

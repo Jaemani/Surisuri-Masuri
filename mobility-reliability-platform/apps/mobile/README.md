@@ -9,6 +9,35 @@ React Native와 Expo 기반의 사용자·수리사 모바일 앱입니다. Andr
 - 홈 우선순위는 진행 중 수리·다음 약속·지원금·기기 상태이며 GPS는 선택적 사용량 기록으로 표시
 - 현재 인명·기기·수리·지원금은 deterministic demo이고 Domain Command API와 Firebase 운영 데이터는 미연결
 
+## Firebase 제품 어댑터 경계
+
+`src/product/repository.ts`의 `FirebaseProductRepository`는 Firebase SDK나
+Firestore를 직접 호출하지 않습니다. 운영 연결 시 다음 세 가지를 주입합니다.
+
+- Firebase Auth ID token provider (`getIdToken()`)
+- Firebase App Check token provider (`getToken()`)
+- Domain Command API origin과 제품 projection/command endpoint
+
+기본 endpoint는 다음과 같으며, Firebase Functions 배포 URL이나 API gateway를
+사용할 때 `endpoints`로 명시적으로 바꿀 수 있습니다.
+
+- `GET /getMobileProductSnapshot?tenantId={candidate}`: 서버가 권한 범위를 적용한 제품 read projection(후속 구현)
+- `POST /createRepairRequest`: 구현된 `create_repair_request` Domain Command
+
+수리 요청은 `tenantId`, `beneficiaryId`, `deviceId`, `issueSummary`,
+`publicFundingInvolved`를 전송하고, 모든 mutation에는 `Idempotency-Key`가 붙습니다.
+클라이언트가 보낸 tenant/person/device는 권한 근거가 아니라 서버 membership과
+assignment 검증을 위한 후보값입니다. Auth, App Check, tenant authorization,
+Firestore mutation, event 기록은 `services/domain-command`가 담당합니다.
+
+명령 응답은 client가 work order를 조립하는 데 사용하지 않습니다. command의
+`resourceId`를 받은 뒤 서버 projection을 재조회하고, 해당 work order가 보일 때만
+화면 상태를 갱신합니다. projection이 아직 준비되지 않았거나 JSON/schema가
+잘못되면 `PROJECTION_PENDING` 또는 `INVALID_RESPONSE`로 fail-closed 합니다.
+운영 어댑터는 demo 데이터로 fallback하지 않습니다. `setRole()` 역시 서버가
+권한을 결정하는 운영 흐름에서 임의 역할 전환을 허용하지 않고
+`ROLE_SWITCH_UNSUPPORTED`를 반환합니다.
+
 - foreground 위치 권한 상태와 명시적 주행 시작·종료 구현
 - `watchPositionAsync` 위치 sample을 SQLite WAL event log에 append
 - event payload와 delivery 상태를 분리한 local outbox 구현

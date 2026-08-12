@@ -67,4 +67,9 @@ export type ProductSnapshot = {
 
 export type CreateRepairRequestInput = {
   title: string;
+  /** Optional command fields used by the production Domain Command adapter. */
+  publicFundingInvolved?: boolean;
+  requestedAmountKrw?: number;
+  /** Reuse this key when a caller retries after an ambiguous network result. */
+  idempotencyKey?: string;
 };

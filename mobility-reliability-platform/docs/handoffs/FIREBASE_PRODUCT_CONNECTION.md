@@ -25,7 +25,7 @@ Content-Type: application/json
 
 현재 모바일과 콘솔 UI 모델은 다수 collection을 조합한다. beneficiary에게 operational Firestore 원문을 넓게 열지 않기 위해 다음 purpose-limited projection endpoint가 필요하다.
 
-- `GET /v1/mobile/product-snapshot`
+- `GET /getMobileProductSnapshot`
 - `GET /v1/console/operations-snapshot`
 
 이 두 read endpoint는 아직 구현·배포되지 않았다. repository adapter는 endpoint, Firebase ID token, App Check token을 dependency injection으로 받아야 하며, 하나라도 빠지면 `NOT_CONFIGURED`로 fail closed한다.

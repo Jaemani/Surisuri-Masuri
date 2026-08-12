@@ -39,3 +39,12 @@
 - 결과: Firestore Emulator 4개 시나리오 통과
 - 확인 항목: canonical path, snake_case storage, idempotent replay/conflict, optimistic concurrency, assigned-repairer enforcement, person-scoped subsidy account
 - 제한: production deployment와 field evidence가 아니며 실제 사용자·기관 데이터를 사용하지 않음
+
+# EVD-20260813-03 — 모바일·콘솔 운영 repository adapter
+
+- 분류: `LOCAL_TEST`, `SYNTHETIC`
+- 모바일: 17 files / 240 tests, typecheck 통과
+- 콘솔: 9 tests, typecheck와 production build 통과
+- 확인 항목: ID token·App Check 주입, command body, Idempotency-Key, revision, server projection validation, fail-closed error
+- 금지 경계: 두 adapter 모두 Firestore direct write와 production→demo error fallback 없음
+- 제한: 실제 Firebase token·배포·현장 data를 사용하지 않았고 native device network 호출을 증명하지 않음
