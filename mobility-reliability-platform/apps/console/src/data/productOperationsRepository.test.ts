@@ -4,10 +4,11 @@ import {
   DemoOperationsRepository,
   FirebaseOperationsRepository,
   OperationsRepositoryError,
+  createOperationsApiEndpoints,
   type FirebaseOperationsRepositoryDependencies,
 } from './productOperationsRepository'
 
-const projectionBase = 'https://projection.example.test/v1/console'
+const projectionBase = 'https://projection.example.test/v1'
 const commandBase = 'https://command.example.test'
 
 const dependencies = (fetch: typeof globalThis.fetch, overrides: Partial<FirebaseOperationsRepositoryDependencies> = {}): FirebaseOperationsRepositoryDependencies => ({
@@ -16,21 +17,7 @@ const dependencies = (fetch: typeof globalThis.fetch, overrides: Partial<Firebas
     getIdToken: async () => 'id-token',
     getAppCheckToken: async () => 'app-check-token',
   },
-  endpoints: {
-    projections: {
-      dashboard: `${projectionBase}/dashboard`,
-      users: `${projectionBase}/users`,
-      devices: `${projectionBase}/devices`,
-      repairs: `${projectionBase}/repairs`,
-      ledger: `${projectionBase}/ledger`,
-      inspections: `${projectionBase}/inspections`,
-      partners: `${projectionBase}/partners`,
-      reports: `${projectionBase}/reports`,
-      services: `${projectionBase}/services`,
-    },
-    transitionRepairRequest: `${commandBase}/transitionRepairRequest`,
-    appendSubsidyTransaction: `${commandBase}/appendSubsidyTransaction`,
-  },
+  endpoints: createOperationsApiEndpoints({ baseUrl: projectionBase, commandBaseUrl: commandBase }),
   fetch,
   createIdempotencyKey: () => '3b789d1c-5220-4fab-afdf-61b53b130fa4',
   ...overrides,
@@ -87,13 +74,33 @@ describe('FirebaseOperationsRepository', () => {
 
     await expect(repository.loadDashboard()).resolves.toEqual(dashboardProjection)
     expect(calls).toHaveLength(1)
-    expect(calls[0].input).toBe(`${projectionBase}/dashboard`)
+    expect(calls[0].input).toBe(`${projectionBase}/getConsoleOperationsSnapshot?projection=dashboard`)
     expect(calls[0].init).toMatchObject({ method: 'GET' })
     expect(calls[0].init?.headers).toMatchObject({
       Authorization: 'Bearer id-token',
       'X-Firebase-AppCheck': 'app-check-token',
       'X-Tenant-Id': 'tenant-seoul-west',
     })
+  })
+
+  it('derives all endpoint URLs from the deployed Functions origins', async () => {
+    const calls: { input: RequestInfo | URL; init?: RequestInit }[] = []
+    const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return json(dashboardProjection)
+    }
+    const configured = dependencies(fetch as typeof globalThis.fetch)
+    const repository = new FirebaseOperationsRepository({
+      ...configured,
+      endpoints: undefined,
+      baseUrl: projectionBase,
+      commandBaseUrl: commandBase,
+    })
+
+    await repository.loadDashboard()
+
+    expect(calls[0].input).toBe(`${projectionBase}/getConsoleOperationsSnapshot?projection=dashboard`)
+    expect(calls[0].init?.headers).toMatchObject({ 'X-Tenant-Id': 'tenant-seoul-west' })
   })
 
   it('sends a canonical repair transition only through the command endpoint', async () => {
@@ -155,4 +162,5 @@ describe('FirebaseOperationsRepository', () => {
     await expect(repository.loadDashboard()).rejects.toMatchObject({ code: 'APP_CHECK_REQUIRED' })
     expect(callCount).toBe(0)
   })
+
 })

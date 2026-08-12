@@ -383,9 +383,47 @@ export interface OperationsApiEndpoints {
   appendSubsidyTransaction: string
 }
 
+/**
+ * The deployed Functions surface has one read endpoint for the console. The
+ * projection name is a query parameter, rather than a path segment. Keeping
+ * this construction in one place prevents a client from accidentally calling
+ * an endpoint that does not exist in the production Functions bundle.
+ */
+export type OperationsEndpointOptions = {
+  baseUrl: string
+  commandBaseUrl?: string
+}
+
+const consoleProjectionNames: Array<keyof OperationsApiEndpoints['projections']> = [
+  'dashboard', 'users', 'devices', 'repairs', 'ledger', 'inspections', 'partners', 'reports', 'services',
+]
+
+export function createOperationsApiEndpoints(options: OperationsEndpointOptions): OperationsApiEndpoints {
+  const baseUrl = options.baseUrl.trim().replace(/\/+$/, '')
+  const commandBaseUrl = (options.commandBaseUrl ?? options.baseUrl).trim().replace(/\/+$/, '')
+  if (!baseUrl) throw new Error('A console operations API base URL is required.')
+  if (!commandBaseUrl) throw new Error('A console command API base URL is required.')
+
+  const snapshotUrl = `${baseUrl}/getConsoleOperationsSnapshot`
+  const projections = Object.fromEntries(
+    consoleProjectionNames.map((projection) => [projection, `${snapshotUrl}?projection=${encodeURIComponent(projection)}`]),
+  ) as OperationsApiEndpoints['projections']
+  return {
+    projections,
+    transitionRepairRequest: `${commandBaseUrl}/transitionRepairRequest`,
+    appendSubsidyTransaction: `${commandBaseUrl}/appendSubsidyTransaction`,
+  }
+}
+
+/** Explicitly named alias for app composition roots. */
+export const createConsoleOperationsApiEndpoints = createOperationsApiEndpoints
+
 export interface FirebaseOperationsRepositoryDependencies {
   tokens: OperationsTokenProvider
-  endpoints: OperationsApiEndpoints
+  /** Either provide explicit endpoint URLs or a Functions origin. */
+  endpoints?: OperationsApiEndpoints
+  baseUrl?: string
+  commandBaseUrl?: string
   fetch?: typeof fetch
   /** Injectable for deterministic tests. Production defaults to crypto.randomUUID(). */
   createIdempotencyKey?: () => string
@@ -554,12 +592,20 @@ export class FirebaseOperationsRepository implements ProductOperationsRepository
 
   private async read<T>(operation: string, projection: keyof OperationsApiEndpoints['projections'], parse: ProjectionParser<T>): Promise<T> {
     const config = this.configuration(operation)
-    return this.request<T>(config.endpoints.projections[projection], 'GET', undefined, parse, operation)
+    const endpoints = this.endpoints(config, operation)
+    return this.request<T>(endpoints.projections[projection], 'GET', undefined, parse, operation)
   }
 
   private async command(endpoint: 'transitionRepairRequest' | 'appendSubsidyTransaction', body: Record<string, unknown>): Promise<CommandReceipt> {
     const config = this.configuration(endpoint)
-    return this.request(config.endpoints[endpoint], 'POST', { tenantId: config.tokens.tenantId, ...body }, parseCommandReceipt, endpoint, this.idempotencyKey(config))
+    const endpoints = this.endpoints(config, endpoint)
+    return this.request(endpoints[endpoint], 'POST', { tenantId: config.tokens.tenantId, ...body }, parseCommandReceipt, endpoint, this.idempotencyKey(config))
+  }
+
+  private endpoints(config: FirebaseOperationsRepositoryDependencies, operation: string): OperationsApiEndpoints {
+    if (config.endpoints) return config.endpoints
+    if (config.baseUrl) return createOperationsApiEndpoints({ baseUrl: config.baseUrl, commandBaseUrl: config.commandBaseUrl })
+    throw new NotConfiguredError(operation)
   }
 
   private async request<T>(url: string, method: 'GET' | 'POST', body: Record<string, unknown> | undefined, parse: ProjectionParser<T>, operation: string, idempotencyKey?: string): Promise<T> {

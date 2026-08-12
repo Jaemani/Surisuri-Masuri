@@ -6,12 +6,18 @@ import {
   demoSubsidy,
   demoUserRoleSession,
 } from './data';
+import { isRepairerProductSnapshot } from './types';
 import type {
   CreateRepairRequestInput,
   ProductRole,
   ProductSnapshot,
+  RepairJob,
   RepairWorkOrder,
   RoleSession,
+  DeviceSummary,
+  SubsidySummary,
+  DemoProductSnapshot,
+  BeneficiaryProductSnapshot,
 } from './types';
 
 export type ProductRepositoryErrorCode =
@@ -43,17 +49,23 @@ export interface ProductRepository {
 }
 
 function copySnapshot(snapshot: ProductSnapshot): ProductSnapshot {
+  if (isRepairerProductSnapshot(snapshot)) {
+    return {
+      roleSession: { ...snapshot.roleSession },
+      repairJobs: snapshot.repairJobs.map((job) => ({ ...job })),
+    };
+  }
   return {
     ...snapshot,
     roleSession: { ...snapshot.roleSession },
     repairRequest: snapshot.repairRequest ? { ...snapshot.repairRequest } : null,
     device: { ...snapshot.device, timeline: snapshot.device.timeline.map((item) => ({ ...item })) },
     subsidy: { ...snapshot.subsidy },
-    repairJobs: snapshot.repairJobs.map((job) => ({ ...job })),
+    ...(snapshot.repairJobs ? { repairJobs: snapshot.repairJobs.map((job) => ({ ...job })) } : {}),
   };
 }
 
-export const demoProductSnapshot: ProductSnapshot = {
+export const demoProductSnapshot: DemoProductSnapshot = {
   roleSession: demoUserRoleSession,
   repairRequest: demoRepairRequest,
   device: demoDevice,
@@ -69,9 +81,11 @@ export const demoProductSnapshot: ProductSnapshot = {
  */
 export class DemoProductRepository implements ProductRepository {
   private snapshot: ProductSnapshot;
+  private readonly userSnapshot: BeneficiaryProductSnapshot | null;
 
   constructor(seed: ProductSnapshot = demoProductSnapshot) {
     this.snapshot = copySnapshot(seed);
+    this.userSnapshot = !isRepairerProductSnapshot(this.snapshot) ? copySnapshot(this.snapshot) as BeneficiaryProductSnapshot : null;
   }
 
   async getSnapshot(): Promise<ProductSnapshot> {
@@ -87,13 +101,24 @@ export class DemoProductRepository implements ProductRepository {
       repairer: '가까운 수리센터를 찾는 중',
       visitAt: '센터 배정 후 안내해 드려요',
     };
+    if (isRepairerProductSnapshot(this.snapshot)) {
+      throw new ProductRepositoryError('ROLE_SWITCH_UNSUPPORTED', 'Repair requests are only available in the beneficiary view.');
+    }
     this.snapshot = { ...this.snapshot, repairRequest: request };
     return { ...request };
   }
 
   async setRole(role: ProductRole): Promise<RoleSession> {
-    const roleSession = role === 'repairer' ? demoRepairerRoleSession : demoUserRoleSession;
-    this.snapshot = { ...this.snapshot, roleSession: { ...roleSession } };
+    if (role === 'repairer') {
+      const jobs = isRepairerProductSnapshot(this.snapshot)
+        ? this.snapshot.repairJobs
+        : this.snapshot.repairJobs ?? this.userSnapshot?.repairJobs ?? [];
+      this.snapshot = { roleSession: { ...demoRepairerRoleSession }, repairJobs: (jobs ?? []).map((job) => ({ ...job })) };
+    } else {
+      if (!this.userSnapshot) throw new ProductRepositoryError('ROLE_SWITCH_UNSUPPORTED', 'A beneficiary snapshot is not available.');
+      this.snapshot = { ...this.userSnapshot, roleSession: { ...demoUserRoleSession } };
+    }
+    const roleSession = this.snapshot.roleSession;
     return { ...roleSession };
   }
 }
@@ -139,7 +164,8 @@ export type FirebaseProductRepositoryOptions = {
   fetch?: ProductHttpFetch;
 };
 
-const defaultProductEndpoints = {
+/** Deployed Firebase Functions names used by the mobile product surface. */
+export const mobileProductEndpoints = {
   snapshot: '/getMobileProductSnapshot',
   createRepairRequest: '/createRepairRequest',
 } as const;
@@ -199,6 +225,9 @@ export class FirebaseProductRepository implements ProductRepository {
     // The command service returns an auditable CommandResult, not a client-
     // authoritative work order. Read the server projection before updating UI.
     const snapshot = await this.getSnapshot();
+    if (isRepairerProductSnapshot(snapshot)) {
+      throw new ProductRepositoryError('PROJECTION_PENDING', 'The repair command projection is not available for the repairer role.');
+    }
     const request = snapshot.repairRequest;
     if (!request || request.id !== result.resourceId) {
       throw new ProductRepositoryError(
@@ -231,7 +260,7 @@ export class FirebaseProductRepository implements ProductRepository {
 
   private endpoint(kind: 'snapshot' | 'createRepairRequest', withTenant = false): string {
     const options = this.requireOptions();
-    const path = options.endpoints?.[kind] ?? defaultProductEndpoints[kind];
+    const path = options.endpoints?.[kind] ?? mobileProductEndpoints[kind];
     if (!path.trim()) throw new ProductRepositoryError('NOT_CONFIGURED', `${kind} endpoint is empty.`);
     const base = options.baseUrl.replace(/\/+$/, '');
     const url = /^https?:\/\//.test(path) ? path : `${base}/${path.replace(/^\/+/, '')}`;
@@ -350,23 +379,38 @@ function decodeCreateCommandResult(payload: unknown): { resourceId: string } {
 function decodeProductSnapshot(payload: unknown): ProductSnapshot {
   const candidate = unwrapData(payload);
   if (!candidate || typeof candidate !== 'object') throw new ProductRepositoryError('INVALID_RESPONSE', 'The product snapshot response is invalid.');
-  const snapshot = candidate as Partial<ProductSnapshot>;
+  const snapshot = candidate as {
+    roleSession?: { role?: unknown; displayName?: unknown };
+    repairRequest?: unknown;
+    device?: unknown;
+    subsidy?: unknown;
+    repairJobs?: unknown;
+  };
   const roleSession = snapshot.roleSession;
   if (!roleSession || (roleSession.role !== 'user' && roleSession.role !== 'repairer') || typeof roleSession.displayName !== 'string') {
     throw new ProductRepositoryError('INVALID_RESPONSE', 'The product snapshot has an invalid role session.');
   }
-  if (!snapshot.device || !validDevice(snapshot.device) || !snapshot.subsidy || !validSubsidy(snapshot.subsidy) || !Array.isArray(snapshot.repairJobs)) {
-    throw new ProductRepositoryError('INVALID_RESPONSE', 'The product snapshot is missing a valid device, subsidy, or repair jobs projection.');
+  if (roleSession.role === 'repairer') {
+    if (!Array.isArray(snapshot.repairJobs) || !snapshot.repairJobs.every(validRepairJob)) {
+      throw new ProductRepositoryError('INVALID_RESPONSE', 'The repairer snapshot is missing a valid repair jobs projection.');
+    }
+    return { roleSession: { role: 'repairer', displayName: roleSession.displayName, isDemo: false }, repairJobs: snapshot.repairJobs.map((job) => ({ ...job })) };
+  }
+  if (!snapshot.device || !validDevice(snapshot.device) || !snapshot.subsidy || !validSubsidy(snapshot.subsidy)) {
+    throw new ProductRepositoryError('INVALID_RESPONSE', 'The beneficiary snapshot is missing a valid device or subsidy projection.');
   }
   if (snapshot.repairRequest !== null && snapshot.repairRequest !== undefined && !validWorkOrder(snapshot.repairRequest)) {
-    throw new ProductRepositoryError('INVALID_RESPONSE', 'The product snapshot has an invalid repair request.');
+    throw new ProductRepositoryError('INVALID_RESPONSE', 'The beneficiary snapshot has an invalid repair request.');
+  }
+  if (snapshot.repairJobs !== undefined && (!Array.isArray(snapshot.repairJobs) || !snapshot.repairJobs.every(validRepairJob))) {
+    throw new ProductRepositoryError('INVALID_RESPONSE', 'The beneficiary snapshot has an invalid repair jobs projection.');
   }
   return {
-    roleSession: { ...roleSession, isDemo: false },
+    roleSession: { role: 'user', displayName: roleSession.displayName, isDemo: false },
     repairRequest: snapshot.repairRequest ? { ...snapshot.repairRequest } : null,
     device: { ...snapshot.device, timeline: snapshot.device.timeline.map((item) => ({ ...item })) },
     subsidy: { ...snapshot.subsidy },
-    repairJobs: snapshot.repairJobs.map((job) => ({ ...job })),
+    ...(snapshot.repairJobs ? { repairJobs: snapshot.repairJobs.map((job) => ({ ...job })) } : {}),
   };
 }
 
@@ -385,23 +429,33 @@ function validWorkOrder(value: unknown): value is RepairWorkOrder {
     && typeof item.status === 'string' && typeof item.repairer === 'string' && typeof item.visitAt === 'string';
 }
 
-function validDevice(value: unknown): value is ProductSnapshot['device'] {
+function validDevice(value: unknown): value is DeviceSummary {
   if (!value || typeof value !== 'object') return false;
-  const item = value as Partial<ProductSnapshot['device']>;
+  const item = value as Partial<DeviceSummary>;
   return typeof item.id === 'string' && typeof item.name === 'string' && typeof item.registrationNumber === 'string'
     && typeof item.registeredAt === 'string' && (item.status === 'healthy' || item.status === 'attention')
     && Array.isArray(item.timeline) && item.timeline.every((timeline) => timeline && typeof timeline.id === 'string' && typeof timeline.date === 'string' && typeof timeline.title === 'string' && typeof timeline.detail === 'string');
 }
 
-function validSubsidy(value: unknown): value is ProductSnapshot['subsidy'] {
+function validSubsidy(value: unknown): value is SubsidySummary {
   if (!value || typeof value !== 'object') return false;
-  const item = value as Partial<ProductSnapshot['subsidy']>;
+  const item = value as Partial<SubsidySummary>;
   return typeof item.program === 'string' && typeof item.cycle === 'string' && Number.isSafeInteger(item.used)
     && Number.isSafeInteger(item.total) && typeof item.nextReview === 'string' && typeof item.note === 'string';
 }
 
+function validRepairJob(value: unknown): value is RepairJob {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<RepairJob>;
+  return typeof item.id === 'string' && typeof item.customer === 'string' && typeof item.device === 'string'
+    && typeof item.issue === 'string' && typeof item.due === 'string' && (item.priority === 'today' || item.priority === 'scheduled');
+}
+
 export type ProductRepositorySource = 'demo' | 'firebase';
 
-export function createProductRepository(source: ProductRepositorySource = 'demo'): ProductRepository {
-  return source === 'firebase' ? new FirebaseProductRepository() : new DemoProductRepository();
+export function createProductRepository(
+  source: ProductRepositorySource = 'demo',
+  options?: FirebaseProductRepositoryOptions,
+): ProductRepository {
+  return source === 'firebase' ? new FirebaseProductRepository(options) : new DemoProductRepository();
 }

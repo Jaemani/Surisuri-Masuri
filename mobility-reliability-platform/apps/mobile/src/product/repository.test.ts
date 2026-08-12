@@ -1,18 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
-import { demoProductSnapshot, DemoProductRepository, FirebaseProductRepository, ProductRepositoryError } from './repository';
+import { demoProductSnapshot, DemoProductRepository, FirebaseProductRepository, mobileProductEndpoints, ProductRepositoryError } from './repository';
 import type { FirebaseProductRepositoryOptions, ProductHttpResponse } from './repository';
+import { isBeneficiaryProductSnapshot, isRepairerProductSnapshot } from './types';
 
 describe('DemoProductRepository', () => {
   it('returns deterministic product data without sharing mutable arrays', async () => {
     const repository = new DemoProductRepository();
     const first = await repository.getSnapshot();
+    if (!isBeneficiaryProductSnapshot(first)) throw new Error('expected beneficiary snapshot');
     first.device.timeline.pop();
-    first.repairJobs[0].customer = '변경된 이름';
+    first.repairJobs?.[0] && (first.repairJobs[0].customer = '변경된 이름');
 
     const second = await repository.getSnapshot();
+    if (!isBeneficiaryProductSnapshot(second)) throw new Error('expected beneficiary snapshot');
     expect(second.device.timeline).toHaveLength(3);
-    expect(second.repairJobs[0].customer).toBe('김정자 님');
+    expect(isBeneficiaryProductSnapshot(second) ? second.repairJobs?.[0]?.customer : undefined).toBe('김정자 님');
     expect(second.roleSession).toEqual({ role: 'user', displayName: '김정자 님', isDemo: true });
   });
 
@@ -21,7 +24,9 @@ describe('DemoProductRepository', () => {
 
     const request = await repository.createRepairRequest({ title: '브레이크가 뻑뻑해요' });
     expect(request.status).toBe('received');
-    expect((await repository.getSnapshot()).repairRequest).toMatchObject({
+    const current = await repository.getSnapshot();
+    if (!isBeneficiaryProductSnapshot(current)) throw new Error('expected beneficiary snapshot');
+    expect(current.repairRequest).toMatchObject({
       id: 'demo-request-new',
       title: '브레이크가 뻑뻑해요',
     });
@@ -53,11 +58,35 @@ describe('FirebaseProductRepository', () => {
 
     expect(snapshot.roleSession.isDemo).toBe(false);
     expect(requests).toHaveLength(1);
-    expect(requests[0].url).toContain('tenantId=tenant-1');
+    expect(requests[0].url).toBe(`https://example.test${mobileProductEndpoints.snapshot}?tenantId=tenant-1`);
     expect(requests[0].init.headers.Authorization).toBe('Bearer id-token');
     expect(requests[0].init.headers['X-Firebase-AppCheck']).toBe('app-check-token');
     expect(requests[0].init.method).toBe('GET');
     expect(requests[0].init.body).toBeUndefined();
+  });
+
+  it('decodes the beneficiary projection without requiring repairer-only jobs', async () => {
+    const { repairJobs: _repairJobs, ...beneficiaryProjection } = demoProductSnapshot;
+    const repository = new FirebaseProductRepository(firebaseOptions(async () => jsonResponse(200, beneficiaryProjection)));
+
+    const snapshot = await repository.getSnapshot();
+
+    expect(snapshot.roleSession).toEqual({ role: 'user', displayName: '김정자 님', isDemo: false });
+    expect('repairJobs' in snapshot).toBe(false);
+  });
+
+  it('decodes the repairer projection without requiring beneficiary-only fields', async () => {
+    const repository = new FirebaseProductRepository(firebaseOptions(async () => jsonResponse(200, {
+      roleSession: { role: 'repairer', displayName: '따뜻한바퀴 수리센터', isDemo: false },
+      repairJobs: [{ id: 'job-1', customer: '김정자 님', device: '나래 모빌리티 M-22', issue: '브레이크 점검', due: '오늘 오후 2:00', priority: 'today' }],
+    })));
+
+    const snapshot = await repository.getSnapshot();
+
+    if (!isRepairerProductSnapshot(snapshot)) throw new Error('expected repairer snapshot');
+    expect(snapshot.roleSession.role).toBe('repairer');
+    expect(snapshot.repairJobs).toHaveLength(1);
+    expect('device' in snapshot).toBe(false);
   });
 
   it('posts a Domain Command and returns only the matching server projection', async () => {

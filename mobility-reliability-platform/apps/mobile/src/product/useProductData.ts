@@ -39,6 +39,7 @@ export function useProductData(repository: ProductRepository) {
   const createRepairRequest = useCallback(async (input: CreateRepairRequestInput) => {
     const request = await repository.createRepairRequest(input);
     setState((current) => current.snapshot
+      && current.snapshot.roleSession.role === 'user'
       ? { ...current, phase: 'ready', snapshot: { ...current.snapshot, repairRequest: request }, errorCode: null }
       : current);
     return request;
@@ -46,9 +47,8 @@ export function useProductData(repository: ProductRepository) {
 
   const setRole = useCallback(async (role: ProductRole) => {
     const roleSession = await repository.setRole(role);
-    setState((current) => current.snapshot
-      ? { ...current, phase: 'ready', snapshot: { ...current.snapshot, roleSession }, errorCode: null }
-      : current);
+    const snapshot = await repository.getSnapshot();
+    setState({ phase: 'ready', snapshot, errorCode: null });
     return roleSession;
   }, [repository]);
 

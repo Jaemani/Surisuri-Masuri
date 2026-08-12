@@ -17,6 +17,7 @@ export interface HttpRequestLike {
 export interface HttpResponseLike {
   status(code: number): HttpResponseLike;
   json(value: unknown): unknown;
+  set?(field: string, value: string): HttpResponseLike;
 }
 
 interface CommandDependencies {

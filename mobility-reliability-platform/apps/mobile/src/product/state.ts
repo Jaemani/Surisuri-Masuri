@@ -1,3 +1,4 @@
+import { isRepairerProductSnapshot } from './types';
 import type { ProductSnapshot, RepairRequestStatus, SubsidySummary } from './types';
 
 export const repairProgressSteps: Array<{ status: RepairRequestStatus; label: string }> = [
@@ -28,15 +29,23 @@ export function formatMoney(value: number) {
   return `${value.toLocaleString('ko-KR')}원`;
 }
 
-/** Keeps screen consumption role-safe while leaving the repository shape stable. */
+/** Converts the role-discriminated server DTO into the screen-specific view. */
 export function selectProductView(snapshot: ProductSnapshot) {
+  if (isRepairerProductSnapshot(snapshot)) {
+    return {
+      role: 'repairer' as const,
+      displayName: snapshot.roleSession.displayName,
+      isDemo: snapshot.roleSession.isDemo,
+      repairJobs: snapshot.repairJobs,
+    };
+  }
   return {
-    role: snapshot.roleSession.role,
+    role: 'user' as const,
     displayName: snapshot.roleSession.displayName,
     isDemo: snapshot.roleSession.isDemo,
     repairRequest: snapshot.repairRequest,
     device: snapshot.device,
     subsidy: snapshot.subsidy,
-    repairJobs: snapshot.repairJobs,
+    repairJobs: snapshot.repairJobs ?? [],
   };
 }

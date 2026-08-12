@@ -48,3 +48,13 @@
 - 확인 항목: ID token·App Check 주입, command body, Idempotency-Key, revision, server projection validation, fail-closed error
 - 금지 경계: 두 adapter 모두 Firestore direct write와 production→demo error fallback 없음
 - 제한: 실제 Firebase token·배포·현장 data를 사용하지 않았고 native device network 호출을 증명하지 않음
+
+# EVD-20260813-04 — 목적 제한 제품 읽기 projection
+
+- 분류: `LOCAL_EMULATOR`, `SYNTHETIC`, `LOCAL_TEST`
+- 서버: Domain Command unit 10개, Firestore Emulator command 4개 + projection 5개 통과
+- 모바일: typecheck, 17 files / 242 tests 통과
+- 콘솔: typecheck, 10 tests, production build 통과
+- 확인 항목: Firebase ID token·App Check·tenant scope HTTP 경계, 역할별 mobile union, operator-only console projection, assigned-repairer filter, DTO redaction, nested tenant fail-closed, bounded reads, Functions endpoint 정렬
+- 금지 경계: `privatePeople`, raw GPS/trip, Storage path, repairer subsidy projection, production→demo fallback 없음
+- 제한: production Firebase 배포/Auth/App Check/native network/현장 사용 증거가 아니며 guardian 대상 projection과 cross-organization grant는 미구현

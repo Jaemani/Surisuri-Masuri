@@ -23,12 +23,14 @@ Content-Type: application/json
 
 ### Read projection endpoints
 
-현재 모바일과 콘솔 UI 모델은 다수 collection을 조합한다. beneficiary에게 operational Firestore 원문을 넓게 열지 않기 위해 다음 purpose-limited projection endpoint가 필요하다.
+모바일과 콘솔 UI는 다음 purpose-limited projection endpoint를 통해 서버가 조합한 DTO만 읽는다.
 
 - `GET /getMobileProductSnapshot`
-- `GET /v1/console/operations-snapshot`
+- `GET /getConsoleOperationsSnapshot?projection=<name>`
 
-이 두 read endpoint는 아직 구현·배포되지 않았다. repository adapter는 endpoint, Firebase ID token, App Check token을 dependency injection으로 받아야 하며, 하나라도 빠지면 `NOT_CONFIGURED`로 fail closed한다.
+두 endpoint는 구현됐지만 production에는 아직 배포되지 않았다. repository adapter는 endpoint, Firebase ID token, App Check token을 dependency injection으로 받으며, 하나라도 빠지면 `NOT_CONFIGURED`로 fail closed한다. 기본 local preview는 실제 Firebase 설정 전 deterministic demo를 명시적으로 사용한다.
+
+모바일 projection은 역할별 union이다. beneficiary는 `repairRequest/device/subsidy`, repairer는 `repairJobs`만 받는다. 콘솔은 `dashboard|users|devices|repairs|ledger|inspections|partners|reports|services` 중 하나를 요구하며 `X-Tenant-Id`를 보낸다.
 
 ## 저장 계약
 
@@ -45,6 +47,8 @@ Firestore 문서는 snake_case이고 모바일/HTTP wire만 camelCase다. Rules�
 - production Firebase project: 미연결
 - native Android/iPhone auth/App Check: 미검증
 - 현장 데이터·사용자: 미연결
+- guardian 대상 선택·관계 projection: 미구현, fail closed
+- cross-organization repair grant: 미구현, fail closed
 
 ## 다른 환경에서 이어받기
 

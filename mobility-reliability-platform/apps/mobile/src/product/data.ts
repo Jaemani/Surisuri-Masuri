@@ -3,7 +3,8 @@ import type {
   DeviceTimelineItem,
   RepairJob,
   RepairWorkOrder,
-  RoleSession,
+  RepairerRoleSession,
+  UserRoleSession,
   SubsidySummary,
 } from './types';
 
@@ -59,13 +60,13 @@ export const demoDevice: DeviceSummary = {
   timeline: demoTimeline,
 };
 
-export const demoUserRoleSession: RoleSession = {
+export const demoUserRoleSession: UserRoleSession = {
   role: 'user',
   displayName: '김정자 님',
   isDemo: true,
 };
 
-export const demoRepairerRoleSession: RoleSession = {
+export const demoRepairerRoleSession: RepairerRoleSession = {
   role: 'repairer',
   displayName: '따뜻한바퀴 수리센터',
   isDemo: true,

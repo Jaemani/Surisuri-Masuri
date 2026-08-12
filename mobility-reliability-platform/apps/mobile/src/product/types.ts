@@ -57,13 +57,35 @@ export type RoleSession = {
   isDemo: boolean;
 };
 
-export type ProductSnapshot = {
-  roleSession: RoleSession;
+export type UserRoleSession = { role: 'user'; displayName: string; isDemo: boolean };
+export type RepairerRoleSession = { role: 'repairer'; displayName: string; isDemo: boolean };
+
+export type BeneficiaryProductSnapshot = {
+  roleSession: UserRoleSession;
   repairRequest: RepairWorkOrder | null;
   device: DeviceSummary;
   subsidy: SubsidySummary;
+  /** Demo may include repair jobs for the role switch preview; production omits this field. */
+  repairJobs?: RepairJob[];
+};
+
+export type RepairerProductSnapshot = {
+  roleSession: RepairerRoleSession;
   repairJobs: RepairJob[];
 };
+
+export type ProductSnapshot = BeneficiaryProductSnapshot | RepairerProductSnapshot;
+
+/** The deterministic preview seed keeps its optional demo jobs populated. */
+export type DemoProductSnapshot = BeneficiaryProductSnapshot & { repairJobs: RepairJob[] };
+
+export function isRepairerProductSnapshot(snapshot: ProductSnapshot): snapshot is RepairerProductSnapshot {
+  return snapshot.roleSession.role === 'repairer';
+}
+
+export function isBeneficiaryProductSnapshot(snapshot: ProductSnapshot): snapshot is BeneficiaryProductSnapshot {
+  return snapshot.roleSession.role === 'user';
+}
 
 export type CreateRepairRequestInput = {
   title: string;

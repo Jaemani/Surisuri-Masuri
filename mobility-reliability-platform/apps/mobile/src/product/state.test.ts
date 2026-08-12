@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { demoProductSnapshot } from './repository';
+import { isBeneficiaryProductSnapshot } from './types';
 import {
   formatMoney,
   getRepairProgress,
@@ -31,8 +32,10 @@ describe('product state transformations', () => {
   });
 
   it('selects the role-safe screen view without changing repository data', () => {
+    if (!isBeneficiaryProductSnapshot(demoProductSnapshot)) throw new Error('expected beneficiary snapshot');
     const view = selectProductView(demoProductSnapshot);
     expect(view).toMatchObject({ role: 'user', displayName: '김정자 님', isDemo: true });
+    if (view.role !== 'user') throw new Error('expected beneficiary view');
     expect(view.device.id).toBe('demo-device-2208');
     expect(view.repairJobs).toHaveLength(3);
   });

@@ -1,0 +1,88 @@
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
+import { Timestamp, getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { FirestoreProductProjectionStore } from '../src/projection-store.js';
+import type { ActorContext } from '../src/types.js';
+
+const enabled = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+const emulatorTest = enabled ? test : test.skip;
+let app: App;
+let db: Firestore;
+
+beforeAll(() => { if (enabled) { app = initializeApp({ projectId: process.env.GCLOUD_PROJECT ?? 'demo-domain-command' }, `projection-${randomUUID()}`); db = getFirestore(app); } });
+afterAll(async () => { if (app) await deleteApp(app); });
+const actor = (tenantId: string, roles: ActorContext['roles'], uid: string, personId?: string): ActorContext => ({ tenantId, roles, uid, ...(personId ? { personId } : {}) });
+
+async function seed(tenantId: string) {
+  const tenant = db.collection('tenants').doc(tenantId);
+  const now = Timestamp.fromDate(new Date('2026-08-13T00:00:00.000Z'));
+  await tenant.set({ tenant_id: tenantId, display_name: '서울서부 복지관', legal_name: 'SENSITIVE-ORG-LEGAL', status: 'active' });
+  await tenant.collection('people').doc('person-1').set({ tenant_id: tenantId, person_id: 'person-1', public_code: 'C-1042', status: 'active', updated_at: now });
+  await tenant.collection('privatePeople').doc('person-1').set({ tenant_id: tenantId, person_id: 'person-1', legal_name: 'SENSITIVE-NAME', phone_e164: 'SENSITIVE-PHONE', address_text: 'SENSITIVE-ADDRESS', birth_date: '1940-01-01' });
+  await tenant.collection('devices').doc('device-1').set({ tenant_id: tenantId, device_id: 'device-1', public_code: 'MOB-1', manufacturer: '나래', model_name: 'EV-2', status: 'active', created_at: now, object_path: 'SENSITIVE-STORAGE', latitude: 37.1 });
+  await tenant.collection('deviceAssignments').doc('assignment-1').set({ tenant_id: tenantId, assignment_id: 'assignment-1', person_id: 'person-1', device_id: 'device-1', status: 'active', valid_from: now });
+  await tenant.collection('repairStations').doc('station-1').set({ tenant_id: tenantId, repair_station_id: 'station-1', display_name: '한마음 모빌리티', contact_label: 'SENSITIVE-PARTNER-CONTACT', status: 'active' });
+  await tenant.collection('repairWorkOrders').doc('work-1').set({ tenant_id: tenantId, work_order_id: 'work-1', requester_person_id: 'person-1', device_id: 'device-1', issue_summary: 'SENSITIVE-RAW-ISSUE', issue_category_label: '브레이크', status: 'assigned', repair_station_id: 'station-1', repairer_firebase_uid: 'repairer-1', requested_amount_krw: 180000, revision: 3, created_at: now, updated_at: now });
+  await tenant.collection('subsidyAccounts').doc('account-1').set({ tenant_id: tenantId, account_id: 'account-1', person_id: 'person-1', status: 'active', allocated_krw: 300000, adjustment_krw: 0, reserved_krw: 180000, executed_krw: 0, available_krw: 120000 });
+  await tenant.collection('subsidyAccounts').doc('account-1').collection('transactions').doc('tx-1').set({ tenant_id: tenantId, transaction_id: 'tx-1', work_order_id: 'work-1', transaction_type: 'reservation', amount_krw: 180000, actor_label: 'SENSITIVE-ACTOR-NAME', occurred_at: now });
+  await tenant.collection('inspections').doc('inspection-1').set({ tenant_id: tenantId, inspection_id: 'inspection-1', person_id: 'person-1', device_id: 'device-1', reason_code: 'routine_cycle', reason_summary: 'SENSITIVE-INSPECTION-NOTE', decision_code: 'review', confidence_band: 'low', scheduled_at: now });
+  await tenant.collection('reportRuns').doc('report-1').set({ tenant_id: tenantId, report_run_id: 'report-1', report_type: 'monthly_operations', title: 'SENSITIVE-REPORT-TITLE', report_type_label: 'SENSITIVE-REPORT-TYPE', status: 'completed', fact_count: 2, completed_at: now });
+  await tenant.collection('trips').doc('trip-secret').set({ tenant_id: tenantId, person_id: 'person-1', latitude: 37.5, longitude: 127.1, object_path: 'SENSITIVE-RAW-GPS' });
+}
+
+describe('Firestore purpose-limited projection adapter', () => {
+  emulatorTest('beneficiary receives own product DTO without PII, UID, or raw GPS', async () => {
+    const tenantId = `tenant-${randomUUID()}`; await seed(tenantId);
+    const store = new FirestoreProductProjectionStore(db);
+    const snapshot = await store.getMobileSnapshot(actor(tenantId, ['beneficiary'], 'beneficiary-1', 'person-1'));
+    if (!('device' in snapshot)) throw new Error('expected beneficiary projection');
+    expect(snapshot.repairRequest).toMatchObject({ id: 'work-1', title: 'SENSITIVE-RAW-ISSUE', status: 'assigned' });
+    expect(snapshot.device).toMatchObject({ id: 'device-1', registrationNumber: 'MOB-1' });
+    expect(snapshot.subsidy).toMatchObject({ used: 180000, total: 300000 });
+    const serialized = JSON.stringify(snapshot);
+    for (const sentinel of ['SENSITIVE-NAME', 'SENSITIVE-PHONE', 'SENSITIVE-ADDRESS', 'SENSITIVE-STORAGE', 'SENSITIVE-RAW-GPS', 'repairer_firebase_uid']) expect(serialized).not.toContain(sentinel);
+  });
+
+  emulatorTest('repairer receives only its assigned job and no subsidy detail', async () => {
+    const tenantId = `tenant-${randomUUID()}`; await seed(tenantId);
+    await db.doc(`tenants/${tenantId}/repairWorkOrders/work-other`).set({ tenant_id: tenantId, work_order_id: 'work-other', requester_person_id: 'person-1', device_id: 'device-1', issue_summary: '다른 작업', status: 'assigned', repairer_firebase_uid: 'repairer-other', revision: 1, created_at: Timestamp.now(), updated_at: Timestamp.now() });
+    const snapshot = await new FirestoreProductProjectionStore(db).getMobileSnapshot(actor(tenantId, ['repairer'], 'repairer-1', 'repairer-person'));
+    expect(snapshot.roleSession.role).toBe('repairer');
+    if (!('repairJobs' in snapshot)) throw new Error('expected repairer projection');
+    expect(snapshot.repairJobs).toHaveLength(1);
+    expect(snapshot.repairJobs[0]?.id).toBe('work-1');
+    expect(snapshot.repairJobs[0]?.issue).toBe('브레이크');
+    expect(JSON.stringify(snapshot)).not.toContain('account-1');
+    expect(snapshot).not.toHaveProperty('device');
+    expect(snapshot).not.toHaveProperty('subsidy');
+    expect(JSON.stringify(snapshot)).not.toContain('SENSITIVE-RAW-ISSUE');
+  });
+
+  emulatorTest('operator sees bounded institution DTO while non-operator is denied', async () => {
+    const tenantId = `tenant-${randomUUID()}`; await seed(tenantId);
+    const store = new FirestoreProductProjectionStore(db);
+    const repairs = await store.getConsoleProjection(actor(tenantId, ['case_worker'], 'worker-1', 'worker-person'), 'repairs') as unknown[];
+    expect(repairs).toHaveLength(1);
+    expect(repairs[0]).toMatchObject({ id: 'work-1', user: '이용자 C-1042', revision: 3 });
+    expect(JSON.stringify(repairs)).not.toContain('SENSITIVE-NAME');
+    expect(JSON.stringify(repairs)).not.toContain('SENSITIVE-RAW-ISSUE');
+    await expect(store.getConsoleProjection(actor(tenantId, ['beneficiary'], 'beneficiary-1', 'person-1'), 'dashboard')).rejects.toMatchObject({ code: 'ROLE_FORBIDDEN' });
+  });
+
+  emulatorTest('console projections do not expose operational free text or contact labels', async () => {
+    const tenantId = `tenant-${randomUUID()}`; await seed(tenantId);
+    const store = new FirestoreProductProjectionStore(db);
+    const operator = actor(tenantId, ['case_worker'], 'worker-1');
+    const output = await Promise.all(['ledger', 'inspections', 'partners', 'reports'].map((name) => store.getConsoleProjection(operator, name as 'ledger' | 'inspections' | 'partners' | 'reports')));
+    const serialized = JSON.stringify(output);
+    for (const sentinel of ['SENSITIVE-ACTOR-NAME', 'SENSITIVE-PARTNER-CONTACT', 'SENSITIVE-INSPECTION-NOTE', 'SENSITIVE-REPORT-TITLE', 'SENSITIVE-REPORT-TYPE']) expect(serialized).not.toContain(sentinel);
+  });
+
+  emulatorTest('fails closed when a nested projection document has a mismatched tenant scope', async () => {
+    const tenantId = `tenant-${randomUUID()}`; await seed(tenantId);
+    await db.doc(`tenants/${tenantId}/devices/corrupt-device`).set({ tenant_id: 'other-tenant', device_id: 'corrupt-device', status: 'active' });
+    const store = new FirestoreProductProjectionStore(db);
+    await expect(store.getConsoleProjection(actor(tenantId, ['case_worker'], 'worker-1'), 'devices')).rejects.toMatchObject({ code: 'CORRUPT_TENANT_SCOPE' });
+  });
+});
