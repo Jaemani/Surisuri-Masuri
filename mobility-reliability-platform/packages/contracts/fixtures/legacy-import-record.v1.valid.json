@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "legacy-import-record.v1",
+  "runId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "sourceSystem": "mongo_legacy",
+  "sourceCollection": "repairs",
+  "sourceId": "66bcaac68038d53f9a48f3af",
+  "sourceSnapshotHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "targetEntityType": "repair_event",
+  "targetId": null,
+  "disposition": "quarantined",
+  "quarantineReasonCodes": ["unverified_amount"],
+  "mappingVersion": "repair-map.v1",
+  "normalizedHash": null,
+  "reviewedBy": null,
+  "reviewedAt": null
+}

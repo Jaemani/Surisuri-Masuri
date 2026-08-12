@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "legacy-import-record.v1",
+  "runId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "sourceSystem": "unknown",
+  "sourceCollection": "repairs",
+  "sourceId": "",
+  "sourceSnapshotHash": "not-a-hash",
+  "targetEntityType": "repair_event",
+  "disposition": "accepted",
+  "mappingVersion": ""
+}

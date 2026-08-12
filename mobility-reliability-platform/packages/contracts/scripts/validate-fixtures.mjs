@@ -28,6 +28,42 @@ async function getValidator(schemaPath) {
 
 const cases = [
   {
+    name: 'valid repair work order v1',
+    schema: 'schemas/repair-work-order.v1.schema.json',
+    fixture: 'fixtures/repair-work-order.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid repair work order v1',
+    schema: 'schemas/repair-work-order.v1.schema.json',
+    fixture: 'fixtures/repair-work-order.v1.invalid.json',
+    expected: false,
+  },
+  {
+    name: 'valid subsidy ledger transaction v1',
+    schema: 'schemas/subsidy-ledger-transaction.v1.schema.json',
+    fixture: 'fixtures/subsidy-ledger-transaction.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid subsidy ledger transaction v1',
+    schema: 'schemas/subsidy-ledger-transaction.v1.schema.json',
+    fixture: 'fixtures/subsidy-ledger-transaction.v1.invalid.json',
+    expected: false,
+  },
+  {
+    name: 'valid legacy import record v1',
+    schema: 'schemas/legacy-import-record.v1.schema.json',
+    fixture: 'fixtures/legacy-import-record.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid legacy import record v1',
+    schema: 'schemas/legacy-import-record.v1.schema.json',
+    fixture: 'fixtures/legacy-import-record.v1.invalid.json',
+    expected: false,
+  },
+  {
     name: 'valid quality features v1',
     schema: 'schemas/quality-features.v1.schema.json',
     fixture: 'fixtures/quality-features.v1.valid.json',

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/subsidy-ledger-transaction.v1.schema.json",
+  "title": "SubsidyLedgerTransactionV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "transactionId", "tenantId", "accountId", "personId",
+    "policyVersionId", "transactionType", "amountKrw", "occurredAt", "recordedBy", "reasonCode"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "subsidy-ledger-transaction.v1" },
+    "transactionId": { "type": "string", "format": "uuid" },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "accountId": { "type": "string", "format": "uuid" },
+    "personId": { "type": "string", "format": "uuid" },
+    "workOrderId": { "type": ["string", "null"], "format": "uuid" },
+    "policyVersionId": { "type": "string", "format": "uuid" },
+    "transactionType": { "enum": ["allocation", "reservation", "execution", "release", "reversal", "adjustment"] },
+    "amountKrw": { "type": "integer", "not": { "const": 0 } },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "recordedBy": { "type": "string", "format": "uuid" },
+    "reasonCode": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "note": { "type": ["string", "null"], "maxLength": 500 },
+    "reversesTransactionId": { "type": ["string", "null"], "format": "uuid" },
+    "source": { "enum": ["native", "verified_legacy", "unverified_legacy"] },
+    "sourceRef": { "type": ["string", "null"], "maxLength": 500 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "transactionType": { "enum": ["reservation", "execution", "release", "reversal"] } } },
+      "then": {
+        "properties": { "workOrderId": { "type": "string", "format": "uuid" } },
+        "required": ["workOrderId"]
+      }
+    },
+    {
+      "if": { "properties": { "transactionType": { "const": "reversal" } } },
+      "then": {
+        "properties": { "reversesTransactionId": { "type": "string", "format": "uuid" } },
+        "required": ["reversesTransactionId"]
+      }
+    }
+  ]
+}

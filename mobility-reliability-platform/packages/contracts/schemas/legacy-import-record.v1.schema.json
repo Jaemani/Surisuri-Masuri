@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/legacy-import-record.v1.schema.json",
+  "title": "LegacyImportRecordV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "runId", "sourceSystem", "sourceCollection", "sourceId",
+    "sourceSnapshotHash", "targetEntityType", "disposition", "mappingVersion"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "legacy-import-record.v1" },
+    "runId": { "type": "string", "format": "uuid" },
+    "sourceSystem": { "enum": ["mongo_legacy", "firestore_legacy"] },
+    "sourceCollection": { "enum": ["users", "guardians", "vehicles", "repairs", "selfChecks", "repairStationsLegacy"] },
+    "sourceId": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "sourceSnapshotHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "targetEntityType": { "enum": ["person", "relationship", "device", "device_assignment", "repair_event", "inspection_event", "repair_station"] },
+    "targetId": { "type": ["string", "null"], "format": "uuid" },
+    "disposition": { "enum": ["accepted", "quarantined", "rejected"] },
+    "quarantineReasonCodes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["ambiguous_id", "missing_reference", "invalid_date", "unknown_enum", "conflicting_duplicate", "unverified_amount", "pii_review_required"] }
+    },
+    "mappingVersion": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "normalizedHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "reviewedBy": { "type": ["string", "null"], "format": "uuid" },
+    "reviewedAt": { "type": ["string", "null"], "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "disposition": { "const": "accepted" } } },
+      "then": {
+        "properties": {
+          "targetId": { "type": "string", "format": "uuid" },
+          "normalizedHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "required": ["targetId", "normalizedHash"]
+      }
+    },
+    {
+      "if": { "properties": { "disposition": { "const": "quarantined" } } },
+      "then": {
+        "required": ["quarantineReasonCodes"],
+        "properties": {
+          "quarantineReasonCodes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "enum": ["ambiguous_id", "missing_reference", "invalid_date", "unknown_enum", "conflicting_duplicate", "unverified_amount", "pii_review_required"] }
+          }
+        }
+      }
+    }
+  ]
+}
