@@ -8,17 +8,20 @@
 
 ```text
 [Mobile App]
-  React Native UI / Native location lifecycle
+  User·guardian repair/support UI / Repairer work UI
+  React Native / QR / Native location lifecycle
   SQLite event outbox / ONNX quality inference
           │
           ├── domain command ──> [Domain Command API]
-          │                       session/trip, repair, inspection, consent
+          │                       repair request/work/verification
+          │                       subsidy ledger / device / inspection / consent
           │
           └── versioned batch ─> [Go Telemetry Gateway]
                                   server-derived idempotency / receipt
                      │
 [Firebase / GCP Boundary]
-  Firebase Auth + App Check + membership authorization
+  Firebase Auth + App Check + tenant membership authorization
+  Firestore: work orders / repair events / subsidy ledger / device timeline
                      │
                      ├──> Cloud Storage: compressed raw GPS batches + lifecycle
                      └──> Firestore: domain event / receipt / metadata
@@ -33,7 +36,7 @@
           ┌─────────┴─────────┐
           ▼                   ▼
 [ML Service]            [Institution Console]
-  training/evaluation     operational views
+  training/evaluation     today queue / users / devices / repairs / subsidy
   model registry          reports/adapters
   calibrated inference    review/feedback
           │                   │
@@ -45,6 +48,9 @@
 
 ### Mobile
 
+- 사용자·보호자는 증상을 접수하고 수리 진행·기기 이력·지원금 요약을 확인한다.
+- 수리사는 배정된 작업에서 QR로 기기를 확인하고 진단·부품·전압·비용을 제출한다.
+- 완료 수리기록과 공적 지원금은 모바일 클라이언트가 단독 확정하지 않는다.
 - 사용자가 명시적으로 시작한 주행 세션을 기본 단위로 수집한다.
 - OS 권한과 lifecycle 변화를 이벤트로 남긴다.
 - 서버 수신 확인 전까지 로컬 이벤트를 보관한다.
@@ -77,7 +83,9 @@
 
 - telemetry gateway와 분리된 control-plane API다.
 - 인증된 session-start/stop을 통해 server UUIDv7 `tripId`를 발급하고 offline `clientSessionId`와 연결한다.
-- 수리·점검·부품 교체·동의 revision·제한된 본인정보 조회 command를 처리한다.
+- 수리 요청·배정·작업 제출·기관 검증, 지원금 원장, 점검·부품 교체·동의 revision·제한된 본인정보 조회 command를 처리한다.
+- 수리 work order와 완료 repair event를 분리하고 상태 전이를 actor role과 현재 revision으로 검증한다.
+- 지원금은 allocation·reservation·execution·release·reversal·adjustment 거래를 append-only로 기록한다.
 - ID token, App Check, membership, role, 사람·기기 관계, 목적을 검사하고 immutable domain event를 생성한다.
 - 초기 배포 후보는 Firebase Functions v2 callable/HTTPS이며 구현 전 별도 ADR에서 runtime과 공통 authorization policy 공유 방식을 확정한다.
 

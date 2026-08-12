@@ -13,13 +13,13 @@
 
 | 월 | 기술 게이트 | 핵심 구현 | 발표 가능한 결과 | 정기리포트 |
 | --- | --- | --- | --- | --- |
-| 5월 | Greenfield Definition | IP 경계, 제품 헌장, 모바일 정보구조, GPS vertical slice 설계 | 신규 아키텍처와 모바일 흐름 | R01, R02 |
-| 6월 | Reliable Mobile Capture | Android/iOS 권한, background GPS, SQLite 이벤트 로그, offline sync | 비행기 모드 복구와 배터리·정확도 비교 | R03, R04 |
-| 7월 | Trusted Telemetry Platform | Go Cloud Run ingest, idempotency, Firestore receipt, Cloud Storage batch, fenced recovery, 위치 필터·보존정책 | 정제 전후 경로와 부하·중복·복구·비용 테스트 | R05, R06 |
-| 8월 | On-device Data Quality ML | 라벨링, 규칙 baseline, PyTorch 시계열 모델, ONNX 배포 | confusion matrix와 모바일 추론 | R07, R08 |
-| 9월 | Asset State & Reliability | 이벤트 projection, 수리 importer, 부품 상태, 생존분석 baseline | 기기 타임라인과 위험곡선 | R09, R10 |
-| 10월 | Calibrated Decision Support | calibration, abstention, 수리사 피드백, fact store, AI 보고서 | 근거 클릭형 위험 설명과 평가표 | R11, R12 |
-| 11월 | Field Operations | 신규 기관 콘솔, 문서 adapter, pilot, observability, security, accessibility | 운영 대시보드와 장애·접근성 전후 비교 | R13, R14 |
+| 5월 | Product & Workflow Definition | IP 경계, 역할·정보구조, 수리·지원금·이관 계약, GPS 기반 설계 | 요청→수리→검증 제품 흐름과 신규 아키텍처 | R01, R02 |
+| 6월 | Role-aware Mobile Foundation | 사용자·수리사 앱 셸, 인증·기관 권한, 사용자·기기·QR, 수리 요청 slice, offline GPS | 역할별 모바일 데모와 비행기 모드 복구 | R03, R04 |
+| 7월 | Repair Operations & Trusted Telemetry | 복지관 운영 기본화면, 수리사 작업기록, Go ingest, 멱등 receipt·Storage, 위치 정책 | 수리 배정 흐름과 telemetry 실패·복구 테스트 | R05, R06 |
+| 8월 | End-to-end Repair & Subsidy | 수리 상태기계, 기관 배정 정책, 지원금 원장, 알림, 이관 리허설, 품질 baseline | 요청→기관검증 데모와 감사 가능한 원장 | R07, R08 |
+| 9월 | Device Timeline & Reliability | 수리 importer, 기기·부품 projection, 주행 품질 ML, 생존분석 baseline | 이관된 기기 타임라인과 위험곡선 | R09, R10 |
+| 10월 | Calibrated Preventive Support | calibration, abstention, 수리사 피드백, fact store, AI 보고서 | 근거 클릭형 점검 권고와 평가표 | R11, R12 |
+| 11월 | Institution Reporting & Field Operations | 콘솔 운영 연결, 문서 adapter, pilot, observability, security, accessibility | 운영 대시보드·기관문서와 장애·접근성 비교 | R13, R14 |
 | 12월 | Reproducible Final Evidence | 시간분할 최종평가, 장애 훈련, 데이터·모델 카드, 데모·백서 | 5분 데모와 재현 패키지 | R15, R16 |
 
 ## 월별 완료 조건

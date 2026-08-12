@@ -23,6 +23,7 @@
 | 질문 | 기준 문서 | 보조 문서 |
 | --- | --- | --- |
 | 왜 새로 만드는가 | [상세 개요](./PROJECT_OVERVIEW.md) | [ADR-0001](./decisions/ADR-0001-greenfield-boundary.md) |
+| 사용자·수리사·복지관이 어떤 업무를 연결하는가 | [상세 개요](./PROJECT_OVERVIEW.md) | [ADR-0043](./decisions/ADR-0043-welfare-center-repair-operations-product-core.md), [Target Domain Model](./data/TARGET_DOMAIN_MODEL.md) |
 | 무엇을 만들고 무엇을 만들지 않는가 | [프로젝트 헌장](./PROJECT_CHARTER.md) | [로드맵](./ROADMAP.md) |
 | 5~12월에 언제 무엇을 판단하는가 | [마스터 실행계획](./plans/MASTER_EXECUTION_PLAN.md) | [정기리포트 16개](./reports/fixed/README.md) |
 | Firebase, Go, domain command와 worker의 책임은 무엇인가 | [시스템 아키텍처](./architecture/SYSTEM_ARCHITECTURE.md) | [ADR-0007](./decisions/ADR-0007-firebase-first-hybrid.md), [ADR-0011](./decisions/ADR-0011-domain-command-worker-boundaries.md) |

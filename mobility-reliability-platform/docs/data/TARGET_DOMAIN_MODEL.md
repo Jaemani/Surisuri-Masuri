@@ -48,11 +48,17 @@
   /deviceAssignments/{assignmentId}
   /partCatalog/{partId}
   /componentInstallations/{componentId}
+  /repairWorkOrders/{workOrderId}
+    /statusHistory/{statusEventId}
   /repairs/{repairId}
     /items/{repairItemId}
   /inspections/{inspectionId}
     /observations/{observationId}
   /trips/{tripId}                              # metadata/summary only
+  /subsidyPolicies/{policyVersionId}
+  /subsidyAccounts/{accountId}
+    /transactions/{transactionId}
+  /repairStations/{repairStationId}
   /ingestReceipts/{batchId}                    # server-only write
     /recoveryAttempts/{attemptId}              # 좌표 없는 복구 감사 ledger
     /purgeLinks/{linkId}                       # top-level target/finding inverse purge registry
