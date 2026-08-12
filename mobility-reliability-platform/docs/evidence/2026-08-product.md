@@ -96,3 +96,10 @@
 - UI: 수리사 부위·처리 선택, 복지관 제출 항목 검증과 빈 항목 fail-closed
 - 검증: mobile 248 tests, console 10 tests/build, domain 12 tests, Emulator 10, Playwright 4 passed
 - 제한: 현장 분류 적합성, 복수 항목 편집 UX, 부품 catalog/component linkage와 실제 배포는 미검증
+
+# EVD-20260813-09 — 현장 기기 공개코드 gate
+
+- 분류: `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
+- 확인 항목: projection 공개코드와 수동 입력 일치 전 일정·작업 action 비활성화, 대소문자 정규화, 일치 상태 안내
+- 검증: mobile 248 tests, TypeScript, Playwright 4 passed, updated repairer workspace snapshot
+- 제한: QR camera/lookup, 위조 방지, 기기 소유권, native accessibility는 미검증

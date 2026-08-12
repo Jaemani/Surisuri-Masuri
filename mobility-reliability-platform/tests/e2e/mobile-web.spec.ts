@@ -53,6 +53,9 @@ test.describe('mobile web visual preview', () => {
     await expect(page.getByRole('heading', { name: '오른쪽 바퀴 소음 점검' })).toBeVisible();
     await expect(page.getByText('MR-2208', { exact: true })).toBeVisible();
     await expect(page.getByText('지원금 잔액 없이', { exact: false })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '기기 코드 확인 필요' })).toBeDisabled();
+    await page.getByLabel('현장 기기 공개코드').fill('mr-2208');
+    await expect(page.getByText('기기 코드가 일치합니다')).toBeVisible();
     await expect(page).toHaveScreenshot('mobile-repairer-workspace.png', { animations: 'disabled', fullPage: true });
     await page.getByRole('button', { name: '방문 일정 확정' }).click();
     await expect(page.getByRole('heading', { name: '방문 일정 확인' })).toBeVisible();
