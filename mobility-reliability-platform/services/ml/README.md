@@ -73,7 +73,30 @@ rtk uv --directory services/ml run --locked --extra dev pytest -q
 
 현재 Python test는 feature golden vector, malformed/coordinate-free output, feature
 hash tamper, label leakage, frozen split evaluation, baseline result schema를 함께
-검증한다. 모델 학습·PyTorch·ONNX·모바일 추론은 다음 R07-C 범위다.
+검증한다.
+
+## R07-C PyTorch 최소 후보
+
+`torch_candidate.py`는 frozen manifest의 train 16 trace만 사용해 292 parameter
+`TinyFeatureMLP`를 CPU에서 학습하고 validation/test 각 16 trace를 평가한다.
+입력은 R07-B의 hash 검증된 coordinate-free feature 13개이며 label·split·좌표는
+prediction tensor에 들어가지 않는다. seed, deterministic algorithm, CPU thread 수,
+feature 순서, 모델 state SHA-256을 결과에 고정한다.
+
+```bash
+rtk uv --directory services/ml sync --locked --extra dev
+rtk uv --directory services/ml run --locked --extra dev ruff format --check src tests
+rtk uv --directory services/ml run --locked --extra dev ruff check src tests
+rtk uv --directory services/ml run --locked --extra dev pytest -q
+```
+
+PyTorch는 `pytorch-cpu` explicit index에서 lock한다. CUDA wheel을 WSL 환경에
+내려받지 않으며 `torch.cuda.is_available()`을 전제로 하지 않는다.
+
+현재 synthetic generator는 규칙 분리가 명확해 rules test macro-F1이 이미 1.0이다.
+따라서 후보 결과가 높아도 모델 우월성이나 field 일반화 증거가 아니다. 결과의
+`deploymentDecision`은 항상 `defer`이며 실제 동의 trace와 고정 field evaluation이
+생길 때까지 ONNX·모바일 추론 진입을 승인하지 않는다.
 
 ## Split and provenance rules
 

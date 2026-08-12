@@ -9,6 +9,7 @@ description = "Reproducible CPU-only data and evaluation utilities for the mobil
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "jsonschema[format]>=4.23,<5",
+  "torch>=2.8,<2.9",
 ]
 
 [project.optional-dependencies]
@@ -33,3 +34,11 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

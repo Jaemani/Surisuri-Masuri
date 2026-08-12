@@ -208,7 +208,22 @@ holdout 경계를 위반한다. feature extractor가 실패하거나 데이터�
 않는다. R07-C는 그 이후 동일 split에서 직접 학습 후보와 평가 harness를 별도로
 추가하는 작업이다.
 
-## 9. 인계 체크리스트
+## 9. R07-C PyTorch 후보 재현
+
+```bash
+rtk pipx install uv
+rtk uv --directory services/ml sync --locked --extra dev
+rtk uv --directory services/ml run --locked --extra dev pytest -q
+```
+
+- Python 3.12, `uv.lock`, explicit `pytorch-cpu` index를 사용한다.
+- 새 CSV나 새 split을 만들지 않고 generator→manifest→feature extractor를 메모리에서 재사용한다.
+- train feature의 mean/std만 normalization에 사용한다.
+- model state hash와 prediction에는 원시 좌표가 없다.
+- synthetic rules baseline이 이미 완전 분리되어 있으므로 후보 결과와 무관하게 deployment는 `defer`다.
+- ONNX는 실제 field holdout 또는 rules 대비 의미 있는 오류 개선 근거가 생긴 뒤 진행한다.
+
+## 10. 인계 체크리스트
 
 - [ ] `a20a85b` 또는 그 후속 commit을 기준으로 clean checkout을 만들었다.
 - [ ] Python 3.12.x와 uv 0.8.13을 확인했다.
