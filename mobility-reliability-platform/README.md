@@ -39,6 +39,7 @@ apps/
   mobile/                 React Native 모바일 앱
   console/                복지관 운영 콘솔
 services/
+  domain-command/         수리·지원금 서버 명령 경계
   telemetry-gateway/      모바일 이벤트 수집 경계
   ml/                     학습·평가·모델 패키징
 packages/
@@ -53,6 +54,7 @@ docs/
   reports/                 사람에게 전달하는 정기·수시 보고서
   evidence/                테스트·실험·데모 증빙 규칙
   data/                    데이터 모델과 이관 기준
+  handoffs/                다른 개발환경에서 이어받기 위한 실행 경계
 ```
 
 ## 문서 원칙
@@ -76,3 +78,5 @@ docs/
 5. 발표 가능한 시각 결과와 실제 운영 증거의 동시 확보
 
 전체 기준 문서와 읽는 순서는 [문서 인덱스](docs/INDEX.md)에서 확인합니다. 상세 범위는 [프로젝트 헌장](docs/PROJECT_CHARTER.md), 월별 게이트는 [8개월 로드맵](docs/ROADMAP.md), 시스템 경계는 [아키텍처](docs/architecture/SYSTEM_ARCHITECTURE.md)를 따릅니다.
+
+Firebase 제품 연결을 이어서 구현할 때는 [command·projection handoff](docs/handoffs/FIREBASE_PRODUCT_CONNECTION.md)를 먼저 확인합니다.

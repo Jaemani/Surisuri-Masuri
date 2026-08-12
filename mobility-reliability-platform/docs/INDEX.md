@@ -17,6 +17,7 @@
 11. [릴리스·파일럿·최종 데모 계획](./plans/RELEASE_PILOT_DEMO_PLAN.md) — 환경 승격, 현장 도입, 발표·포트폴리오 증거
 12. [위험 등록부](./plans/RISK_REGISTER.md) — 현재 위험, 탐지 신호, 대응과 차단 조건
 13. [모바일·운영 콘솔 제품 경험 방향](./plans/PRODUCT_EXPERIENCE_DIRECTION.md) — 두 표면의 사용자 과업, 정보구조, 개인정보·시각 원칙
+14. [Firebase 제품 연결 handoff](./handoffs/FIREBASE_PRODUCT_CONNECTION.md) — command endpoint, projection 공백, 다른 환경 실행 경계
 
 ## 2. 질문별 기준 문서
 
@@ -38,6 +39,7 @@
 | WSL과 실기기에서 어떻게 실행하는가 | [WSL Runbook](./development/WSL_RUNBOOK.md) | 앱·서비스별 README |
 | 모바일 UI를 웹에서 어떻게 빠르게 확인하는가 | [Web·Playwright Runbook](./development/WEB_PLAYWRIGHT_RUNBOOK.md) | [ADR-0042](./decisions/ADR-0042-web-ui-preview-boundary.md), [현재 모바일 UX 감사](./reports/human/HR-20260813-04-mobile-ui-audit.md) |
 | 모바일과 복지관 대시보드는 각각 무엇을 보여주는가 | [제품 경험 방향](./plans/PRODUCT_EXPERIENCE_DIRECTION.md) | [현재 모바일 UX 감사](./reports/human/HR-20260813-04-mobile-ui-audit.md), [콘솔 README](../apps/console/README.md) |
+| 모바일·콘솔을 Firebase에 어떻게 연결하는가 | [Firebase 제품 연결 handoff](./handoffs/FIREBASE_PRODUCT_CONNECTION.md) | [Domain Command README](../services/domain-command/README.md), [ADR-0043](./decisions/ADR-0043-welfare-center-repair-operations-product-core.md) |
 | telemetry orphan·stale receipt를 어떻게 분류하는가 | [Reconciliation Runbook](./development/TELEMETRY_RECONCILIATION_RUNBOOK.md) | [ADR-0017](./decisions/ADR-0017-fenced-ingest-recovery.md) |
 
 ## 3. 계획과 실제의 분리
