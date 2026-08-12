@@ -116,6 +116,40 @@ artifact 생성은 학습 단계지만 그 이후 load/predict 경로에는 opti
 
 현재 field evaluation 테스트 역시 contract bridge용 생성 batch로만 수행한다. 그 결과는 평가 코드의 경계 검증이지 실제 field metric이 아니다.
 
+## R10 synthetic reliability baseline
+
+`reliability_dataset.py`는 실제 수리 export가 준비되기 전에 time-to-inspection
+평가 경계를 검증하기 위한 합성 episode를 생성한다. episode에는 명시적 부품 분류,
+risk clock 시작 사유, decision time, 30일 관측 종료, 누적거리 요약과 점검 필요
+outcome/censoring만 들어간다. raw GPS, Firebase·기관·사람 식별자와 수리 자유문은
+생성하지 않는다.
+
+`device-group-time-holdout.v1` 검증기는 같은 가명 기기 group이 split을 넘지 못하게
+하고, 이전 split의 label availability가 다음 split의 decision time보다 늦으면
+거부한다. 부품 교체가 명시된 episode만 risk clock reset event를 가질 수 있다.
+
+`reliability_baseline.py`는 train split의 표본·사건 수로 부품별 평가 가능 여부를
+동결하고 untouched test split에서 다음 세 기준선을 같은 cohort로 비교한다.
+validation split은 tuning이나 metric에 사용하지 않는다.
+
+- 180일 고정 점검주기
+- 현재 누적거리와 과거 일평균 거리를 이용한 30일 내 1,000km 도달 규칙
+- equal-horizon right censoring을 반영한 최소 Kaplan–Meier 기준선
+
+표본이나 사건이 부족한 부품은 metric 없이 `data_insufficient`로 유보한다. 결과
+runtime은 전체·부품·confusion count, 시간창 비중복, method별 동일 cohort를 schema
+외 semantic invariant로 다시 확인한다. 결과는 언제나 `synthetic_only`,
+`trainingPerformed=false`, `deploymentAuthorized=false`, `deploymentDecision=defer`다.
+이는 실제 고장 예측, 현장 성능, 부품 안전 보증 또는 배포 증거가 아니다.
+현재 기본 출력은 51개 합성 episode와 test 17개 observation이며, controller train
+표본 3개는 최소 4개보다 작아 모든 method에서 metric 없이 abstain한다.
+
+```bash
+rtk uv --cache-dir /tmp/mobility-ml-uv-cache --directory services/ml run --locked --extra dev pytest -q
+rtk uv --cache-dir /tmp/mobility-ml-uv-cache --directory services/ml run --locked --extra dev ruff check src tests
+rtk uv --cache-dir /tmp/mobility-ml-uv-cache --directory services/ml run --locked --extra dev ruff format --check src tests
+```
+
 ## Split and provenance rules
 
 - `group-time-holdout.v1`: 같은 `scenarioGroupId`가 train/validation/test를
