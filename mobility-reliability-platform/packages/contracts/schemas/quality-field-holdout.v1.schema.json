@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/quality-field-holdout.v1.schema.json",
+  "title": "QualityFieldHoldoutV1",
+  "description": "Coordinate-free admission manifest for evaluation-only field telemetry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "holdoutId", "sourceKind", "purpose", "evaluationOnly", "trainingEligible", "deploymentEligible", "telemetrySchemaVersion", "labelSchemaVersion", "featureSchemaVersion", "rawCoordinatesIncluded", "createdAt", "collectionStartedAt", "collectionEndedAt", "consentPolicy", "retention", "trainingBoundary", "traceCount", "traces"],
+  "properties": {
+    "schemaVersion": { "const": "quality-field-holdout.v1" },
+    "holdoutId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "sourceKind": { "const": "field_pilot" },
+    "purpose": { "const": "evaluation_only" },
+    "evaluationOnly": { "const": true },
+    "trainingEligible": { "const": false },
+    "deploymentEligible": { "const": false },
+    "telemetrySchemaVersion": { "const": "telemetry-batch.v2" },
+    "labelSchemaVersion": { "const": "quality-label.v1" },
+    "featureSchemaVersion": { "const": "quality-features.v1" },
+    "rawCoordinatesIncluded": { "const": false },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "collectionStartedAt": { "type": "string", "format": "date-time" },
+    "collectionEndedAt": { "type": "string", "format": "date-time" },
+    "consentPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyVersion", "purposeCode", "admissionStatus", "proofSetSha256", "withdrawalSupported"],
+      "properties": {
+        "policyVersion": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+        "purposeCode": { "const": "mobility_quality_evaluation.v1" },
+        "admissionStatus": { "const": "granted_at_snapshot" },
+        "proofSetSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "withdrawalSupported": { "const": true }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyVersion", "holdoutFrozenAt", "evaluationNotBeforeAt", "evaluationExpiresAt", "deletionWorkflowRequired"],
+      "properties": {
+        "policyVersion": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+        "holdoutFrozenAt": { "type": "string", "format": "date-time" },
+        "evaluationNotBeforeAt": { "type": "string", "format": "date-time" },
+        "evaluationExpiresAt": { "type": "string", "format": "date-time" },
+        "deletionWorkflowRequired": { "const": true }
+      }
+    },
+    "trainingBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frozenModelStateSha256", "frozenRulesVersion", "trainingEndedAt", "fieldCollectionAfterTraining"],
+      "properties": {
+        "frozenModelStateSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "frozenRulesVersion": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+        "trainingEndedAt": { "type": "string", "format": "date-time" },
+        "fieldCollectionAfterTraining": { "const": true }
+      }
+    },
+    "traceCount": { "type": "integer", "minimum": 1, "maximum": 100000 },
+    "traces": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["traceId", "telemetryBatchId", "pseudonymousGroupId", "labelId", "labelState", "labelFinalizedAt", "capturedAt", "sampleCount", "telemetrySha256", "featureSha256", "consentProofDigest", "evaluationEligible", "trainingEligible"],
+        "properties": {
+          "traceId": { "type": "string", "format": "uuid" },
+          "telemetryBatchId": { "type": "string", "format": "uuid" },
+          "pseudonymousGroupId": { "type": "string", "pattern": "^grp_[a-f0-9]{32,64}$" },
+          "labelId": { "type": "string", "format": "uuid" },
+          "labelState": { "enum": ["known", "review_required", "abstained"] },
+          "labelFinalizedAt": { "type": "string", "format": "date-time" },
+          "capturedAt": { "type": "string", "format": "date-time" },
+          "sampleCount": { "type": "integer", "minimum": 1, "maximum": 500 },
+          "telemetrySha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "featureSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "consentProofDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "evaluationEligible": { "type": "boolean" },
+          "trainingEligible": { "const": false }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "quality-field-holdout.v1",
+  "holdoutId": "unsafe-field-holdout",
+  "sourceKind": "field_pilot",
+  "purpose": "evaluation_only",
+  "evaluationOnly": true,
+  "trainingEligible": true,
+  "deploymentEligible": true,
+  "telemetrySchemaVersion": "telemetry-batch.v2",
+  "labelSchemaVersion": "quality-label.v1",
+  "featureSchemaVersion": "quality-features.v1",
+  "rawCoordinatesIncluded": true,
+  "createdAt": "2026-09-10T09:00:00Z",
+  "collectionStartedAt": "2026-09-01T00:00:00Z",
+  "collectionEndedAt": "2026-09-09T23:59:59Z",
+  "consentPolicy": { "policyVersion": "bad", "purposeCode": "training", "admissionStatus": "granted_at_snapshot", "proofSetSha256": "bad", "withdrawalSupported": false },
+  "retention": { "policyVersion": "bad", "holdoutFrozenAt": "2026-09-10T08:00:00Z", "evaluationNotBeforeAt": "2026-09-10T09:00:00Z", "evaluationExpiresAt": "2026-12-09T23:59:59Z", "deletionWorkflowRequired": false },
+  "trainingBoundary": { "frozenModelStateSha256": "bad", "frozenRulesVersion": "r07", "trainingEndedAt": "2026-10-01T00:00:00Z", "fieldCollectionAfterTraining": true },
+  "traceCount": 1,
+  "traces": []
+}

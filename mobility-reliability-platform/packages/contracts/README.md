@@ -18,6 +18,7 @@
 - `domain-event.v1.schema.json`: 검증 이후 내부 event log에 기록하는 공통 envelope
 - `quality-label.v1.schema.json`: 텔레메트리 trace의 이동 유형·품질 검토 라벨. `unknown_review_required`는 학습 class가 아니라 `review_required`/`abstained` 상태로 표현한다.
 - `quality-dataset-manifest.v1.schema.json`: 합성·개발기기·현장 trace의 계보, hash, seed, group/time split 및 benchmark eligibility를 기록하는 ML dataset manifest. `developer_device` trace는 기록할 수 있지만 benchmark loader에서 제외한다.
+- `quality-field-holdout.v1.schema.json`: 동의 기반 field trace의 coordinate-free 평가 입장 manifest. 학습·배포 불가와 좌표 미포함을 고정하며 실제 consent·artifact 대조는 server-only admission 책임으로 남긴다.
 - `quality-features.v1.schema.json`: 하나의 trace에서 추출한 coordinate-free numeric feature와 trace/batch/dataset/feature hash lineage. strict named fields만 허용하며 raw latitude/longitude, PII, label, prediction은 계약상 허용하지 않는다. 추출 실패는 value-free `reasonCode`와 `review_required` 상태로 표현한다.
 - `quality-baseline-result.v1.schema.json`: `quality-features.v1`와 분리된 synthetic-only rules baseline 결과. split별/전체 metric, 네 known class와 `unknown_review_required` confusion matrix, prediction·abstain·feature hash를 strict하게 기록한다.
 

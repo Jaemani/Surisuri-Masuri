@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "quality-field-holdout.v1",
+  "holdoutId": "field-holdout-2026-09-a",
+  "sourceKind": "field_pilot",
+  "purpose": "evaluation_only",
+  "evaluationOnly": true,
+  "trainingEligible": false,
+  "deploymentEligible": false,
+  "telemetrySchemaVersion": "telemetry-batch.v2",
+  "labelSchemaVersion": "quality-label.v1",
+  "featureSchemaVersion": "quality-features.v1",
+  "rawCoordinatesIncluded": false,
+  "createdAt": "2026-09-10T09:00:00Z",
+  "collectionStartedAt": "2026-09-01T00:00:00Z",
+  "collectionEndedAt": "2026-09-09T23:59:59Z",
+  "consentPolicy": {
+    "policyVersion": "field-consent.v1",
+    "purposeCode": "mobility_quality_evaluation.v1",
+    "admissionStatus": "granted_at_snapshot",
+    "proofSetSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "withdrawalSupported": true
+  },
+  "retention": {
+    "policyVersion": "field-retention.v1",
+    "holdoutFrozenAt": "2026-09-10T08:00:00Z",
+    "evaluationNotBeforeAt": "2026-09-10T09:00:00Z",
+    "evaluationExpiresAt": "2026-12-09T23:59:59Z",
+    "deletionWorkflowRequired": true
+  },
+  "trainingBoundary": {
+    "frozenModelStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "frozenRulesVersion": "r07-rules-baseline.v1",
+    "trainingEndedAt": "2026-08-13T00:00:00Z",
+    "fieldCollectionAfterTraining": true
+  },
+  "traceCount": 1,
+  "traces": [{
+    "traceId": "123e4567-e89b-42d3-a456-426614174001",
+    "telemetryBatchId": "123e4567-e89b-42d3-a456-426614174002",
+    "pseudonymousGroupId": "grp_0123456789abcdef0123456789abcdef",
+    "labelId": "123e4567-e89b-42d3-a456-426614174003",
+    "labelState": "known",
+    "labelFinalizedAt": "2026-09-10T07:00:00Z",
+    "capturedAt": "2026-09-01T01:00:00Z",
+    "sampleCount": 12,
+    "telemetrySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "featureSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "consentProofDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "evaluationEligible": true,
+    "trainingEligible": false
+  }]
+}

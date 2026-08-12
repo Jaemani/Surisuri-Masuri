@@ -98,6 +98,12 @@ PyTorch는 `pytorch-cpu` explicit index에서 lock한다. CUDA wheel을 WSL 환�
 `deploymentDecision`은 항상 `defer`이며 실제 동의 trace와 고정 field evaluation이
 생길 때까지 ONNX·모바일 추론 진입을 승인하지 않는다.
 
+## R08-A field holdout admission
+
+`field_holdout.py`는 실제 동의 field data가 들어올 때 사용할 **평가 전용 manifest**를 검증한다. 입력에는 원본 좌표·경로·Firebase ID·Storage path가 없으며, 학습과 배포 eligibility는 false로 고정한다. frozen training 뒤 수집, label freeze, evaluation window, trace count·identity와 known/review 상태를 fail-closed로 확인한다.
+
+현재 테스트는 contract fixture만 사용하며 실제 field trace, 동의 state, 현장 성능을 증명하지 않는다. field manifest는 `torch_candidate.py`의 synthetic training 입력으로 사용할 수 없다. 세부 운영 경계는 [Field holdout protocol](../../docs/data/FIELD_HOLDOUT_PROTOCOL.md)을 따른다.
+
 ## Split and provenance rules
 
 - `group-time-holdout.v1`: 같은 `scenarioGroupId`가 train/validation/test를
