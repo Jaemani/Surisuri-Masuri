@@ -144,18 +144,16 @@ export type DomainRepairStatus =
  * Explicit domain command used by a real operations screen. `actorId` is
  * deliberately absent: the command API derives it from the ID token.
  */
-export type RepairTransitionCommand = {
+type RepairTransitionBase = {
   repairRequestId: string
   expectedRevision: number
-  toStatus: DomainRepairStatus
-  repairStationId?: string
-  repairerFirebaseUid?: string
-  subsidyAccountId?: string
-  billedAmountKrw?: number
-  submittedAt?: string
-  subsidyDecisionId?: string
-  note?: string
 }
+
+export type RepairTransitionCommand =
+  | (RepairTransitionBase & { toStatus: 'under_review' | 'completed' | 'reopened' | 'rejected' | 'cancelled'; note?: string })
+  | (RepairTransitionBase & { toStatus: 'assigned'; repairStationId: string; repairerFirebaseUid: string; note?: string })
+  | (RepairTransitionBase & { toStatus: 'needs_correction'; note?: string })
+  | (RepairTransitionBase & { toStatus: 'center_verified'; subsidyAccountId?: string; subsidyDecisionId: string; note?: string })
 
 export type SubsidyTransactionType = 'allocation' | 'reservation' | 'execution' | 'release' | 'adjustment' | 'reversal'
 
@@ -573,18 +571,21 @@ export class FirebaseOperationsRepository implements ProductOperationsRepository
   }
 
   async transitionRepair(command: RepairTransitionCommand): Promise<CommandReceipt> {
-    return this.command('transitionRepairRequest', {
+    const body: Record<string, unknown> = {
       repairRequestId: command.repairRequestId,
       expectedRevision: command.expectedRevision,
       toStatus: command.toStatus,
-      ...optional('repairStationId', command.repairStationId),
-      ...optional('repairerFirebaseUid', command.repairerFirebaseUid),
-      ...optional('subsidyAccountId', command.subsidyAccountId),
-      ...optional('billedAmountKrw', command.billedAmountKrw),
-      ...optional('submittedAt', command.submittedAt),
-      ...optional('subsidyDecisionId', command.subsidyDecisionId),
       ...optional('note', command.note),
-    })
+    }
+    if (command.toStatus === 'assigned') {
+      body.repairStationId = command.repairStationId
+      body.repairerFirebaseUid = command.repairerFirebaseUid
+    }
+    if (command.toStatus === 'center_verified') {
+      body.subsidyDecisionId = command.subsidyDecisionId
+      if (command.subsidyAccountId !== undefined) body.subsidyAccountId = command.subsidyAccountId
+    }
+    return this.command('transitionRepairRequest', body)
   }
 
   async appendSubsidyTransaction(command: SubsidyCommand): Promise<CommandReceipt> {

@@ -9,7 +9,7 @@
 | 함수 | 용도 | HTTP body |
 | --- | --- | --- |
 | `createRepairRequest` | 사용자·보호자·복지관 수리 접수 | `tenantId`, `beneficiaryId`, `deviceId`, `issueSummary`, `publicFundingInvolved`, `requestedAmountKrw?` |
-| `transitionRepairRequest` | 복지관 배정·수리사 제출·센터 검증·완료 | `tenantId`, `repairRequestId`, `toStatus`, `expectedRevision` 및 상태별 필수 field |
+| `transitionRepairRequest` | 복지관 배정·수리사 작업·센터 검증·완료 | `tenantId`, `repairRequestId`, `toStatus`, `expectedRevision` 및 아래 상태별 exact field |
 | `appendSubsidyTransaction` | 지원금 배정·예약·집행·해제·반전·조정 | `tenantId`, `accountId`, `personId`, `policyVersionId`, `transactionType`, `amountKrw`, `reasonCode`, `workOrderId?` |
 
 공통 header:
@@ -21,6 +21,18 @@ Idempotency-Key: <8~128자 stable key>
 Content-Type: application/json
 ```
 
+상태별 추가 field는 다음과 같이 제한된다. 다른 상태의 field를 섞으면 `UNEXPECTED_COMMAND_FIELD`로 거부한다.
+
+- 배정: `repairStationId`, `repairerFirebaseUid`, `note?`
+- 일정 확정: `scheduledAt`
+- 작업 시작: 추가 field 없음
+- 수리사 제출: `billedAmountKrw`, `workItems[]`; `submittedAt`은 서버가 생성
+- 수정 요청: `note?`
+- 센터 검증: `subsidyDecisionId`, 공적 지원 건의 `subsidyAccountId`, `note?`
+- 완료·재개·거절·취소: `note?`
+
+`workItems`는 `categoryCode`, `actionCode`, `quantity`, `lineAmountKrw`만 허용하며 항목 합계가 청구액과 일치해야 한다. 완료되면 `/repairs/{repairId}/items`에 검증 이력으로 함께 기록된다.
+
 ### Read projection endpoints
 
 모바일과 콘솔 UI는 다음 purpose-limited projection endpoint를 통해 서버가 조합한 DTO만 읽는다.
@@ -30,11 +42,12 @@ Content-Type: application/json
 
 두 endpoint는 구현됐지만 production에는 아직 배포되지 않았다. repository adapter는 endpoint, Firebase ID token, App Check token을 dependency injection으로 받으며, 하나라도 빠지면 `NOT_CONFIGURED`로 fail closed한다. 기본 local preview는 실제 Firebase 설정 전 deterministic demo를 명시적으로 사용한다.
 
-모바일 projection은 역할별 union이다. beneficiary는 `repairRequest/device/subsidy`, repairer는 `repairJobs`만 받는다. 콘솔은 `dashboard|users|devices|repairs|ledger|inspections|partners|reports|services` 중 하나를 요구하며 `X-Tenant-Id`를 보낸다.
+모바일 projection은 역할별 union이다. beneficiary는 `repairRequest/device/subsidy`, repairer는 자신에게 배정된 `repairJobs`만 받는다. 수리사 job에는 status, revision, 공개 기기정보, 구조화 수리 항목과 서버 파생 allowed action이 포함되며 PII·지원금 잔액·UID·GPS는 없다. 콘솔은 `dashboard|users|devices|repairs|ledger|inspections|partners|reports|services` 중 하나를 요구하며 `X-Tenant-Id`를 보낸다.
 
 ## 저장 계약
 
 - `repairWorkOrders/{workOrderId}`와 `statusHistory`
+- 완료 `repairs/{repairId}`와 구조화 `items/{itemId}`
 - `subsidyAccounts/{accountId}/transactions/{transactionId}`
 - `domainEvents/{eventId}`
 - `commandIdempotency/{derivedKey}`
