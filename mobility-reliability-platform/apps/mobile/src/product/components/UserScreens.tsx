@@ -43,22 +43,56 @@ export function UserHomeScreen({ state, onStart, onResume, onStop, onOpenRepairs
         <DemoBadge />
       </View>
 
+      <Pressable
+        accessibilityLabel="진행 중인 수리 요청 보기"
+        accessibilityRole="button"
+        onPress={onOpenRepairs}
+        style={({ pressed }) => [screenStyles.repairHero, pressed && screenStyles.pressed]}
+      >
+        <View style={screenStyles.repairHeroTop}>
+          <View style={screenStyles.repairHeroIcon}><Text style={screenStyles.repairHeroIconText}>!</Text></View>
+          <View style={screenStyles.repairHeroCopy}>
+            <View style={screenStyles.repairHeroStatus}><Text style={screenStyles.cardEyebrow}>진행 중인 수리</Text><StatusPill label="수리센터 배정" tone="orange" /></View>
+            <Text accessibilityRole="header" style={screenStyles.repairHeroTitle}>{demoRepairRequest.title}</Text>
+            <Text style={screenStyles.repairHeroDetail}>{demoRepairRequest.repairer}</Text>
+          </View>
+        </View>
+        <View style={screenStyles.nextAppointment}>
+          <View><Text style={screenStyles.appointmentLabel}>다음 약속</Text><Text style={screenStyles.appointmentValue}>{demoRepairRequest.visitAt}</Text></View>
+          <Text style={screenStyles.chevron}>›</Text>
+        </View>
+      </Pressable>
+
+      <View style={screenStyles.homeSummaryRow}>
+        <Card style={screenStyles.homeSummaryCard}>
+          <Text style={screenStyles.summaryLabel}>남은 수리 지원금</Text>
+          <Text style={screenStyles.summaryValue}>{money(demoSubsidy.total - demoSubsidy.used)}</Text>
+          <Text style={screenStyles.summaryDetail}>2026년 상반기</Text>
+        </Card>
+        <Card style={screenStyles.homeSummaryCard}>
+          <Text style={screenStyles.summaryLabel}>내 기기 상태</Text>
+          <Text style={screenStyles.summaryValue}>정상</Text>
+          <Text style={screenStyles.summaryDetail}>7월 28일 점검</Text>
+        </Card>
+      </View>
+
+      <SectionHeading title="이동 사용량 기록" />
       <Card style={screenStyles.tripCard}>
         <View style={screenStyles.tripCardTop}>
           <View style={[screenStyles.tripIcon, isRecording && screenStyles.tripIconActive]}>
             <Text style={screenStyles.tripIconText}>{isRecording ? '✓' : '↗'}</Text>
           </View>
           <View style={screenStyles.tripCopy}>
-            <Text style={screenStyles.cardEyebrow}>{isRecording ? '지금 기록 중' : '오늘의 이동'}</Text>
+            <Text style={screenStyles.cardEyebrow}>{isRecording ? '지금 기록 중' : '선택 기능'}</Text>
             <Text accessibilityRole="header" style={screenStyles.tripTitle}>
-              {isRecording ? '안전하게 이동하고 있어요' : hasPausedTrip ? '잠시 멈춘 기록이 있어요' : '이동을 기록해 볼까요?'}
+              {isRecording ? '이동 사용량을 기록하고 있어요' : hasPausedTrip ? '잠시 멈춘 기록이 있어요' : '사용량 기록하기'}
             </Text>
             <Text style={screenStyles.tripDescription}>
               {isRecording
                 ? '화면을 닫아도 기록은 계속됩니다.'
                 : hasPausedTrip
                   ? '기록을 이어가거나 이번 이동을 마칠 수 있어요.'
-                  : '시작 버튼을 누르면 내 기기의 이동이 안전하게 저장돼요.'}
+                  : '점검 시기를 더 잘 안내받고 싶을 때 사용할 수 있어요.'}
             </Text>
           </View>
         </View>
@@ -81,13 +115,6 @@ export function UserHomeScreen({ state, onStart, onResume, onStop, onOpenRepairs
 
         {error ? <View accessibilityRole="alert" style={screenStyles.errorBox}><Text style={screenStyles.errorText}>{error}</Text></View> : null}
       </Card>
-
-      <SectionHeading title="오늘의 소식" />
-      <Pressable accessibilityRole="button" onPress={onOpenRepairs} style={({ pressed }) => [screenStyles.newsCard, pressed && screenStyles.pressed]}>
-        <View style={screenStyles.newsIcon}><Text style={screenStyles.newsIconText}>!</Text></View>
-        <View style={screenStyles.newsCopy}><Text style={screenStyles.newsTitle}>수리 요청이 진행 중이에요</Text><Text style={screenStyles.newsDetail}>8월 16일 오후 2시, 따뜻한바퀴 수리센터 방문 예정</Text></View>
-        <Text style={screenStyles.chevron}>›</Text>
-      </Pressable>
 
       <Card style={screenStyles.privacyCard}>
         <Text style={screenStyles.privacyTitle}>내 기록은 안전하게 보관돼요</Text>
@@ -207,7 +234,23 @@ const screenStyles = StyleSheet.create({
   headerRow: { alignItems: 'flex-start', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24 },
   kicker: { color: colors.teal, fontSize: 14, fontWeight: '800', marginBottom: 5 },
   greeting: { color: colors.ink, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
-  tripCard: { backgroundColor: '#E8F4EF', borderColor: '#D4EAE2', marginBottom: 28 },
+  repairHero: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 22, borderWidth: 1, marginBottom: 14, padding: 19 },
+  repairHeroTop: { alignItems: 'flex-start', flexDirection: 'row' },
+  repairHeroIcon: { alignItems: 'center', backgroundColor: colors.orangeWash, borderRadius: 16, height: 48, justifyContent: 'center', marginRight: 13, width: 48 },
+  repairHeroIconText: { color: colors.orange, fontSize: 22, fontWeight: '800' },
+  repairHeroCopy: { flex: 1 },
+  repairHeroStatus: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  repairHeroTitle: { color: colors.ink, fontSize: 20, fontWeight: '800', lineHeight: 27, marginTop: 3 },
+  repairHeroDetail: { color: colors.muted, fontSize: 14, marginTop: 5 },
+  nextAppointment: { alignItems: 'center', backgroundColor: colors.canvas, borderRadius: 14, flexDirection: 'row', justifyContent: 'space-between', marginTop: 17, paddingHorizontal: 14, paddingVertical: 12 },
+  appointmentLabel: { color: colors.muted, fontSize: 12, fontWeight: '700' },
+  appointmentValue: { color: colors.ink, fontSize: 15, fontWeight: '800', marginTop: 3 },
+  homeSummaryRow: { flexDirection: 'row', gap: 10, marginBottom: 25 },
+  homeSummaryCard: { flex: 1, padding: 15 },
+  summaryLabel: { color: colors.muted, fontSize: 12, fontWeight: '700' },
+  summaryValue: { color: colors.ink, fontSize: 20, fontWeight: '800', marginTop: 6 },
+  summaryDetail: { color: colors.faint, fontSize: 12, marginTop: 4 },
+  tripCard: { backgroundColor: '#E8F4EF', borderColor: '#D4EAE2', marginBottom: 16 },
   tripCardTop: { flexDirection: 'row' },
   tripIcon: { alignItems: 'center', backgroundColor: '#D7E9E1', borderRadius: 18, height: 54, justifyContent: 'center', marginRight: 14, width: 54 },
   tripIconActive: { backgroundColor: '#B7E0D2' },
@@ -337,4 +380,8 @@ const screenStyles = StyleSheet.create({
   devSwitchText: { color: colors.muted, fontSize: 12, marginTop: 4 },
 });
 
-const stylesByTone = { teal: screenStyles.timelineDotTeal, orange: screenStyles.timelineDotOrange, blue: screenStyles.timelineDotBlue };
+const stylesByTone = {
+  teal: screenStyles.timelineDotTeal,
+  orange: screenStyles.timelineDotOrange,
+  blue: screenStyles.timelineDotBlue,
+};
