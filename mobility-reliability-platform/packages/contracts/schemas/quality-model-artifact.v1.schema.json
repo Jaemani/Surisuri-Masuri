@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/quality-model-artifact.v1.schema.json",
+  "title": "QualityModelArtifactV1",
+  "description": "Frozen synthetic-trained PyTorch artifact metadata for load-only evaluation. This contract never authorizes deployment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "modelVersion", "modelFamily", "trainingSourceKind",
+    "trainingDatasetSha256", "trainingManifestSha256", "featureSchemaVersion",
+    "featureExtractorVersion", "featureKeys", "classLabels", "normalization",
+    "architecture", "parameterCount", "trainingSeed", "epochs",
+    "modelStateSha256", "weightsFilename", "weightsSha256",
+    "deploymentDecision", "decisionReason", "artifactSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "quality-model-artifact.v1" },
+    "modelVersion": { "const": "r07-tiny-feature-mlp.v1" },
+    "modelFamily": { "const": "TinyFeatureMLP" },
+    "trainingSourceKind": { "const": "synthetic" },
+    "trainingDatasetSha256": { "$ref": "#/$defs/sha256" },
+    "trainingManifestSha256": { "$ref": "#/$defs/sha256" },
+    "featureSchemaVersion": { "const": "quality-features.v1" },
+    "featureExtractorVersion": { "const": "r07-feature-extractor.v1" },
+    "featureKeys": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]{0,63}$" }
+    },
+    "classLabels": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["mobility_aid_likely", "vehicle_likely", "stationary", "gps_noise_or_insufficient"]
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mean", "std", "normalizationSha256"],
+      "properties": {
+        "mean": { "$ref": "#/$defs/vector13" },
+        "std": { "$ref": "#/$defs/vector13" },
+        "normalizationSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputSize", "hiddenSize", "outputSize"],
+      "properties": {
+        "inputSize": { "const": 13 },
+        "hiddenSize": { "const": 16 },
+        "outputSize": { "const": 4 }
+      }
+    },
+    "parameterCount": { "const": 292 },
+    "trainingSeed": { "const": 20260813 },
+    "epochs": { "type": "integer", "minimum": 1, "maximum": 100000 },
+    "modelStateSha256": { "$ref": "#/$defs/sha256" },
+    "weightsFilename": { "const": "weights.pt" },
+    "weightsSha256": { "$ref": "#/$defs/sha256" },
+    "deploymentDecision": { "const": "defer" },
+    "decisionReason": { "const": "synthetic_only_field_evaluation_required" },
+    "artifactSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "vector13": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "items": { "type": "number" }
+    }
+  }
+}

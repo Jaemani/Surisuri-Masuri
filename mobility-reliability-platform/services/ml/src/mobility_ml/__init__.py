@@ -47,6 +47,13 @@ from .rules_baseline import (
     predict_rule,
     validate_baseline_result_schema,
 )
+from .torch_candidate import (
+    MODEL_ARTIFACT_VERSION,
+    FrozenInferenceArtifact,
+    export_frozen_artifact,
+    load_frozen_artifact,
+    predict_frozen,
+)
 
 __all__ = [
     "KNOWN_LABELS",
@@ -84,4 +91,9 @@ __all__ = [
     "evaluate_frozen_dataset",
     "predict_rule",
     "validate_baseline_result_schema",
+    "MODEL_ARTIFACT_VERSION",
+    "FrozenInferenceArtifact",
+    "export_frozen_artifact",
+    "load_frozen_artifact",
+    "predict_frozen",
 ]

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "quality-model-artifact.v1",
+  "modelVersion": "r07-tiny-feature-mlp.v1",
+  "modelFamily": "TinyFeatureMLP",
+  "trainingSourceKind": "synthetic",
+  "trainingDatasetSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "trainingManifestSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "featureSchemaVersion": "quality-features.v1",
+  "featureExtractorVersion": "r07-feature-extractor.v1",
+  "featureKeys": ["pathLengthM", "displacementM", "meanStepDistanceM", "maxStepDistanceM", "reportedSpeedMeanMps", "reportedSpeedMaxMps", "reportedSpeedStdMps", "derivedSpeedMeanMps", "derivedSpeedMaxMps", "stationaryRatio", "accuracyMeanM", "accuracyMaxM", "optionalFieldMissingRatio"],
+  "classLabels": ["mobility_aid_likely", "vehicle_likely", "stationary", "gps_noise_or_insufficient"],
+  "normalization": {
+    "mean": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "std": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    "normalizationSha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "architecture": { "inputSize": 13, "hiddenSize": 16, "outputSize": 4 },
+  "parameterCount": 292,
+  "trainingSeed": 20260813,
+  "epochs": 120,
+  "modelStateSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+  "weightsFilename": "weights.pt",
+  "weightsSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+  "deploymentDecision": "defer",
+  "decisionReason": "synthetic_only_field_evaluation_required",
+  "artifactSha256": "6666666666666666666666666666666666666666666666666666666666666666"
+}

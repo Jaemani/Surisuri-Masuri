@@ -47,8 +47,10 @@
 ### 8월
 
 - 데이터 품질 모델이 규칙 기반 판별과 동일 평가셋에서 비교된다.
-- 모델 크기·지연시간·정확도 변화가 양자화 전후로 기록된다.
+- 합성 후보는 가중치·train-only normalization·feature/class 순서와 계보를 가진 load-only artifact로 고정된다.
+- 모델 크기·지연시간·정확도 변화의 양자화 전후 기록은 실제 field 평가가 후보 효용을 보여주고 별도 ADR이 승인할 때만 진행한다.
 - 모델은 주행 여부를 확정하지 않고 검토·보정 신호로 사용된다.
+- field holdout 입장, field feature bridge와 frozen artifact만으로 ONNX·양자화·모바일 배포 gate가 열리지 않는다.
 
 ### 9월
 
@@ -83,7 +85,7 @@
 5. GPS 노이즈 필터 전후 경로
 6. 출발·도착 민감 위치 마스킹
 7. QR 저조도·훼손 인식률
-8. 모델 양자화 전후 크기·지연시간
+8. frozen artifact hash·정규화 재현과 load-only prediction
 9. tenant 간 권한 침범 테스트
 10. 보고서 근거 누락·오염 입력 공격 테스트
 11. 서버 장애 후 이벤트 재처리

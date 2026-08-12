@@ -43,7 +43,9 @@ ML 서비스에 전달되는 manifest에는 raw 좌표, 주소, 경로, 이름·
 - 보호된 원본 artifact resolver와 삭제 workflow
 - 현장 label guide·복수 검토자 disagreement 처리
 - field evaluation result contract와 confidence interval
-- frozen rules·PyTorch inference artifact와 load-only predictor
+- frozen rules artifact의 별도 hash/version 계약
 - 작은 참가자 수에서 cohort 단위로 과장을 막는 metric
 
-관련 결정: [ADR-0047](../decisions/ADR-0047-field-holdout-admission.md)
+PyTorch frozen artifact와 load-only predictor는 구현됐지만 실제 field holdout과의 state hash 대조·평가는 아직 없다.
+
+관련 결정: [ADR-0047](../decisions/ADR-0047-field-holdout-admission.md), [ADR-0048](../decisions/ADR-0048-frozen-field-inference-boundary.md)

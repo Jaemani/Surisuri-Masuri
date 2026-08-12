@@ -135,3 +135,11 @@
 - 검증: Node valid/invalid JSON fixture와 Python schema·semantic·hash·tamper validator test
 - 안전 경계: 오류에는 path/reason만 포함하고 fixture value·좌표를 출력하지 않음
 - 제한: 무작위 fixture와 bridge 검증용 합성 batch만 사용했으며 실제 동의, Android/iPhone trace, server-only consent/artifact 대조, field metric과 ONNX 진입은 미검증
+
+# EVD-20260813-14 — frozen PyTorch load-only artifact
+
+- 분류: `LOCAL_TEST`, `SYNTHETIC`, `NO_FIELD_DATA`
+- 확인 항목: model state, train-only normalization, ordered feature/class keys, training dataset·manifest, weights와 metadata의 독립 hash; CPU `weights_only` strict load; gradient-off inference; review feature abstain; coordinate/label-free prediction output
+- 검증: Node model artifact valid/invalid fixture와 Python deterministic export, load, prediction, weights·metadata tamper test
+- 결정: artifact metadata의 training source는 synthetic, deployment decision은 `defer`
+- 제한: 실제 field data·동의·복지관·사용자·실기기, ONNX·양자화·모바일 추론·production 배포와 현장 성능을 증명하지 않음

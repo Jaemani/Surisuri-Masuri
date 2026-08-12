@@ -246,8 +246,11 @@ rtk uv --directory services/ml run --locked --extra dev pytest -q
 - [ ] 실제 사용자·현장·모델 성능·배포 상태를 R07-A 완료로 표현하지 않았다.
 - [ ] R07-B synthetic baseline 수치를 현장·실기기 성능으로 표현하지 않았다.
 - [ ] R07-C 후보를 field 성능 또는 ONNX/mobile 완료로 표현하지 않았다.
+- [ ] frozen artifact가 state·weights·normalization·feature/class 순서와 synthetic training 계보를 검증하고 load-only predictor가 학습 API를 호출하지 않는다.
+- [ ] frozen artifact를 실제 field 결과, ONNX·양자화 또는 Android/iPhone 추론 완료로 표현하지 않았다.
 - [ ] field holdout 또는 rules 오류 개선 근거가 없으면 R08 ONNX를 계획 상태로 유지했다.
 
 관련 결정: [ADR-0040](../decisions/ADR-0040-r07-quality-dataset-contract.md)
 관련 결정: [ADR-0041](../decisions/ADR-0041-r07-feature-and-rules-contract.md)
 관련 결정: [ADR-0046](../decisions/ADR-0046-defer-r07-onnx-after-synthetic-candidate.md)
+관련 결정: [ADR-0048](../decisions/ADR-0048-frozen-field-inference-boundary.md)

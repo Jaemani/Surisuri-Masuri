@@ -98,6 +98,12 @@ PyTorch는 `pytorch-cpu` explicit index에서 lock한다. CUDA wheel을 WSL 환�
 `deploymentDecision`은 항상 `defer`이며 실제 동의 trace와 고정 field evaluation이
 생길 때까지 ONNX·모바일 추론 진입을 승인하지 않는다.
 
+### Frozen load-only artifact
+
+`export_frozen_artifact()`는 synthetic train split으로 학습한 가중치와 train-only mean/std를 `quality-model-artifact.v1` metadata와 `weights.pt`로 고정한다. `load_frozen_artifact()`는 CPU `weights_only` load, exact state key·shape·dtype, finite tensor, model/normalization/weights/artifact hash를 모두 확인하고 gradient를 끈다. `predict_frozen()`은 schema와 feature hash가 검증된 synthetic 또는 field feature만 받으며 review 상태는 model forward 없이 abstain한다.
+
+artifact 생성은 학습 단계지만 그 이후 load/predict 경로에는 optimizer나 training API가 없다. 이 코드는 local synthetic 재현 증거이며 field 성능, ONNX 변환, 모바일 추론 또는 배포 승인이 아니다. 결정 경계는 [ADR-0048](../../docs/decisions/ADR-0048-frozen-field-inference-boundary.md)을 따른다.
+
 ## R08-A field holdout admission
 
 `field_holdout.py`는 실제 동의 field data가 들어올 때 사용할 **평가 전용 manifest**를 검증한다. 입력에는 원본 좌표·경로·Firebase ID·Storage path가 없으며, 학습과 배포 eligibility는 false로 고정한다. frozen training 뒤 수집, label freeze, evaluation window, trace count·identity와 known/review 상태를 fail-closed로 확인한다.
