@@ -58,6 +58,17 @@ service cloud.firestore {
         ]);
     }
 
+    function isRepairer(tenantId) {
+      return isActiveMember(tenantId)
+        && get(membershipPath(tenantId)).data.roles.hasAny(['repairer']);
+    }
+
+    function isAssignedRepairer(tenantId) {
+      return isRepairer(tenantId)
+        && 'repairer_firebase_uid' in resource.data
+        && resource.data.repairer_firebase_uid == request.auth.uid;
+    }
+
     function hasOwnPerson(tenantId) {
       return isActiveMember(tenantId)
         && 'person_id' in get(membershipPath(tenantId)).data
@@ -166,6 +177,48 @@ service cloud.firestore {
           allow get, list: if isOperationalStaff(tenantId);
           allow write: if false;
         }
+      }
+
+      // Repair requests/work orders are distinct from immutable completed
+      // repair events. Beneficiaries see their own case, assigned repairers see
+      // their job, and institution staff coordinate the whole tenant queue.
+      match /repairWorkOrders/{workOrderId} {
+        allow get, list: if hasMatchingTenant(tenantId)
+          && (
+            isOperationalStaff(tenantId)
+            || isAssignedRepairer(tenantId)
+            || (
+              hasOwnPerson(tenantId)
+              && 'requester_person_id' in resource.data
+              && resource.data.requester_person_id == get(membershipPath(tenantId)).data.person_id
+            )
+          );
+        allow write: if false;
+
+        match /statusHistory/{statusEventId} {
+          allow get, list: if isOperationalStaff(tenantId);
+          allow write: if false;
+        }
+      }
+
+      match /subsidyAccounts/{accountId} {
+        allow get, list: if canReadPersonScopedResource(tenantId);
+        allow write: if false;
+
+        match /transactions/{transactionId} {
+          allow get, list: if isOperationalStaff(tenantId);
+          allow write: if false;
+        }
+      }
+
+      match /repairStations/{repairStationId} {
+        allow get, list: if isActiveMember(tenantId) && hasMatchingTenant(tenantId);
+        allow write: if false;
+      }
+
+      match /subsidyPolicies/{policyVersionId} {
+        allow get, list: if isActiveMember(tenantId) && hasMatchingTenant(tenantId);
+        allow write: if false;
       }
 
       match /inspections/{inspectionId} {

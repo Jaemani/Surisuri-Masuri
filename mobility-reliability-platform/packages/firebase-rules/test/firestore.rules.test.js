@@ -470,6 +470,98 @@ describe('least-privilege client read boundary', () => {
   );
 });
 
+describe('product repair and subsidy read boundary', () => {
+  test('beneficiary reads only own work order and subsidy summary', async () => {
+    await seedMembership('tenant-a', 'member-a', {
+      roles: ['beneficiary'],
+      personId: 'person-a'
+    });
+    await seedDocument('tenants/tenant-a/repairWorkOrders/work-own', {
+      tenant_id: 'tenant-a',
+      requester_person_id: 'person-a'
+    });
+    await seedDocument('tenants/tenant-a/repairWorkOrders/work-other', {
+      tenant_id: 'tenant-a',
+      requester_person_id: 'person-b'
+    });
+    await seedDocument('tenants/tenant-a/subsidyAccounts/account-own', {
+      tenant_id: 'tenant-a',
+      person_id: 'person-a'
+    });
+    await seedDocument('tenants/tenant-a/subsidyAccounts/account-other', {
+      tenant_id: 'tenant-a',
+      person_id: 'person-b'
+    });
+
+    const db = testEnvironment.authenticatedContext('member-a').firestore();
+    await assertSucceeds(getDoc(doc(db, 'tenants/tenant-a/repairWorkOrders/work-own')));
+    await assertFails(getDoc(doc(db, 'tenants/tenant-a/repairWorkOrders/work-other')));
+    await assertSucceeds(getDoc(doc(db, 'tenants/tenant-a/subsidyAccounts/account-own')));
+    await assertFails(getDoc(doc(db, 'tenants/tenant-a/subsidyAccounts/account-other')));
+    await assertFails(getDocs(collection(db, 'tenants/tenant-a/subsidyAccounts/account-own/transactions')));
+  });
+
+  test('repairer reads only jobs explicitly assigned to its firebase identity', async () => {
+    await seedMembership('tenant-a', 'repairer-a', {
+      roles: ['repairer'],
+      personId: 'repairer-person-a'
+    });
+    await seedDocument('tenants/tenant-a/repairWorkOrders/work-own', {
+      tenant_id: 'tenant-a',
+      requester_person_id: 'person-a',
+      repairer_firebase_uid: 'repairer-a'
+    });
+    await seedDocument('tenants/tenant-a/repairWorkOrders/work-other', {
+      tenant_id: 'tenant-a',
+      requester_person_id: 'person-b',
+      repairer_firebase_uid: 'repairer-b'
+    });
+
+    const db = testEnvironment.authenticatedContext('repairer-a').firestore();
+    await assertSucceeds(getDoc(doc(db, 'tenants/tenant-a/repairWorkOrders/work-own')));
+    await assertFails(getDoc(doc(db, 'tenants/tenant-a/repairWorkOrders/work-other')));
+  });
+
+  test('operational staff reads the tenant work queue and ledger transactions', async () => {
+    await seedMembership('tenant-a', 'worker-a', {
+      roles: ['case_worker'],
+      personId: 'worker-person-a'
+    });
+    await seedDocument('tenants/tenant-a/repairWorkOrders/work-a', {
+      tenant_id: 'tenant-a',
+      requester_person_id: 'person-a'
+    });
+    await seedDocument('tenants/tenant-a/subsidyAccounts/account-a', {
+      tenant_id: 'tenant-a',
+      person_id: 'person-a'
+    });
+    await seedDocument('tenants/tenant-a/subsidyAccounts/account-a/transactions/transaction-a', {
+      tenant_id: 'tenant-a',
+      amount_krw: 90000
+    });
+
+    const db = testEnvironment.authenticatedContext('worker-a').firestore();
+    await assertSucceeds(getDocs(query(
+      collection(db, 'tenants/tenant-a/repairWorkOrders'),
+      where('tenant_id', '==', 'tenant-a')
+    )));
+    await assertSucceeds(getDocs(collection(db, 'tenants/tenant-a/subsidyAccounts/account-a/transactions')));
+  });
+
+  test('all direct client writes remain denied', async () => {
+    await seedMembership('tenant-a', 'worker-a', { roles: ['case_worker'] });
+    const db = testEnvironment.authenticatedContext('worker-a').firestore();
+    await assertFails(setDoc(doc(db, 'tenants/tenant-a/repairWorkOrders/work-new'), {
+      tenant_id: 'tenant-a',
+      requester_person_id: 'person-a'
+    }));
+    await assertFails(setDoc(doc(db, 'tenants/tenant-a/subsidyAccounts/account-a'), {
+      tenant_id: 'tenant-a',
+      person_id: 'person-a'
+    }));
+  });
+});
+
 describe('server-owned mutation boundary', () => {
   test('active members cannot directly write protected domain paths', async () => {
     await seedMembership('tenant-a', 'member-a', { roles: ['tenant_admin'] });
