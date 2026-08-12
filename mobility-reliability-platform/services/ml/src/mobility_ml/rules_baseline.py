@@ -17,6 +17,11 @@ from .features import (
     validate_feature_record_schema,
     verify_feature_hash,
 )
+from .field_features import (
+    FIELD_FEATURE_VERSION,
+    validate_field_feature_schema,
+    verify_field_feature_hash,
+)
 from .manifest import (
     ABSTAIN_LABEL,
     DATASET_VERSION,
@@ -91,6 +96,9 @@ def _feature_input(record: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def _feature_hash(record: Mapping[str, Any]) -> str | None:
+    if record.get("schemaVersion") == FIELD_FEATURE_VERSION:
+        value = record.get("featureSha256")
+        return value if isinstance(value, str) else None
     lineage = record.get("lineage")
     if not isinstance(lineage, Mapping):
         return None
@@ -105,7 +113,13 @@ def predict_rule(feature_record: Mapping[str, Any]) -> dict[str, Any]:
     """Return one prediction without accessing labels or split metadata."""
 
     features = _feature_input(feature_record)
-    if not verify_feature_hash(feature_record):
+    if feature_record.get("schemaVersion") == FIELD_FEATURE_VERSION:
+        validate_field_feature_schema(feature_record)
+        valid_hash = verify_field_feature_hash(feature_record)
+    else:
+        validate_feature_record_schema(feature_record)
+        valid_hash = verify_feature_hash(feature_record)
+    if not valid_hash:
         raise ValueError("feature hash mismatch")
     if feature_record.get("extractionStatus") != FEATURE_STATUS_READY or not features:
         return {

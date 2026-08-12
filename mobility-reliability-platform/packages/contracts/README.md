@@ -21,6 +21,7 @@
 - `quality-field-holdout.v1.schema.json`: 동의 기반 field trace의 coordinate-free 평가 입장 manifest. 학습·배포 불가와 좌표 미포함을 고정하며 실제 consent·artifact 대조는 server-only admission 책임으로 남긴다.
 - `quality-field-features.v1.schema.json`: 입장된 field trace에서 생성한 평가 전용 numeric feature. holdout manifest·trace·telemetry hash를 정확히 연결하며 좌표, label, split, 가명 group, consent digest를 허용하지 않는다. 단독 컴파일 가능한 계약이며 공통 extractor 숫자 필드가 `quality-features.v1`과 달라지면 Python 회귀 테스트가 실패한다.
 - `quality-model-artifact.v1.schema.json`: synthetic train split에서 한 번 학습한 PyTorch 후보의 load-only 평가 metadata. feature/class 순서, train-only normalization, architecture와 state·weights hash를 고정하며 배포 결정은 항상 `defer`다. 실제 weights는 trusted `weights.pt`로 분리하고 loader가 두 파일을 함께 검증한다.
+- `quality-field-evaluation-result.v1.schema.json`: 동일한 적격 field feature cohort에서 frozen rules와 frozen PyTorch 후보를 비교한 평가 전용 결과. cohort reconciliation, 두 predictor의 count, abstain, trace별 label/prediction을 기록하되 가명 group·동의 digest·feature 값·원본 위치를 허용하지 않고 학습·배포는 false/defer로 고정한다.
 - `quality-features.v1.schema.json`: 하나의 trace에서 추출한 coordinate-free numeric feature와 trace/batch/dataset/feature hash lineage. strict named fields만 허용하며 raw latitude/longitude, PII, label, prediction은 계약상 허용하지 않는다. 추출 실패는 value-free `reasonCode`와 `review_required` 상태로 표현한다.
 - `quality-baseline-result.v1.schema.json`: `quality-features.v1`와 분리된 synthetic-only rules baseline 결과. split별/전체 metric, 네 known class와 `unknown_review_required` confusion matrix, prediction·abstain·feature hash를 strict하게 기록한다.
 

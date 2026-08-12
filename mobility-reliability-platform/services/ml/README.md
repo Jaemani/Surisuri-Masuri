@@ -112,6 +112,10 @@ artifact 생성은 학습 단계지만 그 이후 load/predict 경로에는 opti
 
 현재 테스트는 contract fixture와 field 계약 bridge 검증용 합성 batch만 사용하며 실제 field trace, 동의 state, 현장 성능을 증명하지 않는다. 합성 training loader도 바뀌지 않았고 field manifest는 `torch_candidate.py`의 학습 입력으로 사용할 수 없다. 세부 운영 경계는 [Field holdout protocol](../../docs/data/FIELD_HOLDOUT_PROTOCOL.md)을 따른다.
 
+`field_evaluation.py`는 manifest의 평가 window와 frozen model/rules version을 확인한 뒤 label-ready이면서 feature-ready인 동일 trace set에 두 predictor를 실행한다. label review, feature review, missing feature를 별도 집계하고 total→label→feature→scored count를 재조정한다. 이 모듈은 optimizer나 fit API를 갖지 않으며 결과 계약은 항상 `trainingPerformed=false`, `deploymentAuthorized=false`, `deploymentDecision=defer`다.
+
+현재 field evaluation 테스트 역시 contract bridge용 생성 batch로만 수행한다. 그 결과는 평가 코드의 경계 검증이지 실제 field metric이 아니다.
+
 ## Split and provenance rules
 
 - `group-time-holdout.v1`: 같은 `scenarioGroupId`가 train/validation/test를

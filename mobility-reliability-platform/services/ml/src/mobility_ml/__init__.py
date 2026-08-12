@@ -17,6 +17,11 @@ from .features import (
     validate_feature_record_schema,
     verify_feature_hash,
 )
+from .field_evaluation import (
+    FIELD_EVALUATION_VERSION,
+    evaluate_field_holdout,
+    validate_field_evaluation_result,
+)
 from .field_features import (
     FIELD_FEATURE_VERSION,
     extract_field_feature_record,
@@ -86,6 +91,9 @@ __all__ = [
     "extract_field_feature_record",
     "validate_field_feature_schema",
     "verify_field_feature_hash",
+    "FIELD_EVALUATION_VERSION",
+    "evaluate_field_holdout",
+    "validate_field_evaluation_result",
     "METRICS_VERSION",
     "RULE_BASELINE_VERSION",
     "evaluate_frozen_dataset",

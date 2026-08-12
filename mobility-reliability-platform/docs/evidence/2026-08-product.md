@@ -143,3 +143,11 @@
 - 검증: Node model artifact valid/invalid fixture와 Python deterministic export, load, prediction, weights·metadata tamper test
 - 결정: artifact metadata의 training source는 synthetic, deployment decision은 `defer`
 - 제한: 실제 field data·동의·복지관·사용자·실기기, ONNX·양자화·모바일 추론·production 배포와 현장 성능을 증명하지 않음
+
+# EVD-20260813-15 — field evaluation-only harness 계약
+
+- 분류: `LOCAL_TEST`, `CONTRACT_FIXTURE`, `SYNTHETIC_BRIDGE`, `NO_FIELD_DATA`
+- 확인 항목: evaluation window, frozen model state·rules version 일치, exact holdout/trace/batch/feature hash linkage, 동일 scored cohort의 rules/PyTorch 비교, label/feature review·missing count reconciliation, 학습 API 미호출
+- 결과 계약: `trainingPerformed=false`, `deploymentAuthorized=false`, `deploymentDecision=defer`, `evaluation_only_no_deployment`
+- privacy 경계: result에 pseudonymous group, consent digest, feature values, raw samples·coordinates, Firebase/Storage identity 없음
+- 제한: 생성 batch 하나로 evaluation 경계를 검증했으며 실제 field metric, 동의, 참가자 수, 모델 효용, confidence interval, ONNX·모바일·production 배포 증거가 아님

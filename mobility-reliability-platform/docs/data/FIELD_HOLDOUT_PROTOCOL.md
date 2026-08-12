@@ -42,10 +42,12 @@ ML 서비스에 전달되는 manifest에는 raw 좌표, 주소, 경로, 이름·
 - 실제 consent ledger 대조 adapter
 - 보호된 원본 artifact resolver와 삭제 workflow
 - 현장 label guide·복수 검토자 disagreement 처리
-- field evaluation result contract와 confidence interval
+- 실제 작은 cohort용 confidence interval과 보고 임계치
 - frozen rules artifact의 별도 hash/version 계약
 - 작은 참가자 수에서 cohort 단위로 과장을 막는 metric
 
 PyTorch frozen artifact와 load-only predictor는 구현됐지만 실제 field holdout과의 state hash 대조·평가는 아직 없다.
+
+field evaluation result 계약과 동일-cohort rules/PyTorch 평가 harness도 구현됐다. 다만 테스트 입력은 생성 batch뿐이며 실제 동의 field holdout, 현장 metric 또는 배포 결정은 없다.
 
 관련 결정: [ADR-0047](../decisions/ADR-0047-field-holdout-admission.md), [ADR-0048](../decisions/ADR-0048-frozen-field-inference-boundary.md)

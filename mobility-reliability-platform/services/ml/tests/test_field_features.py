@@ -12,6 +12,7 @@ from mobility_ml.field_features import (
 )
 from mobility_ml.generate_r07_dataset import generate_dataset
 from mobility_ml.manifest import DatasetValidationError, dataset_sha256, find_contract_schema
+from mobility_ml.rules_baseline import predict_rule
 
 
 def holdout() -> dict:
@@ -87,4 +88,17 @@ def test_field_numeric_feature_contract_tracks_synthetic_extractor_contract() ->
     synthetic_document = json.loads(synthetic_schema.read_text())
     assert (
         field_document["$defs"]["numericFeatures"] == synthetic_document["$defs"]["numericFeatures"]
+    )
+
+
+def test_rules_baseline_accepts_the_same_verified_field_feature_boundary() -> None:
+    batch, manifest = linked_inputs()
+    record = extract_field_feature_record(
+        batch, manifest, trace_id=manifest["traces"][0]["traceId"]
+    )
+    prediction = predict_rule(record)
+    assert prediction["status"] in {"predicted", "abstain"}
+    assert prediction["featureHash"] == record["featureSha256"]
+    assert not {"expectedLabel", "pseudonymousGroupId", "latitude", "longitude"}.intersection(
+        prediction
     )

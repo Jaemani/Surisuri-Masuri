@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "quality-field-evaluation-result.v1",
+  "evaluationScope": "field_holdout_evaluation_only",
+  "evaluatedAt": "2026-09-10T10:00:00Z",
+  "holdoutId": "field-holdout-2026-09-a",
+  "holdoutManifestSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "modelVersion": "r07-tiny-feature-mlp.v1",
+  "modelStateSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "modelArtifactSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "rulesVersion": "r07-rules-baseline.v1",
+  "trainingPerformed": false,
+  "deploymentAuthorized": false,
+  "deploymentDecision": "defer",
+  "decisionReason": "evaluation_only_no_deployment",
+  "cohort": { "totalTraceCount": 1, "pseudonymousGroupCount": 1, "labelEligibleCount": 1, "featureReadyCount": 1, "scoredTraceCount": 1, "labelReviewCount": 0, "featureReviewCount": 0, "missingFeatureCount": 0 },
+  "rulesMetrics": { "count": 1, "accuracy": 1, "macroF1": 0.25, "abstainCount": 0 },
+  "modelMetrics": { "count": 1, "accuracy": 1, "macroF1": 0.25, "abstainCount": 0 },
+  "predictions": [{ "traceId": "123e4567-e89b-42d3-a456-426614174001", "featureSha256": "4444444444444444444444444444444444444444444444444444444444444444", "expectedLabel": "mobility_aid_likely", "rulesPredictedLabel": "mobility_aid_likely", "modelPredictedLabel": "mobility_aid_likely" }],
+  "evaluationResultSha256": "5555555555555555555555555555555555555555555555555555555555555555"
+}

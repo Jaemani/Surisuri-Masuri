@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "quality-field-evaluation-result.v1",
+  "evaluationScope": "training",
+  "trainingPerformed": true,
+  "deploymentAuthorized": true,
+  "deploymentDecision": "deploy",
+  "rawCoordinates": [{"latitude": 37.5, "longitude": 127.0}]
+}

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/quality-field-evaluation-result.v1.schema.json",
+  "title": "QualityFieldEvaluationResultV1",
+  "description": "Evaluation-only comparison of frozen rules and PyTorch inference on one admitted field cohort.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "evaluationScope", "evaluatedAt", "holdoutId",
+    "holdoutManifestSha256", "modelVersion", "modelStateSha256",
+    "modelArtifactSha256", "rulesVersion", "trainingPerformed",
+    "deploymentAuthorized", "deploymentDecision", "decisionReason",
+    "cohort", "rulesMetrics", "modelMetrics", "predictions", "evaluationResultSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "quality-field-evaluation-result.v1" },
+    "evaluationScope": { "const": "field_holdout_evaluation_only" },
+    "evaluatedAt": { "type": "string", "format": "date-time" },
+    "holdoutId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "holdoutManifestSha256": { "$ref": "#/$defs/sha256" },
+    "modelVersion": { "const": "r07-tiny-feature-mlp.v1" },
+    "modelStateSha256": { "$ref": "#/$defs/sha256" },
+    "modelArtifactSha256": { "$ref": "#/$defs/sha256" },
+    "rulesVersion": { "const": "r07-rules-baseline.v1" },
+    "trainingPerformed": { "const": false },
+    "deploymentAuthorized": { "const": false },
+    "deploymentDecision": { "const": "defer" },
+    "decisionReason": { "const": "evaluation_only_no_deployment" },
+    "cohort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["totalTraceCount", "pseudonymousGroupCount", "labelEligibleCount", "featureReadyCount", "scoredTraceCount", "labelReviewCount", "featureReviewCount", "missingFeatureCount"],
+      "properties": {
+        "totalTraceCount": { "type": "integer", "minimum": 1 },
+        "pseudonymousGroupCount": { "type": "integer", "minimum": 1 },
+        "labelEligibleCount": { "type": "integer", "minimum": 0 },
+        "featureReadyCount": { "type": "integer", "minimum": 0 },
+        "scoredTraceCount": { "type": "integer", "minimum": 0 },
+        "labelReviewCount": { "type": "integer", "minimum": 0 },
+        "featureReviewCount": { "type": "integer", "minimum": 0 },
+        "missingFeatureCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "rulesMetrics": { "$ref": "#/$defs/metrics" },
+    "modelMetrics": { "$ref": "#/$defs/metrics" },
+    "predictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["traceId", "featureSha256", "expectedLabel", "rulesPredictedLabel", "modelPredictedLabel"],
+        "properties": {
+          "traceId": { "type": "string", "format": "uuid" },
+          "featureSha256": { "$ref": "#/$defs/sha256" },
+          "expectedLabel": { "$ref": "#/$defs/knownLabel" },
+          "rulesPredictedLabel": { "$ref": "#/$defs/predictedLabel" },
+          "modelPredictedLabel": { "$ref": "#/$defs/predictedLabel" }
+        }
+      }
+    },
+    "evaluationResultSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "knownLabel": { "enum": ["mobility_aid_likely", "vehicle_likely", "stationary", "gps_noise_or_insufficient"] },
+    "predictedLabel": { "enum": ["mobility_aid_likely", "vehicle_likely", "stationary", "gps_noise_or_insufficient", "unknown_review_required"] },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "accuracy", "macroF1", "abstainCount"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "accuracy": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "macroF1": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "abstainCount": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

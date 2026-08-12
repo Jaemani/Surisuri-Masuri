@@ -160,6 +160,18 @@ const cases = [
     expected: false,
   },
   {
+    name: 'valid quality field evaluation result v1',
+    schema: 'schemas/quality-field-evaluation-result.v1.schema.json',
+    fixture: 'fixtures/quality-field-evaluation-result.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid quality field evaluation result v1',
+    schema: 'schemas/quality-field-evaluation-result.v1.schema.json',
+    fixture: 'fixtures/quality-field-evaluation-result.v1.invalid.json',
+    expected: false,
+  },
+  {
     name: 'valid telemetry batch v2',
     schema: 'schemas/telemetry-batch.v2.schema.json',
     fixture: 'fixtures/telemetry-batch.v2.valid.json',
