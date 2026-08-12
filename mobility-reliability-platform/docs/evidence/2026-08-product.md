@@ -31,3 +31,11 @@
 - 이 증거는 local code, emulator와 deterministic demo UI의 실행 가능성을 증명한다.
 - 실제 Firebase 프로젝트 배포, Domain Command API 연결, 실사용자 데이터 이관, 현장 수리 처리, 공적 보조금 집행을 증명하지 않는다.
 - Playwright는 Expo Web/Vite에서의 UI·상태 전이를 증명하며 Android/iPhone native 동작을 증명하지 않는다.
+# EVD-20260813-02 — Firebase Domain Command transaction 경계
+
+- 분류: `LOCAL_EMULATOR`, `SYNTHETIC`
+- 대상: 수리 접수·상태 전환·지원금 원장
+- 실행: `pnpm --filter @mobility-reliability/domain-command test:emulator`
+- 결과: Firestore Emulator 4개 시나리오 통과
+- 확인 항목: canonical path, snake_case storage, idempotent replay/conflict, optimistic concurrency, assigned-repairer enforcement, person-scoped subsidy account
+- 제한: production deployment와 field evidence가 아니며 실제 사용자·기관 데이터를 사용하지 않음
