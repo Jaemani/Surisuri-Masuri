@@ -1,0 +1,11 @@
+{
+  "name": "@mobility-reliability/legacy-importer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.js",
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/cli.js",
+    "test": "node --test"
+  }
+}
