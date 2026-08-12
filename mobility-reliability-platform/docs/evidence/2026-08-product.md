@@ -77,3 +77,13 @@
 - 시각 증거: `mobile-repair-intake`, `mobile-repair-review`, `console-repairs` snapshot
 - 확인 항목: 모바일 category/detail/funding/amount validation과 review, stable idempotency input, projection-pending read-only recovery, console stage-aware synthetic assignment와 operator read-only wait
 - 제한: 실제 Firebase command, native TalkBack/VoiceOver, 현장 직원·이용자 사용 증거가 아님
+
+# EVD-20260813-07 — 수리사 단계형 작업공간
+
+- 분류: `LOCAL_EMULATOR`, `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
+- 서버: 수리사 command exact allowlist, server-owned submitted time, 배정 UID query와 purpose-limited projection
+- 모바일: typecheck, 18 files / 248 tests, Android/iOS Expo export 통과
+- Playwright: 모바일 2개 + 콘솔 2개 통과
+- 시각 증거: `mobile-repairer-list`, `mobile-repairer-workspace` snapshot
+- 확인 항목: 일정 확정 → 작업 시작 → 비용 제출 → 복지관 검증 대기, 공개코드 대조, 한 단계 한 CTA, authoritative projection refresh
+- 제한: native picker, QR camera/lookup, 구조화 작업 항목, 실제 Firebase 배포와 실기기 접근성은 미검증

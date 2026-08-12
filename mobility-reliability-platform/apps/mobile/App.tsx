@@ -51,7 +51,7 @@ export default function App() {
     return (
       <SafeAreaView style={styles.screen}>
         <StatusBar style="dark" />
-        <RepairerScreen jobs={view.repairJobs} displayName={view.displayName} onSwitchToUser={switchToUser} />
+        <RepairerScreen jobs={view.repairJobs} displayName={view.displayName} isDemo={view.isDemo} onSwitchToUser={switchToUser} onTransition={product.transitionRepairJob} onRefresh={product.refresh} />
       </SafeAreaView>
     );
   }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import type { CreateRepairRequestInput, ProductRole, ProductSnapshot } from './types';
+import type { CreateRepairRequestInput, ProductRole, ProductSnapshot, RepairerJobCommand } from './types';
 import { ProductRepositoryError } from './repository';
 import type { ProductRepository } from './repository';
 import { selectProductView } from './state';
@@ -52,6 +52,14 @@ export function useProductData(repository: ProductRepository) {
     return roleSession;
   }, [repository]);
 
+  const transitionRepairJob = useCallback(async (input: RepairerJobCommand) => {
+    const job = await repository.transitionRepairJob(input);
+    setState((current) => current.snapshot?.roleSession.role === 'repairer'
+      ? { ...current, phase: 'ready', snapshot: { ...current.snapshot, repairJobs: current.snapshot.repairJobs.map((candidate) => candidate.id === job.id ? job : candidate) }, errorCode: null }
+      : current);
+    return job;
+  }, [repository]);
+
   const view = state.snapshot ? selectProductView(state.snapshot) : null;
-  return { ...state, view, refresh, createRepairRequest, setRole };
+  return { ...state, view, refresh, createRepairRequest, transitionRepairJob, setRole };
 }
