@@ -4,6 +4,26 @@
 추적한다. 실제 사용자·기관·staging·production 영향이 있는 사건은 이 문서가 아니라
 [`incidents/`](../incidents/) 정책에 따라 별도 인시던트로 기록한다.
 
+## DEVFAIL-20260813-01 — Expo Web 설치 후처리의 CLI 파일 해석 일시 실패
+
+- 상태: `resolved-local-development`
+- 환경: WSL2 local pnpm / Expo SDK 57
+- 실제 사용자·기관 영향: 없음
+- 증상: 웹 호환 의존성 설치 완료 후 Expo CLI가 `autoAddConfigPlugins.js`를 찾지 못해 exit 1을 반환했다.
+- 영향: package manifest와 lockfile은 변경됐지만 설치 명령 전체가 실패로 표시됐다. 실행 중 Android Metro에는 영향이 없었다.
+- 복구: 활성 CLI 경로의 파일 존재와 `expo --version`을 확인한 뒤 실제 Expo Web bundle을 재실행했다. 233 modules bundle이 완료됐다.
+- 예방: Expo 의존성 변경 후 exit code뿐 아니라 package diff, CLI 응답, 실제 bundle을 각각 확인한다.
+
+## DEVFAIL-20260813-02 — Playwright headless shell 다운로드 타임아웃
+
+- 상태: `workaround-verified-local-development`
+- 환경: WSL2 network / Playwright 1.62.1
+- 실제 사용자·기관 영향: 없음
+- 증상: full Chrome 다운로드는 완료됐으나 headless shell 다운로드가 timeout 및 `EAI_AGAIN`으로 중단됐다.
+- 영향: 기본 browser discovery는 불완전했지만 설치된 full Chrome 실행 파일은 정상이었다.
+- 복구: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`로 full Chrome을 지정해 모바일 웹 시각 테스트 1건을 통과시켰다.
+- 예방: 사용자 홈의 revision 경로를 저장소 설정에 고정하지 않는다. 정상 네트워크에서 설치를 재시도하고 WSL 네트워크 장애 때만 환경변수를 사용한다.
+
 아래 항목은 2026-08-11 배포 전 local review에서 발견해 같은 코드 증분에서
 해결한 경계 결함이다. 모두 WSL2의 local Node SQLite/component test 범위에서만
 관찰되었고 실제 사용자·기관·staging·production 데이터에는 영향이 없었다. 따라서

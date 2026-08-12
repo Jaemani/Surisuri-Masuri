@@ -16,6 +16,7 @@
 10. [데이터·ML·AI 실행계획](./plans/DATA_ML_AI_PLAN.md) — 데이터 계보, 두 모델, 근거형 보고서 에이전트
 11. [릴리스·파일럿·최종 데모 계획](./plans/RELEASE_PILOT_DEMO_PLAN.md) — 환경 승격, 현장 도입, 발표·포트폴리오 증거
 12. [위험 등록부](./plans/RISK_REGISTER.md) — 현재 위험, 탐지 신호, 대응과 차단 조건
+13. [모바일·운영 콘솔 제품 경험 방향](./plans/PRODUCT_EXPERIENCE_DIRECTION.md) — 두 표면의 사용자 과업, 정보구조, 개인정보·시각 원칙
 
 ## 2. 질문별 기준 문서
 
@@ -34,6 +35,8 @@
 | 심각한 장애가 있었는가 | [인시던트 정책](./incidents/README.md) | 해당 `INC-*` 문서 |
 | 배포 전 native smoke에서 어떤 중대한 실패를 고쳤는가 | [개발 실패 기록](./development/DEVELOPMENT_FAILURE_LOG.md) | [ADR-0038](./decisions/ADR-0038-cold-launch-background-service-reconciliation.md), [EVD-20260723-051](./evidence/2026-07.md#evd-20260723-051--android-background-gps-native-lifecycle-smoke와-cold-launch-복구) |
 | WSL과 실기기에서 어떻게 실행하는가 | [WSL Runbook](./development/WSL_RUNBOOK.md) | 앱·서비스별 README |
+| 모바일 UI를 웹에서 어떻게 빠르게 확인하는가 | [Web·Playwright Runbook](./development/WEB_PLAYWRIGHT_RUNBOOK.md) | [ADR-0042](./decisions/ADR-0042-web-ui-preview-boundary.md), [현재 모바일 UX 감사](./reports/human/HR-20260813-04-mobile-ui-audit.md) |
+| 모바일과 복지관 대시보드는 각각 무엇을 보여주는가 | [제품 경험 방향](./plans/PRODUCT_EXPERIENCE_DIRECTION.md) | [현재 모바일 UX 감사](./reports/human/HR-20260813-04-mobile-ui-audit.md), [콘솔 README](../apps/console/README.md) |
 | telemetry orphan·stale receipt를 어떻게 분류하는가 | [Reconciliation Runbook](./development/TELEMETRY_RECONCILIATION_RUNBOOK.md) | [ADR-0017](./decisions/ADR-0017-fenced-ingest-recovery.md) |
 
 ## 3. 계획과 실제의 분리

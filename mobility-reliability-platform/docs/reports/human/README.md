@@ -116,3 +116,4 @@
 | [HR-20260811-01](./HR-20260811-01-mobile-upload-disposition.md) | M3 모바일 upload disposition·SQLite v4와 response-loss correlation | `draft` |
 | [HR-20260811-02](./HR-20260811-02-r07-dataset-foundation.md) | R07 합성 데이터셋·label·group/time split 기반 | `draft` |
 | [HR-20260811-03](./HR-20260811-03-r07-feature-rules-baseline.md) | R07 feature contract·rules baseline | `draft` |
+| [HR-20260813-04](./HR-20260813-04-mobile-ui-audit.md) | 현재 Android 모바일 흐름 UX·접근성 감사 | `draft` |
