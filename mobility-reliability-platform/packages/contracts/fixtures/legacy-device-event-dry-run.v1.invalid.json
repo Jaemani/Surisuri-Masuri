@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "legacy-device-event-dry-run.v1",
+  "manifestId": "0cb33fa1-07d9-4c6d-9a15-bd6b7b26e7d4",
+  "importRunId": "3b5ddcc5-f65f-48e5-a3b3-f8e142fb5d79",
+  "sourceHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "crosswalkHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "outputHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "dryRun": true,
+  "writeApplied": true,
+  "deploymentApplied": false,
+  "counts": {
+    "accepted": 8,
+    "quarantined": 0
+  },
+  "quarantineReasonCounts": {},
+  "generatedEvents": [],
+  "sourceRecord": {
+    "name": "must not be present"
+  }
+}

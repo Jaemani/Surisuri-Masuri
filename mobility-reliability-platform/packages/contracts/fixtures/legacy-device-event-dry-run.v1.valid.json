@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "legacy-device-event-dry-run.v1",
+  "manifestId": "0cb33fa1-07d9-4c6d-9a15-bd6b7b26e7d4",
+  "importRunId": "3b5ddcc5-f65f-48e5-a3b3-f8e142fb5d79",
+  "sourceHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "crosswalkHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "outputHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "dryRun": true,
+  "writeApplied": false,
+  "deploymentApplied": false,
+  "counts": {
+    "accepted": 8,
+    "quarantined": 2
+  },
+  "quarantineReasonCounts": {
+    "ambiguous_id": 1,
+    "unverified_amount": 1
+  },
+  "generatedEvents": [
+    {
+      "eventId": "8c1e1752-e9f5-4dd2-b462-e52b24f806a5",
+      "eventHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "eventId": "1de4a241-2da0-49f0-bf1c-e5c8baa20347",
+      "eventHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ]
+}

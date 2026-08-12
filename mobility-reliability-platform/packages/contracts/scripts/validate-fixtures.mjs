@@ -219,6 +219,18 @@ const cases = [
     fixture: 'fixtures/device-state-event.v1.invalid.json',
     expected: false,
   },
+  {
+    name: 'valid legacy device event dry run v1',
+    schema: 'schemas/legacy-device-event-dry-run.v1.schema.json',
+    fixture: 'fixtures/legacy-device-event-dry-run.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid legacy device event dry run v1 rejects writes and source records',
+    schema: 'schemas/legacy-device-event-dry-run.v1.schema.json',
+    fixture: 'fixtures/legacy-device-event-dry-run.v1.invalid.json',
+    expected: false,
+  },
 ]
 
 for (const testCase of cases) {

@@ -1,5 +1,17 @@
 # 2026년 8월 제품 증거
 
+## EVD-20260813-020 — legacy repair→device-state event local dry-run bridge
+
+- 생성: 2026-08-13 / Codex 작업 실행
+- 환경·데이터: local / synthetic / contract fixture
+- 출처: strict legacy bridge, `legacy-device-event-dry-run.v1`, unit tests
+- 상태: generated / 사람 검토 대기
+- 확인 항목: verified source 승인, device·repair UUID crosswalk, deterministic event ID, quarantine, input/output hash, dry-run/write/deployment false
+- 검증: legacy importer 9 passed, contracts 34 fixture cases passed
+- privacy·안전 경계: raw text·PII·money·UID·GPS 제외, component event 추정 금지, Firestore API 호출 없음
+- 현재 증명하지 않는 것: 실제 legacy export·이관 건수·Firestore import·current/shadow 반영, production·복지관·field 성과
+- 사용처: [UPD-20260813-24](../product-updates/UPD-20260813-24-legacy-repair-dry-run-bridge-plan.md), [R09](../reports/fixed/2026-09-15.md)
+
 ## EVD-20260813-019 — Firestore shadow projection atomic promotion
 
 - 생성: 2026-08-13 / Codex 작업 실행

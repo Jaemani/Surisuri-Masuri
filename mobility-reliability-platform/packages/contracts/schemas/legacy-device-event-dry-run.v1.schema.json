@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/legacy-device-event-dry-run.v1.schema.json",
+  "title": "LegacyDeviceEventDryRunV1",
+  "description": "Privacy-minimised result of a legacy repair to device-state-event dry run. It never authorises writes or deployment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "manifestId",
+    "importRunId",
+    "sourceHash",
+    "crosswalkHash",
+    "outputHash",
+    "dryRun",
+    "writeApplied",
+    "deploymentApplied",
+    "counts",
+    "quarantineReasonCounts",
+    "generatedEvents"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "legacy-device-event-dry-run.v1" },
+    "manifestId": { "type": "string", "format": "uuid" },
+    "importRunId": { "type": "string", "format": "uuid" },
+    "sourceHash": { "$ref": "#/$defs/sha256" },
+    "crosswalkHash": { "$ref": "#/$defs/sha256" },
+    "outputHash": { "$ref": "#/$defs/sha256" },
+    "dryRun": { "const": true },
+    "writeApplied": { "const": false },
+    "deploymentApplied": { "const": false },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "quarantined"],
+      "properties": {
+        "accepted": { "type": "integer", "minimum": 0 },
+        "quarantined": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "quarantineReasonCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ambiguous_id": { "type": "integer", "minimum": 1 },
+        "missing_reference": { "type": "integer", "minimum": 1 },
+        "invalid_date": { "type": "integer", "minimum": 1 },
+        "unknown_enum": { "type": "integer", "minimum": 1 },
+        "conflicting_duplicate": { "type": "integer", "minimum": 1 },
+        "unverified_amount": { "type": "integer", "minimum": 1 },
+        "pii_review_required": { "type": "integer", "minimum": 1 }
+        ,"unverified_source": { "type": "integer", "minimum": 1 }
+        ,"missing_recorded_at": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "generatedEvents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["eventId", "eventHash"],
+        "properties": {
+          "eventId": { "type": "string", "format": "uuid" },
+          "eventHash": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

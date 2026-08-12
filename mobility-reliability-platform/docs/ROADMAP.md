@@ -17,7 +17,7 @@
 | 6월 | Role-aware Mobile Foundation | 사용자·수리사 앱 셸, 인증·기관 권한, 사용자·기기·QR, 수리 요청 slice, offline GPS | 역할별 모바일 데모와 비행기 모드 복구 | R03, R04 |
 | 7월 | Repair Operations & Trusted Telemetry | 복지관 운영 기본화면, 수리사 작업기록, Go ingest, 멱등 receipt·Storage, 위치 정책 | 수리 배정 흐름과 telemetry 실패·복구 테스트 | R05, R06 |
 | 8월 | End-to-end Repair & Subsidy | 수리 상태기계, 기관 배정 정책, 지원금 원장, 알림, 이관 리허설, 품질 baseline | 요청→기관검증 데모와 감사 가능한 원장 | R07, R08 |
-| 9월 | Device Timeline & Reliability | 수리 importer, verified completed-repair 기반 모바일·복지관 console read-time timeline, normalized event 기반 device current-state deterministic replay, Firestore shadow→current/checkpoint atomic promotion, 기기·부품 projection, 주행 품질 ML, 생존분석 baseline | 역할별 기기 타임라인·시점별 상태 재현·검증된 current promotion과 위험곡선 | R09, R10 |
+| 9월 | Device Timeline & Reliability | verified completed legacy repair dry-run bridge, 수리 importer, verified completed-repair 기반 모바일·복지관 console read-time timeline, normalized event 기반 device current-state deterministic replay, Firestore shadow→current/checkpoint atomic promotion, 기기·부품 projection, 주행 품질 ML, 생존분석 baseline | legacy 변환 대조표·역할별 기기 타임라인·시점별 상태 재현·검증된 current promotion과 위험곡선 | R09, R10 |
 | 10월 | Calibrated Preventive Support | calibration, abstention, 수리사 피드백, fact store, AI 보고서 | 근거 클릭형 점검 권고와 평가표 | R11, R12 |
 | 11월 | Institution Reporting & Field Operations | 콘솔 운영 연결, 문서 adapter, pilot, observability, security, accessibility | 운영 대시보드·기관문서와 장애·접근성 비교 | R13, R14 |
 | 12월 | Reproducible Final Evidence | 시간분할 최종평가, 장애 훈련, 데이터·모델 카드, 데모·백서 | 5분 데모와 재현 패키지 | R15, R16 |
@@ -58,6 +58,7 @@
 - 사용자 모바일과 복지관 콘솔은 동일한 verified completed-repair archive를 사용하되 목적 제한 DTO로 분리한다. console read-time replay는 [ADR-0051](./decisions/ADR-0051-console-completed-repair-timeline-read-time-replay.md) 구현 후에만 완료로 판정한다.
 - normalized repair·explicit part/component·inspection·trip summary event를 projector version·checkpoint·checksum과 함께 replay하고, out-of-order와 `asOf` 결과를 재현한다. raw GPS는 current state·checkpoint에 포함하지 않으며, 명시적 linkage 없는 수리 항목에서 component 설치·제거를 추정하지 않는다. 이 증분은 [ADR-0052](./decisions/ADR-0052-device-current-state-deterministic-replay.md) 승인·구현·검증 후에만 완료로 판정한다.
 - pure replay 결과는 server-only shadow에 먼저 기록하고, authoritative device current와 per-device checkpoint를 하나의 transaction에서 승격한다. exact replay는 idempotent하게 수렴하고 binding conflict·corrupt shadow·checksum drift·stale revision은 fail-closed하며 client direct write와 외부 side effect를 허용하지 않는다. 이 증분은 [ADR-0053](./decisions/ADR-0053-firestore-shadow-projection-promotion.md) 구현·Emulator/Rules 검증 후에만 완료로 판정한다.
+- verified completed legacy repair를 explicit UUID crosswalk와 deterministic event ID로 dry-run 변환하고, unknown date/device/category는 quarantine한다. reconciliation count/hash가 설명 가능해야 하며 `dryRunOnly=true`, Firestore write 0, raw text·PII·money·UID·GPS 제외와 component 추정 금지를 적용한다. 이 증분은 [ADR-0054](./decisions/ADR-0054-legacy-repair-device-state-event-dry-run.md) 실행·검증 후에만 완료로 판정한다.
 - 이관 데이터의 출처와 변환 결과가 추적된다.
 - 신뢰성 모델은 고정 점검주기와 비교되고 데이터 부족 시 abstain한다.
 
