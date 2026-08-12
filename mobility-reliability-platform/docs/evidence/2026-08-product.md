@@ -1,5 +1,17 @@
 # 2026년 8월 제품 증거
 
+## EVD-20260813-019 — Firestore shadow projection atomic promotion
+
+- 생성: 2026-08-13 / Codex 작업 실행
+- 환경·데이터: local / synthetic / Firestore·Rules Emulator
+- 출처: device state projection store, Emulator tests, Firestore Rules tests
+- 상태: generated / 사람 검토 대기
+- 확인 항목: shadow write 후 authoritative device current와 per-device checkpoint의 atomic promotion, 동일 replay의 idempotent convergence, input drift·corrupt shadow·checksum drift fail-closed, client direct read/write deny
+- 검증: domain-command Emulator 14 passed, Rules Emulator 40 passed
+- side-effect 경계: promotion/replay retry에서 FCM·SMS·외부 API·수리 command·지원금 ledger 변경이 없음
+- 현재 증명하지 않는 것: production Firebase, 실제 복지관·field 성과, Cloud Tasks/Pub/Sub 운영 worker와 배포
+- 사용처: [UPD-20260813-23](../product-updates/UPD-20260813-23-firestore-shadow-promotion-plan.md), [R09](../reports/fixed/2026-09-15.md)
+
 ## EVD-20260813-018 — device current-state deterministic pure replay
 
 - 생성: 2026-08-13 / Codex 작업 실행

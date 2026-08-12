@@ -12,7 +12,7 @@
     "check": "pnpm run typecheck",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
-    "test:emulator": "firebase emulators:exec --config ../../firebase.json --project demo-domain-command --only firestore \"vitest run test/firestore-emulator.test.ts test/projection-emulator.test.ts\""
+    "test:emulator": "firebase emulators:exec --config ../../firebase.json --project demo-domain-command --only firestore \"vitest run test/firestore-emulator.test.ts test/projection-emulator.test.ts test/device-state-projection-emulator.test.ts\""
   },
   "dependencies": {
     "@mobility-reliability/domain-workflows": "workspace:*",

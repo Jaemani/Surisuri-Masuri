@@ -470,6 +470,75 @@ describe('least-privilege client read boundary', () => {
   );
 });
 
+describe('device current-state projector boundary', () => {
+  test.each([
+    'beneficiary',
+    'guardian',
+    'repairer',
+    'auditor',
+    'case_worker',
+    'tenant_admin'
+  ])('%s cannot read or write projector source, checkpoint, or version records', async (role) => {
+    const uid = `${role}-device-projector-boundary`;
+    const protectedPaths = [
+      'deviceStateEvents/event-1',
+      'projectionCheckpoints/device-current-state',
+      'devices/device-1/stateVersions/version-1'
+    ];
+
+    await seedMembership('tenant-a', uid, { roles: [role] });
+    for (const path of protectedPaths) {
+      await seedDocument(`tenants/tenant-a/${path}`, {
+        tenant_id: 'tenant-a'
+      });
+    }
+
+    const db = testEnvironment.authenticatedContext(uid).firestore();
+    for (const path of protectedPaths) {
+      await assertFails(getDoc(doc(db, `tenants/tenant-a/${path}`)));
+      await assertFails(setDoc(doc(db, `tenants/tenant-a/${path}`), {
+        tenant_id: 'tenant-a',
+        client_attempt: true
+      }));
+    }
+  });
+
+  test.each(['case_worker', 'tenant_admin'])('%s may read, but cannot write, the current device state', async (role) => {
+    const uid = `${role}-current-state-reader`;
+    await seedMembership('tenant-a', uid, { roles: [role] });
+    await seedDocument('tenants/tenant-a/devices/device-1', {
+      tenant_id: 'tenant-a'
+    });
+    await seedDocument('tenants/tenant-a/devices/device-1/state/current', {
+      tenant_id: 'tenant-a',
+      projection_version: 1
+    });
+
+    const db = testEnvironment.authenticatedContext(uid).firestore();
+    const currentState = doc(db, 'tenants/tenant-a/devices/device-1/state/current');
+    await assertSucceeds(getDoc(currentState));
+    await assertFails(setDoc(currentState, {
+      tenant_id: 'tenant-a',
+      projection_version: 2
+    }));
+  });
+
+  test.each(['beneficiary', 'guardian', 'repairer', 'auditor'])('%s cannot read the current device state', async (role) => {
+    const uid = `${role}-current-state-denied`;
+    await seedMembership('tenant-a', uid, { roles: [role] });
+    await seedDocument('tenants/tenant-a/devices/device-1', {
+      tenant_id: 'tenant-a'
+    });
+    await seedDocument('tenants/tenant-a/devices/device-1/state/current', {
+      tenant_id: 'tenant-a',
+      projection_version: 1
+    });
+
+    const db = testEnvironment.authenticatedContext(uid).firestore();
+    await assertFails(getDoc(doc(db, 'tenants/tenant-a/devices/device-1/state/current')));
+  });
+});
+
 describe('product repair and subsidy read boundary', () => {
   test('beneficiary reads only own work order and subsidy summary', async () => {
     await seedMembership('tenant-a', 'member-a', {

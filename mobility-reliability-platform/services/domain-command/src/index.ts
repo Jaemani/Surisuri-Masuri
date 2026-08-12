@@ -9,6 +9,7 @@ export { resolveActorContext, createRepairRequestHandler, transitionRepairReques
 export { FirestoreProductProjectionStore } from './projection-store.js';
 export * from './device-timeline-projector.js';
 export * from './device-state-projector.js';
+export * from './device-state-projection-store.js';
 export { getMobileProductSnapshotHandler, getConsoleOperationsSnapshotHandler } from './projection-http.js';
 export * from './projection-types.js';
 export * from './types.js';
