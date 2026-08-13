@@ -38,4 +38,27 @@ test('rejects identity and raw-location fields anywhere in fact or report payloa
   const leakedReport = structuredClone(report)
   leakedReport.receipt.latitude = 37.5
   assert.throws(() => validateGroundedReport(leakedReport, bundle), /REPORT_KEYS_INVALID|REPORT_INVALID/)
+  const snakeLeak = structuredClone(bundle)
+  snakeLeak.facts[0].value.device_id = 'SECRET'
+  assert.throws(() => validateFactBundle(snakeLeak), /FACT_BUNDLE_INVALID/)
+})
+
+test('binds nested facts and the entire fact bundle into both hashes', () => {
+  const { bundle, report } = buildSyntheticCalibrationReport(assessment)
+  const changedFact = structuredClone(bundle)
+  changedFact.facts[0].value.validationCount += 1
+  assert.throws(() => validateFactBundle(changedFact), /FACT_BUNDLE_HASH_MISMATCH/)
+  const changedReceipt = structuredClone(report)
+  changedReceipt.receipt.factBundleSha256 = '0'.repeat(64)
+  assert.throws(() => validateGroundedReport(changedReceipt, bundle), /RECEIPT_INVALID/)
+})
+
+test('rejects forged assessment scope and malformed typed facts', () => {
+  const forged = structuredClone(assessment)
+  forged.evaluationScope = 'field'
+  assert.throws(() => buildSyntheticCalibrationReport(forged), /ASSESSMENT_INVALID/)
+  const { bundle } = buildSyntheticCalibrationReport(assessment)
+  const malformed = structuredClone(bundle)
+  malformed.facts[0].value.validationEventCount = malformed.facts[0].value.validationCount + 1
+  assert.throws(() => validateFactBundle(malformed), /FACT_VALUE_INVALID/)
 })
