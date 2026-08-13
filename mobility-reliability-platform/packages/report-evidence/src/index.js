@@ -2,6 +2,13 @@ import { createHash } from 'node:crypto'
 
 const allowedFactTypes = new Set(['component_readiness', 'fallback_policy', 'scope_boundary'])
 const allowedClaimTypes = new Set(['readiness_summary', 'fallback_summary', 'boundary_summary'])
+const requiredFactProfile = new Map([
+  ['FACT-R11-BATTERY-READINESS', ['component_readiness', 'battery', 'readiness_summary', 'CLAIM-R11-01-COMPONENT-READINESS']],
+  ['FACT-R11-BRAKE-READINESS', ['component_readiness', 'brake', 'readiness_summary', 'CLAIM-R11-02-COMPONENT-READINESS']],
+  ['FACT-R11-CONTROLLER-READINESS', ['component_readiness', 'controller', 'readiness_summary', 'CLAIM-R11-03-COMPONENT-READINESS']],
+  ['FACT-R11-FALLBACK-POLICY', ['fallback_policy', null, 'fallback_summary', 'CLAIM-R11-04-FALLBACK-POLICY']],
+  ['FACT-R11-SYNTHETIC-BOUNDARY', ['scope_boundary', null, 'boundary_summary', 'CLAIM-R11-05-SCOPE-BOUNDARY']],
+])
 const forbiddenKeys = new Set(['personId', 'person_id', 'deviceId', 'device_id', 'tenantId', 'tenant_id', 'firebaseUid', 'firebase_uid', 'actorUid', 'actor_uid', 'latitude', 'longitude', 'coordinates', 'rawPath', 'raw_path', 'objectPath', 'object_path', 'repairMemo', 'repair_memo', 'sourceRef', 'source_ref'])
 
 export class ReportEvidenceError extends Error {
@@ -33,10 +40,11 @@ function factText(fact) {
 }
 
 function validCount(value) { return Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000 }
+function validTimestamp(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value) && !Number.isNaN(Date.parse(value)) }
 
 function validateSourceAssessment(assessment) {
   exactKeys(assessment, ['schemaVersion', 'assessmentId', 'generatedAt', 'evaluationScope', 'sourceKind', 'evaluatorVersion', 'policyVersion', 'lineage', 'assessmentPolicy', 'factBoundary', 'components', 'limitations', 'deploymentAuthorized', 'deploymentDecision', 'assessmentSha256'], 'ASSESSMENT_KEYS_INVALID')
-  if (assessment.schemaVersion !== 'reliability-calibration-assessment.v1' || !/^[0-9a-f-]{36}$/.test(assessment.assessmentId) || Number.isNaN(Date.parse(assessment.generatedAt)) || assessment.evaluationScope !== 'synthetic_only' || assessment.sourceKind !== 'synthetic' || assessment.evaluatorVersion !== 'r11-calibration-estimability.v1' || assessment.policyVersion !== 'r11-calibration-abstention-policy.v1' || assessment.deploymentAuthorized !== false || assessment.deploymentDecision !== 'defer' || !/^[a-f0-9]{64}$/.test(assessment.assessmentSha256) || containsForbiddenKey(assessment)) throw new ReportEvidenceError('ASSESSMENT_INVALID')
+  if (assessment.schemaVersion !== 'reliability-calibration-assessment.v1' || !/^[0-9a-f-]{36}$/.test(assessment.assessmentId) || !validTimestamp(assessment.generatedAt) || assessment.evaluationScope !== 'synthetic_only' || assessment.sourceKind !== 'synthetic' || assessment.evaluatorVersion !== 'r11-calibration-estimability.v1' || assessment.policyVersion !== 'r11-calibration-abstention-policy.v1' || assessment.deploymentAuthorized !== false || assessment.deploymentDecision !== 'defer' || !/^[a-f0-9]{64}$/.test(assessment.assessmentSha256) || containsForbiddenKey(assessment)) throw new ReportEvidenceError('ASSESSMENT_INVALID')
   exactKeys(assessment.lineage, ['datasetSha256', 'baselineResultSha256'], 'ASSESSMENT_LINEAGE_INVALID')
   if (!/^[a-f0-9]{64}$/.test(assessment.lineage.datasetSha256) || !/^[a-f0-9]{64}$/.test(assessment.lineage.baselineResultSha256)) throw new ReportEvidenceError('ASSESSMENT_LINEAGE_INVALID')
   exactKeys(assessment.assessmentPolicy, ['method', 'horizonDays', 'riskThreshold', 'minimumSamples', 'minimumEvents', 'minimumDistinctScores', 'validationPurpose', 'testPurpose', 'testUsedForTuning'], 'ASSESSMENT_POLICY_INVALID')
@@ -70,14 +78,16 @@ function validateFactValue(fact) {
 
 export function validateFactBundle(bundle) {
   exactKeys(bundle, ['schemaVersion', 'bundleId', 'generatedAt', 'sourceArtifactSha256', 'facts', 'factBundleSha256'], 'FACT_BUNDLE_KEYS_INVALID')
-  if (bundle.schemaVersion !== 'report-fact-bundle.v1' || !/^bundle-[a-f0-9]{16}$/.test(bundle.bundleId) || Number.isNaN(Date.parse(bundle.generatedAt)) || !/^[a-f0-9]{64}$/.test(bundle.sourceArtifactSha256) || !/^[a-f0-9]{64}$/.test(bundle.factBundleSha256) || !Array.isArray(bundle.facts) || bundle.facts.length < 1 || bundle.facts.length > 50 || containsForbiddenKey(bundle)) throw new ReportEvidenceError('FACT_BUNDLE_INVALID')
+  if (bundle.schemaVersion !== 'report-fact-bundle.v1' || bundle.bundleId !== `bundle-${bundle.sourceArtifactSha256?.slice(0, 16)}` || !validTimestamp(bundle.generatedAt) || !/^[a-f0-9]{64}$/.test(bundle.sourceArtifactSha256) || !/^[a-f0-9]{64}$/.test(bundle.factBundleSha256) || !Array.isArray(bundle.facts) || bundle.facts.length !== requiredFactProfile.size || containsForbiddenKey(bundle)) throw new ReportEvidenceError('FACT_BUNDLE_INVALID')
   const seen = new Set()
   for (const fact of bundle.facts) {
     exactKeys(fact, ['factId', 'factType', 'sourceArtifactSha256', 'value'], 'FACT_KEYS_INVALID')
-    if (!/^FACT-R11-[A-Z0-9-]{3,40}$/.test(fact.factId) || seen.has(fact.factId) || !allowedFactTypes.has(fact.factType) || fact.sourceArtifactSha256 !== bundle.sourceArtifactSha256) throw new ReportEvidenceError('FACT_INVALID')
+    const profile = requiredFactProfile.get(fact.factId)
+    if (!profile || seen.has(fact.factId) || !allowedFactTypes.has(fact.factType) || fact.factType !== profile[0] || (profile[1] !== null && fact.value?.component !== profile[1]) || fact.sourceArtifactSha256 !== bundle.sourceArtifactSha256) throw new ReportEvidenceError('FACT_INVALID')
     validateFactValue(fact)
     seen.add(fact.factId)
   }
+  if (seen.size !== requiredFactProfile.size) throw new ReportEvidenceError('FACT_PROFILE_INCOMPLETE')
   const payload = { ...bundle }; delete payload.factBundleSha256
   if (sha256(canonical(payload)) !== bundle.factBundleSha256) throw new ReportEvidenceError('FACT_BUNDLE_HASH_MISMATCH')
   return true
@@ -86,16 +96,18 @@ export function validateFactBundle(bundle) {
 export function validateGroundedReport(report, bundle) {
   validateFactBundle(bundle)
   exactKeys(report, ['schemaVersion', 'reportId', 'audience', 'generatedAt', 'factBundleId', 'claims', 'receipt', 'reportSha256'], 'REPORT_KEYS_INVALID')
-  if (report.schemaVersion !== 'grounded-operations-report.v1' || !/^report-[a-f0-9]{16}$/.test(report.reportId) || report.audience !== 'institution_operator' || report.factBundleId !== bundle.bundleId || report.generatedAt !== bundle.generatedAt || !Array.isArray(report.claims) || report.claims.length < 1 || report.claims.length > 50 || !/^[a-f0-9]{64}$/.test(report.reportSha256) || containsForbiddenKey(report)) throw new ReportEvidenceError('REPORT_INVALID')
+  if (report.schemaVersion !== 'grounded-operations-report.v1' || report.reportId !== `report-${bundle.sourceArtifactSha256.slice(0, 16)}` || report.audience !== 'institution_operator' || report.factBundleId !== bundle.bundleId || report.generatedAt !== bundle.generatedAt || !Array.isArray(report.claims) || report.claims.length !== requiredFactProfile.size || !/^[a-f0-9]{64}$/.test(report.reportSha256) || containsForbiddenKey(report)) throw new ReportEvidenceError('REPORT_INVALID')
   const factById = new Map(bundle.facts.map((fact) => [fact.factId, fact]))
   const claimIds = new Set()
   for (const claim of report.claims) {
     exactKeys(claim, ['claimId', 'claimType', 'status', 'text', 'evidenceFactIds'], 'CLAIM_KEYS_INVALID')
-    if (!/^CLAIM-R11-[A-Z0-9-]{3,40}$/.test(claim.claimId) || claimIds.has(claim.claimId) || !allowedClaimTypes.has(claim.claimType) || claim.status !== 'grounded' || !Array.isArray(claim.evidenceFactIds) || claim.evidenceFactIds.length !== 1 || new Set(claim.evidenceFactIds).size !== claim.evidenceFactIds.length) throw new ReportEvidenceError('CLAIM_INVALID')
+    const profile = requiredFactProfile.get(claim.evidenceFactIds?.[0])
+    if (!profile || claim.claimId !== profile[3] || claimIds.has(claim.claimId) || !allowedClaimTypes.has(claim.claimType) || claim.claimType !== profile[2] || claim.status !== 'grounded' || !Array.isArray(claim.evidenceFactIds) || claim.evidenceFactIds.length !== 1) throw new ReportEvidenceError('CLAIM_INVALID')
     claimIds.add(claim.claimId)
     const fact = factById.get(claim.evidenceFactIds[0])
     if (!fact || claim.text !== factText(fact)) throw new ReportEvidenceError('CLAIM_EVIDENCE_MISMATCH')
   }
+  if (claimIds.size !== requiredFactProfile.size) throw new ReportEvidenceError('CLAIM_PROFILE_INCOMPLETE')
   exactKeys(report.receipt, ['writer', 'validator', 'fallbackUsed', 'sourceArtifactSha256', 'factBundleSha256'], 'RECEIPT_KEYS_INVALID')
   if (report.receipt.writer !== 'deterministic_template.v1' || report.receipt.validator !== 'claim-evidence-validator.v1' || report.receipt.fallbackUsed !== true || report.receipt.sourceArtifactSha256 !== bundle.sourceArtifactSha256 || report.receipt.factBundleSha256 !== bundle.factBundleSha256) throw new ReportEvidenceError('RECEIPT_INVALID')
   const payload = { ...report }; delete payload.reportSha256

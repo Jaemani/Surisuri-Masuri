@@ -29,10 +29,10 @@ test('rejects missing, duplicate, and foreign facts', () => {
   const { bundle, report } = buildSyntheticCalibrationReport(assessment)
   const missing = structuredClone(report)
   missing.claims[0].evidenceFactIds = ['FACT-R11-NOT-FOUND']
-  assert.throws(() => validateGroundedReport(missing, bundle), /CLAIM_EVIDENCE_MISMATCH/)
+  assert.throws(() => validateGroundedReport(missing, bundle), /CLAIM_INVALID|CLAIM_EVIDENCE_MISMATCH/)
   const duplicate = structuredClone(bundle)
   duplicate.facts.push(structuredClone(duplicate.facts[0]))
-  assert.throws(() => validateFactBundle(duplicate), /FACT_INVALID/)
+  assert.throws(() => validateFactBundle(duplicate), /FACT_BUNDLE_INVALID|FACT_INVALID/)
 })
 
 test('rejects identity and raw-location fields anywhere in fact or report payloads', () => {
@@ -78,4 +78,31 @@ test('rejects a rehashed assessment that weakens the accepted source contract', 
   const forged = structuredClone(assessment)
   forged.assessmentPolicy.testUsedForTuning = true
   assert.throws(() => buildSyntheticCalibrationReport(forged), (error) => error instanceof ReportEvidenceError && error.code === 'ASSESSMENT_POLICY_INVALID')
+})
+
+test('requires the complete fallback and synthetic boundary fact profile', () => {
+  const { bundle } = buildSyntheticCalibrationReport(assessment)
+  const incomplete = structuredClone(bundle)
+  incomplete.facts = incomplete.facts.filter((fact) => fact.factType !== 'scope_boundary')
+  assert.throws(() => validateFactBundle(incomplete), /FACT_BUNDLE_INVALID|FACT_PROFILE_INCOMPLETE/)
+})
+
+test('requires every fact to have its exact typed claim', () => {
+  const { bundle, report } = buildSyntheticCalibrationReport(assessment)
+  const missing = structuredClone(report)
+  missing.claims.pop()
+  assert.throws(() => validateGroundedReport(missing, bundle), /REPORT_INVALID|CLAIM_PROFILE_INCOMPLETE/)
+  const mistyped = structuredClone(report)
+  mistyped.claims[0].claimType = 'boundary_summary'
+  assert.throws(() => validateGroundedReport(mistyped, bundle), /CLAIM_INVALID/)
+})
+
+test('rejects identifier value channels and arbitrary artifact identities', () => {
+  const { bundle, report } = buildSyntheticCalibrationReport(assessment)
+  const leaked = structuredClone(bundle)
+  leaked.facts[0].factId = 'FACT-R11-PHONE-01012345678'
+  assert.throws(() => validateFactBundle(leaked), /FACT_INVALID/)
+  const substituted = structuredClone(report)
+  substituted.reportId = `report-${'0'.repeat(16)}`
+  assert.throws(() => validateGroundedReport(substituted, bundle), /REPORT_INVALID/)
 })

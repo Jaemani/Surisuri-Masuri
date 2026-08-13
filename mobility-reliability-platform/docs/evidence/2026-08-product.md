@@ -316,3 +316,13 @@
 - 경계: local source 구조·무결성만 검증한다. 작성자 인증, 디지털 서명, 실제 dataset/result 재계산, Firebase Fact Store, 기관 검토·발행과 production 배포를 증명하지 않는다.
 
 관련: [ADR-0062](../decisions/ADR-0062-r12-source-assessment-integrity.md), [UPD-20260813-32](../product-updates/UPD-20260813-32-r12-source-integrity.md), [HR-20260813-24](../reports/human/HR-20260813-24-r12-source-integrity-review.md)
+
+# EVD-20260813-029 — R12 complete Fact·claim profile
+
+- 범위: local deterministic synthetic report validator
+- 공격 회귀: scope Fact 제거, claim coverage 누락, fact↔claim type 불일치, 전화번호 형태 임의 Fact ID, 임의 report ID 거부
+- 불변조건: battery/brake/controller readiness + fallback + synthetic boundary 정확히 5개, Fact당 정확히 하나의 결정론적 claim
+- 검증: `pnpm --filter @mobility-reliability/report-evidence check`; package test 12/12 통과
+- 경계: R11 synthetic abstention 전용 profile이다. candidate claim disposition, Firebase persistence envelope, tenant/parent binding, 사람 승인·발행과 production 배포는 별도다.
+
+관련: [ADR-0063](../decisions/ADR-0063-r12-complete-fact-claim-profile.md), [UPD-20260813-33](../product-updates/UPD-20260813-33-r12-complete-profile.md)
