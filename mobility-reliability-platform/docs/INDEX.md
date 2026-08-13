@@ -210,3 +210,5 @@ rules baseline을 연결했다. 코드 기준점은 commit `a9b20d9`이다.
 - [ADR-0060 — R11 calibration estimability gate](./decisions/ADR-0060-r11-calibration-estimability-gate.md)
 - [UPD-20260813-30 — calibration readiness presentation](./product-updates/UPD-20260813-30-calibration-readiness-presentation.md)
 - [HR-20260813-23 — 보정 가능성 화면 사람 검토](./reports/human/HR-20260813-23-calibration-readiness-review.md)
+- [ADR-0061 — R12 근거 연결형 결정론적 보고서](./decisions/ADR-0061-r12-grounded-report-fallback.md)
+- [UPD-20260813-31 — R12 근거 연결형 fallback 보고서](./product-updates/UPD-20260813-31-r12-grounded-report.md)

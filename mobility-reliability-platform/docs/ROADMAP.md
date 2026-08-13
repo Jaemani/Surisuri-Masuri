@@ -71,6 +71,7 @@
 
 - 위험도와 사용자 설명 생성이 분리된다.
 - 주요 보고서 문장마다 fact ID 또는 `확인 필요` 상태가 존재한다.
+- R12 선행 slice는 R11 합성 assessment를 5개 typed Fact와 5개 deterministic grounded claim으로 변환하고 bundle/report recursive hash와 receipt로 묶는다. 현재 LLM·Firebase write·기관 발행 없이 fallbackUsed=true이며 [ADR-0061](./decisions/ADR-0061-r12-grounded-report-fallback.md)의 local synthetic 경계를 따른다.
 - 수리사 피드백이 원 예측을 덮어쓰지 않고 새 이벤트로 보존된다.
 
 ### 11월

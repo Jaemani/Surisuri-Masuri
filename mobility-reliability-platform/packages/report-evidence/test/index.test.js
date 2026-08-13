@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import assessment from '../../contracts/fixtures/reliability-calibration-assessment.v1.valid.json' with { type: 'json' }
+import consoleSnapshot from '../../../apps/console/src/data/r12GroundedReport.json' with { type: 'json' }
 import { ReportEvidenceError, buildSyntheticCalibrationReport, validateFactBundle, validateGroundedReport } from '../src/index.js'
 
 test('builds deterministic aggregate facts and a fully grounded fallback report', () => {
@@ -11,6 +12,10 @@ test('builds deterministic aggregate facts and a fully grounded fallback report'
   assert.equal(first.report.claims.length, 5)
   assert.ok(first.report.claims.every((claim) => claim.status === 'grounded' && claim.evidenceFactIds.length === 1))
   assert.equal(first.report.receipt.fallbackUsed, true)
+})
+
+test('console snapshot exactly matches the validated builder output', () => {
+  assert.deepEqual(consoleSnapshot, buildSyntheticCalibrationReport(assessment))
 })
 
 test('rejects hallucinated text even when it references a real fact ID', () => {

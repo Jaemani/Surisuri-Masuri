@@ -105,6 +105,10 @@ test.describe('institution console web presentation and repair operations', () =
     await expect(page.getByText('검증 표본 부족')).toHaveCount(2);
     await expect(page.getByText('기준선 학습 근거 부족')).toBeVisible();
     await expect(page.getByText('실제 기기 위험도, 현장 calibration, 개별 운영 조치가 아닙니다.')).toBeVisible();
+    await expect(page.getByText('R12 · EVIDENCE-GROUNDED REPORT')).toBeVisible();
+    await expect(page.getByText('LLM 사용 안 함 · deterministic fallback')).toBeVisible();
+    await expect(page.getByText('근거 연결됨')).toHaveCount(5);
+    await expect(page.getByText('FACT-R11-FALLBACK-POLICY')).toBeVisible();
     await expect(page.getByText('CONTROLLER / ABSTENTION')).toBeVisible();
     await expect(page.getByText('판단 유보', { exact: true })).toBeVisible();
     await expect(page.getByText(/MOB-|박정호|이경자|윤옥순|최민수/)).toHaveCount(0);
@@ -112,5 +116,7 @@ test.describe('institution console web presentation and repair operations', () =
     await expect(page).toHaveScreenshot('console-reports-baseline-comparison.png', {
       animations: 'disabled',
     });
+    await page.getByText('R12 · EVIDENCE-GROUNDED REPORT').scrollIntoViewIfNeeded();
+    await expect(page).toHaveScreenshot('console-reports-grounded-evidence.png', { animations: 'disabled' });
   });
 });

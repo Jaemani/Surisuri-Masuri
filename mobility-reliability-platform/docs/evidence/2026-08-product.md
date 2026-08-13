@@ -296,3 +296,13 @@
 - 경계: 합성 holdout evaluator의 fail-closed 동작만 증명한다. 실제 수리 fact, 현장 보정, 개별 위험, 고장 시점, 안전, 운영 조치, 배포·기관 검증을 증명하지 않는다.
 
 관련: [ADR-0060](../decisions/ADR-0060-r11-calibration-estimability-gate.md), [UPD-20260813-30](../product-updates/UPD-20260813-30-calibration-readiness-presentation.md), [HR-20260813-23](../reports/human/HR-20260813-23-calibration-readiness-review.md)
+# EVD-20260813-027 — R12 Fact bundle과 근거 연결형 fallback 보고서
+
+- 범위: local deterministic synthetic report package·console presentation
+- 결과: R11 assessment→5 typed Facts→5 grounded claims. LLM 0회, fallbackUsed true, 모든 claim Fact coverage 100%.
+- 검증: report-evidence 7 tests, recursive report/bundle hash, typed fact value, forged scope, dangling/duplicate evidence, camel/snake PII·좌표 key 차단, console snapshot exact equality, Playwright console 6 flows.
+- 저장: `packages/report-evidence`, `apps/console/src/data/r12GroundedReport.json`, `apps/console/src/App.tsx`, `tests/e2e/.../console-reports-grounded-evidence-console-chromium-linux.png`.
+- 재현: `pnpm --filter @mobility-reliability/report-evidence test`; `pnpm --filter @mobility-reliability/console typecheck`; `pnpm exec playwright test tests/e2e/console-web.spec.ts --project=console-chromium`.
+- 경계: 합성 aggregate fallback validator와 UI만 증명한다. 실제 Fact Store, LLM, 기관·사용자 보고서, production Firebase, 사람 승인·발행·운영 조치를 증명하지 않는다.
+
+관련: [ADR-0061](../decisions/ADR-0061-r12-grounded-report-fallback.md), [UPD-20260813-31](../product-updates/UPD-20260813-31-r12-grounded-report.md)
