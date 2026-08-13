@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "reliability-comparison-artifact.v1",
+  "artifactVersion": "r10-reliability-presentation.v1",
+  "evaluationScope": "synthetic_only",
+  "sourceKind": "synthetic",
+  "datasetVersion": "reliability-dataset.r10.synthetic.v1",
+  "lineage": {
+    "datasetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baselineResultSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "comparisonContext": {
+    "metricSplit": "test",
+    "curveSourceSplit": "train",
+    "horizonDays": 30,
+    "validationUsedForTuning": false
+  },
+  "displayPolicy": {
+    "audience": "internal_synthetic_demo",
+    "presentationMode": "read_only",
+    "perDeviceInference": false,
+    "fieldPerformance": false,
+    "productionUse": false,
+    "safetyDecision": false
+  },
+  "components": [
+    {
+      "component": "battery",
+      "sampleCount": 8,
+      "eventCount": 6,
+      "censoredCount": 2,
+      "methods": {
+        "fixedInterval": {
+          "status": "evaluated",
+          "abstention": false,
+          "dueCount": 4,
+          "confusion": { "truePositive": 3, "falsePositive": 1, "trueNegative": 1, "falseNegative": 3 },
+          "sensitivity": 0.5,
+          "specificity": 0.5,
+          "brierScore": 0.5
+        },
+        "cumulativeDistance": {
+          "status": "evaluated",
+          "abstention": false,
+          "dueCount": 5,
+          "confusion": { "truePositive": 4, "falsePositive": 1, "trueNegative": 1, "falseNegative": 2 },
+          "sensitivity": 0.666666666667,
+          "specificity": 0.5,
+          "brierScore": 0.375
+        },
+        "kaplanMeier": {
+          "status": "evaluated",
+          "abstention": false,
+          "dueCount": 6,
+          "confusion": { "truePositive": 5, "falsePositive": 1, "trueNegative": 1, "falseNegative": 1 },
+          "sensitivity": 0.833333333333,
+          "specificity": 0.5,
+          "brierScore": 0.25,
+          "curve": {
+            "sourceSplit": "train",
+            "points": [
+              { "day": 0, "eventFreeProbability": 1 },
+              { "day": 12, "eventFreeProbability": 0.75 },
+              { "day": 30, "eventFreeProbability": 0.75 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "component": "controller",
+      "sampleCount": 3,
+      "eventCount": 1,
+      "censoredCount": 2,
+      "methods": {
+        "fixedInterval": {
+          "status": "data_insufficient",
+          "abstention": true,
+          "abstentionReason": "insufficient_samples"
+        },
+        "cumulativeDistance": {
+          "status": "data_insufficient",
+          "abstention": true,
+          "abstentionReason": "insufficient_samples"
+        },
+        "kaplanMeier": {
+          "status": "data_insufficient",
+          "abstention": true,
+          "abstentionReason": "insufficient_samples"
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "synthetic_data_only",
+    "no_field_performance",
+    "no_component_inference_without_explicit_linkage",
+    "not_for_safety_critical_failure_prediction"
+  ],
+  "deploymentAuthorized": false,
+  "deploymentDecision": "defer",
+  "artifactSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}

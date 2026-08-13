@@ -243,6 +243,18 @@ const cases = [
     fixture: 'fixtures/reliability-baseline-result.v1.invalid.json',
     expected: false,
   },
+  {
+    name: 'valid reliability comparison artifact v1',
+    schema: 'schemas/reliability-comparison-artifact.v1.schema.json',
+    fixture: 'fixtures/reliability-comparison-artifact.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid reliability comparison artifact v1 rejects field, identity, CTA, and abstention metrics',
+    schema: 'schemas/reliability-comparison-artifact.v1.schema.json',
+    fixture: 'fixtures/reliability-comparison-artifact.v1.invalid.json',
+    expected: false,
+  },
 ]
 
 for (const testCase of cases) {

@@ -121,3 +121,4 @@
 | [HR-20260813-18](./HR-20260813-18-console-completed-repair-timeline.md) | 복지관 콘솔 완료 수리 타임라인 설계 점검 | `generated` |
 | [HR-20260813-19](./HR-20260813-19-r10-synthetic-reliability-baseline.md) | R10 합성 reliability baseline 구현 점검 | `generated` |
 | [HR-20260813-20](./HR-20260813-20-console-inspection-evidence-ui.md) | 복지관 예방점검 설명 화면 점검 | `generated` |
+| [HR-20260813-21](./HR-20260813-21-r10-synthetic-reliability-presentation.md) | 합성 reliability 기준선 비교 화면 점검 | `generated` |

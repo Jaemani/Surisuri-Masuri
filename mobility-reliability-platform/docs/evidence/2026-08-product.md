@@ -1,5 +1,17 @@
 # 2026년 8월 제품 증거
 
+## EVD-20260813-024 — R10 합성 reliability 비교 presentation
+
+- 생성: 2026-08-13 / Codex 작업 실행
+- 환경·데이터: local WSL2 / CPU / synthetic only / web visual
+- 출처: presentation JSON Schema·fixture, Python builder·validator, generated console artifact, React UI, Playwright snapshot
+- 상태: generated / 사람 검토 대기
+- 확인 항목: dataset/result/self-hash lineage, train curve와 untouched test metric 분리, aggregate-only component, controller abstention, UI의 generated artifact binding, field/per-device/production/safety/CTA false
+- 검증: contracts 38 fixture cases, ML 전체 suite, console typecheck·16 tests·build, Playwright console 5 passed
+- 시각 증거: `tests/e2e/console-web.spec.ts-snapshots/console-reports-baseline-comparison-console-chromium-linux.png`
+- 현재 증명하지 않는 것: 실제 수리·주행·기관 데이터, field 성능·calibration, 개별 위험도, 실제 기관 이해도·접근성, Firebase·production 배포
+- 사용처: [ADR-0058](../decisions/ADR-0058-r10-synthetic-reliability-presentation.md), [UPD-20260813-28](../product-updates/UPD-20260813-28-r10-synthetic-reliability-presentation.md), [HR-20260813-21](../reports/human/HR-20260813-21-r10-synthetic-reliability-presentation.md), [R10](../reports/fixed/2026-09-30.md)
+
 ## EVD-20260813-023 — console 예방점검 근거·유보 UI
 
 - 생성: 2026-08-13 / Codex 작업 실행

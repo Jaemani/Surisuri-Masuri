@@ -65,4 +65,24 @@ test.describe('institution console web presentation and repair operations', () =
       animations: 'disabled',
     });
   });
+
+  test('shows report-level synthetic baseline comparison without individual actions', async ({ page }) => {
+    await page.goto('/');
+
+    await page.getByRole('button', { name: '보고서', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '보고서' })).toBeVisible();
+    await expect(page.getByText('SYNTHETIC-ONLY · 배포 보류')).toBeVisible();
+    await expect(page.getByText('FIXED INTERVAL')).toBeVisible();
+    await expect(page.getByText('CUMULATIVE DISTANCE')).toBeVisible();
+    await expect(page.getByText('KAPLAN–MEIER')).toBeVisible();
+    await expect(page.getByText('TRAIN CURVE / RULE')).toBeVisible();
+    await expect(page.getByText('TEST METRICS')).toBeVisible();
+    await expect(page.getByText('CONTROLLER / ABSTENTION')).toBeVisible();
+    await expect(page.getByText('판단 유보', { exact: true })).toBeVisible();
+    await expect(page.getByText(/MOB-|박정호|이경자|윤옥순|최민수/)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /새 보고서|필터|내보내기/ })).toHaveCount(0);
+    await expect(page).toHaveScreenshot('console-reports-baseline-comparison.png', {
+      animations: 'disabled',
+    });
+  });
 });

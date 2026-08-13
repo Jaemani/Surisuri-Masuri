@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "reliability-comparison-artifact.v1",
+  "artifactVersion": "r10-reliability-presentation.v1",
+  "evaluationScope": "synthetic_only",
+  "sourceKind": "synthetic",
+  "datasetVersion": "reliability-dataset.r10.synthetic.v1",
+  "lineage": {
+    "datasetSha256": "e322548d33bb1c8a3014a21ae0c527a8862c2780f49c1589c1106d51064e63a2",
+    "baselineResultSha256": "c6712452fbc2b967b3d896ca1877fc6810df372aacd487587155cc3dd7b9278f"
+  },
+  "comparisonContext": {
+    "metricSplit": "test",
+    "curveSourceSplit": "train",
+    "horizonDays": 30,
+    "validationUsedForTuning": false
+  },
+  "displayPolicy": {
+    "audience": "internal_synthetic_demo",
+    "presentationMode": "read_only",
+    "perDeviceInference": false,
+    "fieldPerformance": false,
+    "productionUse": false,
+    "safetyDecision": false
+  },
+  "components": [
+    {
+      "component": "battery",
+      "sampleCount": 8,
+      "eventCount": 6,
+      "censoredCount": 2,
+      "methods": {
+        "fixedInterval": { "status": "evaluated", "abstention": false, "dueCount": 6, "confusion": { "truePositive": 4, "falsePositive": 2, "trueNegative": 0, "falseNegative": 2 }, "sensitivity": 0.666666666667, "specificity": 0.0, "brierScore": 0.5 },
+        "cumulativeDistance": { "status": "evaluated", "abstention": false, "dueCount": 4, "confusion": { "truePositive": 3, "falsePositive": 1, "trueNegative": 1, "falseNegative": 3 }, "sensitivity": 0.5, "specificity": 0.5, "brierScore": 0.5 },
+        "kaplanMeier": { "status": "evaluated", "abstention": false, "dueCount": 8, "confusion": { "truePositive": 6, "falsePositive": 2, "trueNegative": 0, "falseNegative": 0 }, "sensitivity": 1.0, "specificity": 0.0, "brierScore": 0.1875, "curve": { "sourceSplit": "train", "points": [{ "day": 0, "eventFreeProbability": 1.0 }, { "day": 7, "eventFreeProbability": 0.875 }, { "day": 10, "eventFreeProbability": 0.75 }, { "day": 11, "eventFreeProbability": 0.625 }, { "day": 14, "eventFreeProbability": 0.5 }, { "day": 20, "eventFreeProbability": 0.375 }, { "day": 23, "eventFreeProbability": 0.25 }, { "day": 30, "eventFreeProbability": 0.25 }] } }
+      }
+    },
+    {
+      "component": "brake",
+      "sampleCount": 6,
+      "eventCount": 4,
+      "censoredCount": 2,
+      "methods": {
+        "fixedInterval": { "status": "evaluated", "abstention": false, "dueCount": 4, "confusion": { "truePositive": 3, "falsePositive": 1, "trueNegative": 1, "falseNegative": 1 }, "sensitivity": 0.75, "specificity": 0.5, "brierScore": 0.333333333333 },
+        "cumulativeDistance": { "status": "evaluated", "abstention": false, "dueCount": 3, "confusion": { "truePositive": 2, "falsePositive": 1, "trueNegative": 1, "falseNegative": 2 }, "sensitivity": 0.5, "specificity": 0.5, "brierScore": 0.5 },
+        "kaplanMeier": { "status": "evaluated", "abstention": false, "dueCount": 6, "confusion": { "truePositive": 4, "falsePositive": 2, "trueNegative": 0, "falseNegative": 0 }, "sensitivity": 1.0, "specificity": 0.0, "brierScore": 0.25, "curve": { "sourceSplit": "train", "points": [{ "day": 0, "eventFreeProbability": 1.0 }, { "day": 9, "eventFreeProbability": 0.833333333333 }, { "day": 12, "eventFreeProbability": 0.666666666667 }, { "day": 19, "eventFreeProbability": 0.5 }, { "day": 23, "eventFreeProbability": 0.333333333333 }, { "day": 24, "eventFreeProbability": 0.166666666667 }, { "day": 30, "eventFreeProbability": 0.166666666667 }] } }
+      }
+    },
+    {
+      "component": "controller",
+      "sampleCount": 3,
+      "eventCount": 1,
+      "censoredCount": 2,
+      "methods": {
+        "fixedInterval": { "status": "data_insufficient", "abstention": true, "abstentionReason": "insufficient_samples" },
+        "cumulativeDistance": { "status": "data_insufficient", "abstention": true, "abstentionReason": "insufficient_samples" },
+        "kaplanMeier": { "status": "data_insufficient", "abstention": true, "abstentionReason": "insufficient_samples" }
+      }
+    }
+  ],
+  "limitations": ["synthetic_data_only", "no_field_performance", "no_component_inference_without_explicit_linkage", "not_for_safety_critical_failure_prediction"],
+  "deploymentAuthorized": false,
+  "deploymentDecision": "defer",
+  "artifactSha256": "660f4afefc54f6877def7dc0d25a367b13340aee5f112c05f935f7e67e8df720"
+}

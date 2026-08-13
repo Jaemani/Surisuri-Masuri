@@ -144,6 +144,12 @@ runtime은 전체·부품·confusion count, 시간창 비중복, method별 동�
 현재 기본 출력은 51개 합성 episode와 test 17개 observation이며, controller train
 표본 3개는 최소 4개보다 작아 모든 method에서 metric 없이 abstain한다.
 
+`reliability_presentation.py`는 이 결과에서 identity-free aggregate artifact를 만든다.
+train Kaplan–Meier curve와 untouched test metric을 분리하고 dataset/result/self hash를
+함께 검증한다. provenance 검증에는 dataset과 result를 반드시 같이 전달하며, 콘솔은
+생성된 deterministic synthetic snapshot만 읽는다. 이는 field 또는 per-device inference가
+아니다.
+
 ```bash
 rtk uv --cache-dir /tmp/mobility-ml-uv-cache --directory services/ml run --locked --extra dev pytest -q
 rtk uv --cache-dir /tmp/mobility-ml-uv-cache --directory services/ml run --locked --extra dev ruff check src tests

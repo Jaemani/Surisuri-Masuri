@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "reliability-comparison-artifact.v1",
+  "artifactVersion": "r10-reliability-presentation.v1",
+  "evaluationScope": "field",
+  "sourceKind": "synthetic",
+  "datasetVersion": "reliability-dataset.r10.synthetic.v1",
+  "lineage": {
+    "datasetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baselineResultSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "comparisonContext": {
+    "metricSplit": "test",
+    "curveSourceSplit": "test",
+    "horizonDays": 30,
+    "validationUsedForTuning": true
+  },
+  "displayPolicy": {
+    "audience": "internal_synthetic_demo",
+    "presentationMode": "interactive",
+    "perDeviceInference": true,
+    "fieldPerformance": true,
+    "productionUse": true,
+    "safetyDecision": true
+  },
+  "components": [
+    {
+      "component": "battery",
+      "sampleCount": 1,
+      "eventCount": 0,
+      "censoredCount": 1,
+      "deviceGroupId": "must-not-leave-source",
+      "methods": {
+        "fixedInterval": {
+          "status": "data_insufficient",
+          "abstention": true,
+          "abstentionReason": "insufficient_events",
+          "dueCount": 0
+        },
+        "cumulativeDistance": {
+          "status": "data_insufficient",
+          "abstention": true,
+          "abstentionReason": "insufficient_events"
+        },
+        "kaplanMeier": {
+          "status": "data_insufficient",
+          "abstention": true,
+          "abstentionReason": "insufficient_events",
+          "curve": {
+            "sourceSplit": "train",
+            "points": [
+              { "day": 0, "eventFreeProbability": 1 },
+              { "day": 30, "eventFreeProbability": 0.5 }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "synthetic_data_only",
+    "no_field_performance",
+    "no_component_inference_without_explicit_linkage",
+    "not_for_safety_critical_failure_prediction"
+  ],
+  "deploymentAuthorized": true,
+  "deploymentDecision": "authorize",
+  "artifactSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}

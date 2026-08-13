@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/reliability-comparison-artifact.v1.schema.json",
+  "title": "ReliabilityComparisonArtifactV1",
+  "description": "Strict aggregate-only presentation artifact derived from a synthetic reliability baseline. It is not a field, per-device, operational, or deployment payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactVersion",
+    "evaluationScope",
+    "sourceKind",
+    "datasetVersion",
+    "lineage",
+    "comparisonContext",
+    "displayPolicy",
+    "components",
+    "limitations",
+    "deploymentAuthorized",
+    "deploymentDecision",
+    "artifactSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "reliability-comparison-artifact.v1" },
+    "artifactVersion": { "const": "r10-reliability-presentation.v1" },
+    "evaluationScope": { "const": "synthetic_only" },
+    "sourceKind": { "const": "synthetic" },
+    "datasetVersion": { "const": "reliability-dataset.r10.synthetic.v1" },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["datasetSha256", "baselineResultSha256"],
+      "properties": {
+        "datasetSha256": { "$ref": "#/$defs/sha256" },
+        "baselineResultSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "comparisonContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metricSplit", "curveSourceSplit", "horizonDays", "validationUsedForTuning"],
+      "properties": {
+        "metricSplit": { "const": "test" },
+        "curveSourceSplit": { "const": "train" },
+        "horizonDays": { "const": 30 },
+        "validationUsedForTuning": { "const": false }
+      }
+    },
+    "displayPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audience", "presentationMode", "perDeviceInference", "fieldPerformance", "productionUse", "safetyDecision"],
+      "properties": {
+        "audience": { "const": "internal_synthetic_demo" },
+        "presentationMode": { "const": "read_only" },
+        "perDeviceInference": { "const": false },
+        "fieldPerformance": { "const": false },
+        "productionUse": { "const": false },
+        "safetyDecision": { "const": false }
+      }
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/componentComparison" }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "synthetic_data_only",
+          "no_field_performance",
+          "no_component_inference_without_explicit_linkage",
+          "not_for_safety_critical_failure_prediction"
+        ]
+      }
+    },
+    "deploymentAuthorized": { "const": false },
+    "deploymentDecision": { "const": "defer" },
+    "artifactSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "componentCode": {
+      "type": "string",
+      "enum": ["battery", "brake", "controller", "motor", "seat_frame", "wheel_tire"]
+    },
+    "confusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["truePositive", "falsePositive", "trueNegative", "falseNegative"],
+      "properties": {
+        "truePositive": { "type": "integer", "minimum": 0 },
+        "falsePositive": { "type": "integer", "minimum": 0 },
+        "trueNegative": { "type": "integer", "minimum": 0 },
+        "falseNegative": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "curve": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceSplit", "points"],
+      "properties": {
+        "sourceSplit": { "const": "train" },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["day", "eventFreeProbability"],
+            "properties": {
+              "day": { "type": "integer", "minimum": 0, "maximum": 30 },
+              "eventFreeProbability": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        }
+      }
+    },
+    "methodComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "abstention"],
+      "properties": {
+        "status": { "enum": ["evaluated", "data_insufficient"] },
+        "abstention": { "type": "boolean" },
+        "abstentionReason": {
+          "enum": ["insufficient_events", "insufficient_samples", "data_quality_insufficient"]
+        },
+        "dueCount": { "type": "integer", "minimum": 0 },
+        "confusion": { "$ref": "#/$defs/confusion" },
+        "sensitivity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "specificity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "brierScore": { "type": "number", "minimum": 0, "maximum": 1 },
+        "curve": { "$ref": "#/$defs/curve" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "evaluated" } }, "required": ["status"] },
+          "then": {
+            "required": ["dueCount", "confusion", "sensitivity", "specificity", "brierScore"],
+            "properties": {
+              "abstention": { "const": false },
+              "abstentionReason": false,
+              "dueCount": true,
+              "confusion": true,
+              "sensitivity": true,
+              "specificity": true,
+              "brierScore": true
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "data_insufficient" } }, "required": ["status"] },
+          "then": {
+            "required": ["abstentionReason"],
+            "properties": {
+              "abstention": { "const": true },
+              "dueCount": false,
+              "confusion": false,
+              "sensitivity": false,
+              "specificity": false,
+              "brierScore": false,
+              "curve": false
+            }
+          }
+        }
+      ]
+    },
+    "ruleMethod": {
+      "allOf": [
+        { "$ref": "#/$defs/methodComparison" },
+        { "type": "object", "properties": { "curve": false } }
+      ]
+    },
+    "kaplanMeierMethod": {
+      "allOf": [
+        { "$ref": "#/$defs/methodComparison" },
+        {
+          "if": { "type": "object", "properties": { "status": { "const": "evaluated" } }, "required": ["status"] },
+          "then": { "type": "object", "required": ["curve"], "properties": { "curve": true } }
+        }
+      ]
+    },
+    "componentComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "sampleCount", "eventCount", "censoredCount", "methods"],
+      "properties": {
+        "component": { "$ref": "#/$defs/componentCode" },
+        "sampleCount": { "type": "integer", "minimum": 0 },
+        "eventCount": { "type": "integer", "minimum": 0 },
+        "censoredCount": { "type": "integer", "minimum": 0 },
+        "methods": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fixedInterval", "cumulativeDistance", "kaplanMeier"],
+          "properties": {
+            "fixedInterval": { "$ref": "#/$defs/ruleMethod" },
+            "cumulativeDistance": { "$ref": "#/$defs/ruleMethod" },
+            "kaplanMeier": { "$ref": "#/$defs/kaplanMeierMethod" }
+          }
+        }
+      }
+    }
+  }
+}

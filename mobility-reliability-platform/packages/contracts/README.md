@@ -25,6 +25,7 @@
 - `quality-features.v1.schema.json`: 하나의 trace에서 추출한 coordinate-free numeric feature와 trace/batch/dataset/feature hash lineage. strict named fields만 허용하며 raw latitude/longitude, PII, label, prediction은 계약상 허용하지 않는다. 추출 실패는 value-free `reasonCode`와 `review_required` 상태로 표현한다.
 - `quality-baseline-result.v1.schema.json`: `quality-features.v1`와 분리된 synthetic-only rules baseline 결과. split별/전체 metric, 네 known class와 `unknown_review_required` confusion matrix, prediction·abstain·feature hash를 strict하게 기록한다.
 - `reliability-baseline-result.v1.schema.json`: R10 time-to-inspection baseline 결과의 synthetic-only contract. `device-group-time-holdout.v1` 시간창·leakage flag·counts reconciliation, fixed interval·cumulative distance·Kaplan–Meier 방법과 component별 `data_insufficient` abstention을 기록하며 `deploymentAuthorized=false`와 `deploymentDecision=defer`를 고정한다. 실제 event/censoring 데이터·성능·field/production 배포를 의미하지 않는다.
+- `reliability-comparison-artifact.v1.schema.json`: R10 baseline 결과에서 파생한 aggregate-only presentation wire contract. train curve와 test metric 출처, identity-free component 비교, read-only internal synthetic demo와 deployment defer를 고정한다. 산술 합계·component 중복·metric lineage는 Python semantic validator가 추가 검증한다.
 
 R07-B1에서는 규칙 baseline 결과를 이 feature contract에 넣지 않는다. baseline output이
 추가될 때는 별도 versioned result schema와 lineage/evaluation contract로 분리한다.
