@@ -150,6 +150,8 @@ train Kaplan–Meier curve와 untouched test metric을 분리하고 dataset/resu
 생성된 deterministic synthetic snapshot만 읽는다. 이는 field 또는 per-device inference가
 아니다.
 
+R11의 `reliability_calibration.py`는 calibration 수치를 먼저 만들지 않고 평가 가능성부터 검사한다. validation component별 최소 표본 30건, 사건 10건, 서로 다른 score 3개를 요구한다. 현재 KM 기준선은 component 내부에서 단일 aggregate score이고 합성 validation도 8/6/3건뿐이므로 모두 `not_estimable`이다. 이때 metric·curve를 내보내지 않고 `fixed_interval_and_human_review`로 닫는다. test는 eligibility나 tuning에 사용하지 않으며 console fixture는 evaluator 결과와 exact equality를 테스트한다.
+
 ```bash
 rtk uv --cache-dir /tmp/mobility-ml-uv-cache --directory services/ml run --locked --extra dev pytest -q
 rtk uv --cache-dir /tmp/mobility-ml-uv-cache --directory services/ml run --locked --extra dev ruff check src tests

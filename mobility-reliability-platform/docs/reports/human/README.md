@@ -123,3 +123,4 @@
 | [HR-20260813-20](./HR-20260813-20-console-inspection-evidence-ui.md) | 복지관 예방점검 설명 화면 점검 | `generated` |
 | [HR-20260813-21](./HR-20260813-21-r10-synthetic-reliability-presentation.md) | 합성 reliability 기준선 비교 화면 점검 | `generated` |
 | [HR-20260813-22](./HR-20260813-22-center-verification-subsidy-authority-loop.md) | 센터 검증·지원금 집행 흐름 점검 | `generated` |
+- [HR-20260813-23 — 보정 가능성 화면 사람 검토](./HR-20260813-23-calibration-readiness-review.md)

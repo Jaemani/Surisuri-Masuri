@@ -284,3 +284,15 @@
 - 시각 증거: `tests/e2e/mobile-web.spec.ts-snapshots/mobile-device-timeline-mobile-chromium-linux.png`
 - Product Design 확인: 390×844 snapshot에서 기기 요약→타임라인→수리 도움 위계와 하단 tab 상태를 확인; screenshot만으로 native 접근성·TalkBack/VoiceOver는 확인하지 못함
 - 제한: read-time completed-repair slice이며 전체 Digital Twin, async current projection, legacy import, 부품 lifecycle, 실제 수리·사용자·production 배포가 아님
+# EVD-20260813-026 — R11 calibration estimability와 판단 유보
+
+- 범위: local deterministic synthetic evaluator·contract·console presentation
+- 산출물: `reliability-calibration-assessment.v1`, `r11-calibration-estimability.v1`, R11 보고서 readiness section
+- 결과: validation 배터리 8건·브레이크 6건·컨트롤러 3건으로 최소 30건 미달. 세 component 모두 `not_estimable`; calibration metric·curve 0개, fallback `fixed_interval_and_human_review`, deployment defer.
+- 계보: dataset SHA-256 `e322548d33bb1c8a3014a21ae0c527a8862c2780f49c1589c1106d51064e63a2`, R10 result SHA-256 `c6712452fbc2b967b3d896ca1877fc6810df372aacd487587155cc3dd7b9278f`, assessment SHA-256 `a2be7299b68d29a71ed0f89fd12e8571988942d1f4f8acf0eb9898c4d5eb8de7`.
+- 저장 위치: `packages/contracts/schemas/reliability-calibration-assessment.v1.schema.json`, valid/invalid fixture, `services/ml/src/mobility_ml/reliability_calibration.py`, Python test, `apps/console/src/App.tsx`, Playwright report snapshot. Snapshot SHA-256 `1a46fe4fe64094a01e7e8a6b5fff9305071a22449f1b8c363fadcf427fb9b0e5`.
+- 재현: `pnpm --filter @mobility-reliability/contracts test`; `uv --directory services/ml run --locked --extra dev pytest -q`; `pnpm exec playwright test tests/e2e/console-web.spec.ts --project=console-chromium`.
+- 접근: repository 접근 개발자. 합성 fixture 외 production Firebase·외부 저장소 접근 없음.
+- 경계: 합성 holdout evaluator의 fail-closed 동작만 증명한다. 실제 수리 fact, 현장 보정, 개별 위험, 고장 시점, 안전, 운영 조치, 배포·기관 검증을 증명하지 않는다.
+
+관련: [ADR-0060](../decisions/ADR-0060-r11-calibration-estimability-gate.md), [UPD-20260813-30](../product-updates/UPD-20260813-30-calibration-readiness-presentation.md), [HR-20260813-23](../reports/human/HR-20260813-23-calibration-readiness-review.md)

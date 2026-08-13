@@ -99,6 +99,8 @@ def validate_reliability_calibration(
             expected_error = abs(metric["predictedRisk"] - metric["observedRate"])
             if abs(metric["absoluteCalibrationError"] - expected_error) > 1e-12:
                 raise DatasetValidationError("reliability calibration error:mismatch")
+    if seen != set(COMPONENTS):
+        raise DatasetValidationError("reliability calibration component:coverage")
     if dataset is not None and result is not None:
         validate_reliability_dataset(dataset)
         validate_reliability_result(result)
@@ -112,6 +114,11 @@ def validate_reliability_calibration(
             dataset["replacementEvents"]
         ):
             raise DatasetValidationError("reliability calibration fact count:mismatch")
+        expected = assess_reliability_calibration(
+            dataset, result, generated_at=assessment["generatedAt"], _skip_validation=True
+        )
+        if assessment != expected:
+            raise DatasetValidationError("reliability calibration dataset binding:mismatch")
 
 
 def assess_reliability_calibration(
@@ -119,6 +126,7 @@ def assess_reliability_calibration(
     result: Mapping[str, Any],
     *,
     generated_at: str = "2026-08-13T13:00:00Z",
+    _skip_validation: bool = False,
 ) -> dict[str, Any]:
     """Measure train-derived KM calibration on validation and untouched test splits."""
 
@@ -224,5 +232,6 @@ def assess_reliability_calibration(
         "deploymentDecision": "defer",
     }
     assessment["assessmentSha256"] = _hash(assessment)
-    validate_reliability_calibration(assessment, dataset=dataset, result=result)
+    if not _skip_validation:
+        validate_reliability_calibration(assessment, dataset=dataset, result=result)
     return assessment

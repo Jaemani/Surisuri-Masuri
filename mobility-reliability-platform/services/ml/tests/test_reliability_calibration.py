@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -85,3 +86,14 @@ def test_hash_and_lineage_tampering_are_rejected() -> None:
     wrong_lineage["lineage"]["datasetSha256"] = "0" * 64
     with pytest.raises(DatasetValidationError, match="hash:mismatch"):
         validate_reliability_calibration(wrong_lineage, dataset=dataset, result=baseline)
+
+
+def test_console_snapshot_is_exactly_the_generated_assessment() -> None:
+    expected = assessment()
+    snapshot = json.loads(
+        (
+            Path(__file__).parents[3]
+            / "packages/contracts/fixtures/reliability-calibration-assessment.v1.valid.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert snapshot == expected

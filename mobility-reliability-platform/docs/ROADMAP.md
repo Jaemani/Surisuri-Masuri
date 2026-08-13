@@ -65,6 +65,7 @@
 - 핵심 수리 흐름의 센터 검증과 지원금 execution은 분리 명령·projection 재조회로 연결하고, 부분 성공을 `검증 완료·집행 대기`로 보존한다. execution은 center verification 이후에만 허용하고 immutable ledger transaction이 있을 때만 집행 완료로 표시한다. [ADR-0059](./decisions/ADR-0059-center-verification-subsidy-authority-loop.md), [EVD-20260813-025](./evidence/2026-08-product.md#evd-20260813-025--센터-검증지원금-집행-authority-loop)에 local synthetic/Emulator 범위를 기록한다.
 - 이관 데이터의 출처와 변환 결과가 추적된다.
 - 신뢰성 모델은 고정 점검주기와 비교되고 데이터 부족 시 abstain한다.
+- R11 calibration readiness는 validation 표본 30·사건 10·distinct score 3을 진입 조건으로 고정한다. 현재 합성 cohort는 전 component가 `not_estimable`이며 metric·curve 없이 고정주기+사람 검토로 fallback한다. [ADR-0060](./decisions/ADR-0060-r11-calibration-estimability-gate.md), [EVD-20260813-026](./evidence/2026-08-product.md#evd-20260813-026--r11-calibration-estimability와-판단-유보)에 local synthetic 범위를 기록한다.
 
 ### 10월
 

@@ -207,3 +207,6 @@ rules baseline을 연결했다. 코드 기준점은 commit `a9b20d9`이다.
 - 저장·권한·신뢰 경계를 바꾸면 아키텍처, Target Domain Model, 관련 ADR을 갱신한다.
 - 검증 기준을 바꾸면 Validation Plan에 이유와 적용 시작 버전을 남긴다.
 - 미래 정기리포트의 계획 문구는 바꿀 수 있지만 실제 수행처럼 표현하지 않는다.
+- [ADR-0060 — R11 calibration estimability gate](./decisions/ADR-0060-r11-calibration-estimability-gate.md)
+- [UPD-20260813-30 — calibration readiness presentation](./product-updates/UPD-20260813-30-calibration-readiness-presentation.md)
+- [HR-20260813-23 — 보정 가능성 화면 사람 검토](./reports/human/HR-20260813-23-calibration-readiness-review.md)

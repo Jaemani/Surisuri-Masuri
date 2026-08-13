@@ -100,6 +100,11 @@ test.describe('institution console web presentation and repair operations', () =
     await expect(page.getByText('KAPLAN–MEIER')).toBeVisible();
     await expect(page.getByText('TRAIN CURVE / RULE')).toBeVisible();
     await expect(page.getByText('TEST METRICS')).toBeVisible();
+    await expect(page.getByText('R11 · CALIBRATION READINESS')).toBeVisible();
+    await expect(page.getByText('전체 판단 유보')).toBeVisible();
+    await expect(page.getByText('검증 표본 부족')).toHaveCount(2);
+    await expect(page.getByText('기준선 학습 근거 부족')).toBeVisible();
+    await expect(page.getByText('실제 기기 위험도, 현장 calibration, 개별 운영 조치가 아닙니다.')).toBeVisible();
     await expect(page.getByText('CONTROLLER / ABSTENTION')).toBeVisible();
     await expect(page.getByText('판단 유보', { exact: true })).toBeVisible();
     await expect(page.getByText(/MOB-|박정호|이경자|윤옥순|최민수/)).toHaveCount(0);
