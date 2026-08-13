@@ -347,3 +347,13 @@
 - 운영 경계: Firebase report worker, 사람 승인·발행 receipt, actual institution report와 production 배포를 증명하지 않는다.
 
 관련: [ADR-0065](../decisions/ADR-0065-report-generation-review-publication-states.md), [UPD-20260813-35](../product-updates/UPD-20260813-35-report-run-lifecycle.md), [HR-20260813-26](../reports/human/HR-20260813-26-report-run-lifecycle-review.md)
+
+# EVD-20260813-032 — unsupported candidate claim disposition
+
+- 범위: local deterministic candidate validator·synthetic Fact bundle
+- 결과: canonical 후보 4개 include, 변조 문장 1개 omit; 민감 key·foreign Fact 후보는 원문/ID echo 없이 omit
+- validation codes: `candidate_shape_or_sensitive_key`, `evidence_cardinality_invalid`, `evidence_not_found`, `claim_identity_or_type_invalid`, `claim_text_unsupported`
+- 검증: report-evidence check, 17/17 tests 통과
+- 경계: LLM 호출, 실제 자유문, 사람 검토 초안, Firebase 저장과 production report를 증명하지 않는다.
+
+관련: [ADR-0066](../decisions/ADR-0066-unsupported-claim-disposition.md), [UPD-20260813-36](../product-updates/UPD-20260813-36-unsupported-claim-omission.md)

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import assessment from '../../contracts/fixtures/reliability-calibration-assessment.v1.valid.json' with { type: 'json' }
 import consoleSnapshot from '../../../apps/console/src/data/r12GroundedReport.json' with { type: 'json' }
-import { ReportEvidenceError, buildSyntheticCalibrationReport, buildSyntheticFallbackRun, createReportRun, transitionReportRun, validateFactBundle, validateGroundedReport } from '../src/index.js'
+import { ReportEvidenceError, buildSyntheticCalibrationReport, buildSyntheticFallbackRun, classifyCandidateClaims, createReportRun, transitionReportRun, validateFactBundle, validateGroundedReport } from '../src/index.js'
 
 test('builds deterministic aggregate facts and a fully grounded fallback report', () => {
   const first = buildSyntheticCalibrationReport(assessment)
@@ -132,4 +132,22 @@ test('requires an allowlisted failure class and separates primary from fallback'
   assert.equal(failed.reviewStatus, 'not_ready')
   const validated = transitionReportRun(pending, 'validated')
   assert.throws(() => transitionReportRun(validated, 'completed', { fallbackUsed: true, artifactSha256: '2'.repeat(64), completedAt: assessment.generatedAt }), /REPORT_RUN_PRIMARY_REQUIRED/)
+})
+
+test('omits unsupported candidate text before final report sealing', () => {
+  const { bundle, report } = buildSyntheticCalibrationReport(assessment)
+  const candidates = report.claims.map(({ status: _status, ...claim }) => claim)
+  candidates[0].text = '배터리 고장 확률은 95%입니다.'
+  const result = classifyCandidateClaims(candidates, bundle)
+  assert.equal(result.included.length, 4)
+  assert.equal(result.omittedCount, 1)
+  assert.deepEqual(result.dispositions[0], { candidateIndex: 0, disposition: 'omit', validationCodes: ['claim_text_unsupported'] })
+  assert.equal(JSON.stringify(result).includes('95%'), false)
+})
+
+test('does not echo sensitive or foreign candidate content into dispositions', () => {
+  const { bundle } = buildSyntheticCalibrationReport(assessment)
+  const result = classifyCandidateClaims([{ claimId: 'CLAIM-R11-PHONE-01012345678', claimType: 'readiness_summary', text: '민감 자유문', evidenceFactIds: ['FACT-R11-NOT-FOUND'], deviceId: 'SECRET' }], bundle)
+  assert.deepEqual(result, { included: [], dispositions: [{ candidateIndex: 0, disposition: 'omit', validationCodes: ['candidate_shape_or_sensitive_key'] }], omittedCount: 1 })
+  assert.equal(JSON.stringify(result).includes('SECRET'), false)
 })

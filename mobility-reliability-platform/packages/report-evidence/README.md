@@ -10,6 +10,7 @@ R12의 계산 결과→Fact→주장 경계를 검증하는 dependency-free Node
 - 사람·기관·기기 ID, raw 좌표·경로, 수리 자유문 key는 중첩 위치에서도 거부한다.
 - 현재 writer는 LLM이 아니라 `deterministic_template.v1`이며 receipt의 `fallbackUsed=true`를 고정한다.
 - report run은 `pending → validated | failed`, `validated → completed | fallback | failed`만 허용한다. 현재 결정론적 결과는 `fallback / 사람 검토 대기 / 미발행`이다.
+- candidate claim은 봉인 전에 개별 검증하며 unsupported 문장은 기본 `omit`한다. disposition에는 원문·임의 ID를 되돌려주지 않는다.
 - 실제 기관 보고서, 현장 사실, LLM groundedness, 사람 승인, production 발행을 증명하지 않는다.
 
 ```bash

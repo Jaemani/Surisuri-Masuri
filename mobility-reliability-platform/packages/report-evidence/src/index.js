@@ -165,3 +165,29 @@ export function buildSyntheticFallbackRun(bundle, report) {
   const validated = transitionReportRun(pending, 'validated')
   return transitionReportRun(validated, 'fallback', { fallbackUsed: true, artifactSha256: report.reportSha256, completedAt: report.generatedAt })
 }
+
+export function classifyCandidateClaims(candidates, bundle) {
+  validateFactBundle(bundle)
+  if (!Array.isArray(candidates) || candidates.length < 1 || candidates.length > 50) throw new ReportEvidenceError('CANDIDATE_CLAIMS_INVALID')
+  const factById = new Map(bundle.facts.map((fact) => [fact.factId, fact]))
+  const included = []
+  const dispositions = []
+  const includedIds = new Set()
+  candidates.forEach((candidate, candidateIndex) => {
+    const omit = (code) => dispositions.push({ candidateIndex, disposition: 'omit', validationCodes: [code] })
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate) || containsForbiddenKey(candidate)) return omit('candidate_shape_or_sensitive_key')
+    if (Object.keys(candidate).sort().join('|') !== ['claimId', 'claimType', 'text', 'evidenceFactIds'].sort().join('|')) return omit('candidate_shape_or_sensitive_key')
+    if (!Array.isArray(candidate.evidenceFactIds) || candidate.evidenceFactIds.length !== 1) return omit('evidence_cardinality_invalid')
+    const factId = candidate.evidenceFactIds[0]
+    const fact = factById.get(factId)
+    const profile = requiredFactProfile.get(factId)
+    if (!fact || !profile) return omit('evidence_not_found')
+    if (candidate.claimId !== profile[3] || candidate.claimType !== profile[2] || includedIds.has(candidate.claimId)) return omit('claim_identity_or_type_invalid')
+    if (candidate.text !== factText(fact)) return omit('claim_text_unsupported')
+    const claim = { ...candidate, status: 'grounded' }
+    included.push(claim)
+    includedIds.add(candidate.claimId)
+    dispositions.push({ candidateIndex, disposition: 'include', validationCodes: [] })
+  })
+  return { included, dispositions, omittedCount: dispositions.filter((item) => item.disposition === 'omit').length }
+}
