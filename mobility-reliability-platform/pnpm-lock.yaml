@@ -120,6 +120,8 @@ importers:
 
   packages/legacy-importer: {}
 
+  packages/report-evidence: {}
+
   services/domain-command:
     dependencies:
       '@mobility-reliability/domain-workflows':
