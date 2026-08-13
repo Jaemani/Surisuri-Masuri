@@ -306,3 +306,13 @@
 - 경계: 합성 aggregate fallback validator와 UI만 증명한다. 실제 Fact Store, LLM, 기관·사용자 보고서, production Firebase, 사람 승인·발행·운영 조치를 증명하지 않는다.
 
 관련: [ADR-0061](../decisions/ADR-0061-r12-grounded-report-fallback.md), [UPD-20260813-31](../product-updates/UPD-20260813-31-r12-grounded-report.md)
+
+# EVD-20260813-028 — R12 source assessment self-hash gate
+
+- 범위: local deterministic Node report boundary·synthetic R11 fixture
+- 확인: R11 Python canonical JSON과 호환되는 locale 비의존 key 정렬, assessment 전체 self-hash 재계산, root/lineage/policy/fact-boundary/limitations/component allowlist
+- 공격 회귀: hash를 갱신하지 않은 nested count 변조 거부, test tuning을 허용하도록 의미를 바꾼 입력 거부
+- 검증: `pnpm --filter @mobility-reliability/report-evidence check`; package test 9/9 통과
+- 경계: local source 구조·무결성만 검증한다. 작성자 인증, 디지털 서명, 실제 dataset/result 재계산, Firebase Fact Store, 기관 검토·발행과 production 배포를 증명하지 않는다.
+
+관련: [ADR-0062](../decisions/ADR-0062-r12-source-assessment-integrity.md), [UPD-20260813-32](../product-updates/UPD-20260813-32-r12-source-integrity.md), [HR-20260813-24](../reports/human/HR-20260813-24-r12-source-integrity-review.md)

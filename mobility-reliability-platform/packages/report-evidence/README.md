@@ -5,6 +5,7 @@ R12의 계산 결과→Fact→주장 경계를 검증하는 dependency-free Node
 - 모든 grounded claim은 정확히 하나의 존재하는 Fact ID를 가져야 한다.
 - claim text는 fact type별 결정론적 template과 정확히 일치해야 한다.
 - fact와 claim은 source assessment SHA-256에 묶인다.
+- source assessment 자체도 Python evaluator와 같은 canonical JSON 규칙으로 self-hash를 재계산하고, R11의 목적·분할·판단 유보 계약을 다시 검사한다.
 - 사람·기관·기기 ID, raw 좌표·경로, 수리 자유문 key는 중첩 위치에서도 거부한다.
 - 현재 writer는 LLM이 아니라 `deterministic_template.v1`이며 receipt의 `fallbackUsed=true`를 고정한다.
 - 실제 기관 보고서, 현장 사실, LLM groundedness, 사람 승인, production 발행을 증명하지 않는다.

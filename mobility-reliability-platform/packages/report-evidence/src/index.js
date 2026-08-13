@@ -11,7 +11,7 @@ export class ReportEvidenceError extends Error {
 const stable = (value) => Array.isArray(value)
   ? value.map(stable)
   : value && typeof value === 'object'
-    ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, stable(child)]))
+    ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([key, child]) => [key, stable(child)]))
     : value
 const canonical = (value) => JSON.stringify(stable(value))
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
@@ -33,6 +33,28 @@ function factText(fact) {
 }
 
 function validCount(value) { return Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000 }
+
+function validateSourceAssessment(assessment) {
+  exactKeys(assessment, ['schemaVersion', 'assessmentId', 'generatedAt', 'evaluationScope', 'sourceKind', 'evaluatorVersion', 'policyVersion', 'lineage', 'assessmentPolicy', 'factBoundary', 'components', 'limitations', 'deploymentAuthorized', 'deploymentDecision', 'assessmentSha256'], 'ASSESSMENT_KEYS_INVALID')
+  if (assessment.schemaVersion !== 'reliability-calibration-assessment.v1' || !/^[0-9a-f-]{36}$/.test(assessment.assessmentId) || Number.isNaN(Date.parse(assessment.generatedAt)) || assessment.evaluationScope !== 'synthetic_only' || assessment.sourceKind !== 'synthetic' || assessment.evaluatorVersion !== 'r11-calibration-estimability.v1' || assessment.policyVersion !== 'r11-calibration-abstention-policy.v1' || assessment.deploymentAuthorized !== false || assessment.deploymentDecision !== 'defer' || !/^[a-f0-9]{64}$/.test(assessment.assessmentSha256) || containsForbiddenKey(assessment)) throw new ReportEvidenceError('ASSESSMENT_INVALID')
+  exactKeys(assessment.lineage, ['datasetSha256', 'baselineResultSha256'], 'ASSESSMENT_LINEAGE_INVALID')
+  if (!/^[a-f0-9]{64}$/.test(assessment.lineage.datasetSha256) || !/^[a-f0-9]{64}$/.test(assessment.lineage.baselineResultSha256)) throw new ReportEvidenceError('ASSESSMENT_LINEAGE_INVALID')
+  exactKeys(assessment.assessmentPolicy, ['method', 'horizonDays', 'riskThreshold', 'minimumSamples', 'minimumEvents', 'minimumDistinctScores', 'validationPurpose', 'testPurpose', 'testUsedForTuning'], 'ASSESSMENT_POLICY_INVALID')
+  if (assessment.assessmentPolicy.method !== 'kaplan_meier' || assessment.assessmentPolicy.horizonDays !== 30 || assessment.assessmentPolicy.riskThreshold !== 0.5 || assessment.assessmentPolicy.minimumSamples !== 30 || assessment.assessmentPolicy.minimumEvents !== 10 || assessment.assessmentPolicy.minimumDistinctScores !== 3 || assessment.assessmentPolicy.validationPurpose !== 'calibration_and_abstention_assessment' || assessment.assessmentPolicy.testPurpose !== 'untouched_final_measurement' || assessment.assessmentPolicy.testUsedForTuning !== false) throw new ReportEvidenceError('ASSESSMENT_POLICY_INVALID')
+  exactKeys(assessment.factBoundary, ['riskResetSourceQuality', 'explicitRiskResetFactCount', 'componentLinkInferenceAllowed', 'rawRepairTextIncluded', 'identityIncluded'], 'ASSESSMENT_BOUNDARY_INVALID')
+  if (assessment.factBoundary.riskResetSourceQuality !== 'verified_synthetic' || !validCount(assessment.factBoundary.explicitRiskResetFactCount) || assessment.factBoundary.componentLinkInferenceAllowed !== false || assessment.factBoundary.rawRepairTextIncluded !== false || assessment.factBoundary.identityIncluded !== false) throw new ReportEvidenceError('ASSESSMENT_BOUNDARY_INVALID')
+  const expectedLimitations = ['aggregate_only', 'no_field_calibration', 'no_individual_action', 'not_for_safety_critical_failure_prediction', 'synthetic_data_only']
+  if (!Array.isArray(assessment.limitations) || [...assessment.limitations].sort().join('|') !== expectedLimitations.join('|')) throw new ReportEvidenceError('ASSESSMENT_LIMITATIONS_INVALID')
+  if (!Array.isArray(assessment.components) || assessment.components.length !== 3) throw new ReportEvidenceError('ASSESSMENT_COMPONENTS_INVALID')
+  const components = new Set()
+  for (const component of assessment.components) {
+    exactKeys(component, ['component', 'validationCount', 'validationEventCount', 'testCount', 'testEventCount', 'distinctValidationScoreCount', 'fallback', 'calibrationStatus', 'abstention', 'notEstimableReason'], 'ASSESSMENT_COMPONENT_INVALID')
+    if (!['battery', 'brake', 'controller'].includes(component.component) || components.has(component.component) || component.calibrationStatus !== 'not_estimable' || component.abstention !== true || !['reliability_train_insufficient', 'calibration_sample_insufficient', 'calibration_event_insufficient', 'score_variation_insufficient'].includes(component.notEstimableReason) || component.fallback !== 'fixed_interval_and_human_review' || !validCount(component.validationCount) || !validCount(component.validationEventCount) || !validCount(component.testCount) || !validCount(component.testEventCount) || !validCount(component.distinctValidationScoreCount) || component.validationEventCount > component.validationCount || component.testEventCount > component.testCount) throw new ReportEvidenceError('ASSESSMENT_COMPONENT_INVALID')
+    components.add(component.component)
+  }
+  const payload = { ...assessment }; delete payload.assessmentSha256
+  if (sha256(canonical(payload)) !== assessment.assessmentSha256) throw new ReportEvidenceError('ASSESSMENT_HASH_MISMATCH')
+}
 function validateFactValue(fact) {
   if (fact.factType === 'component_readiness') {
     exactKeys(fact.value, ['component', 'status', 'validationCount', 'validationEventCount'], 'FACT_VALUE_KEYS_INVALID')
@@ -82,7 +104,7 @@ export function validateGroundedReport(report, bundle) {
 }
 
 export function buildSyntheticCalibrationReport(assessment) {
-  if (assessment?.schemaVersion !== 'reliability-calibration-assessment.v1' || assessment.evaluationScope !== 'synthetic_only' || assessment.sourceKind !== 'synthetic' || assessment.deploymentAuthorized !== false || assessment.deploymentDecision !== 'defer' || !/^[a-f0-9]{64}$/.test(assessment.assessmentSha256) || !Array.isArray(assessment.components) || assessment.components.length !== 3 || assessment.components.some((component) => component.calibrationStatus !== 'not_estimable' || component.abstention !== true)) throw new ReportEvidenceError('ASSESSMENT_INVALID')
+  validateSourceAssessment(assessment)
   const sourceArtifactSha256 = assessment.assessmentSha256
   const componentFacts = assessment.components.map((component) => ({ factId: `FACT-R11-${component.component.toUpperCase()}-READINESS`, factType: 'component_readiness', sourceArtifactSha256, value: { component: component.component, status: component.calibrationStatus, validationCount: component.validationCount, validationEventCount: component.validationEventCount } }))
   const facts = [...componentFacts, { factId: 'FACT-R11-FALLBACK-POLICY', factType: 'fallback_policy', sourceArtifactSha256, value: { label: '고정 점검 일정과 담당자 검토' } }, { factId: 'FACT-R11-SYNTHETIC-BOUNDARY', factType: 'scope_boundary', sourceArtifactSha256, value: { evaluationScope: 'synthetic_only', fieldPerformance: false, individualActionAllowed: false } }]

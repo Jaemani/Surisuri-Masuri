@@ -212,3 +212,6 @@ rules baseline을 연결했다. 코드 기준점은 commit `a9b20d9`이다.
 - [HR-20260813-23 — 보정 가능성 화면 사람 검토](./reports/human/HR-20260813-23-calibration-readiness-review.md)
 - [ADR-0061 — R12 근거 연결형 결정론적 보고서](./decisions/ADR-0061-r12-grounded-report-fallback.md)
 - [UPD-20260813-31 — R12 근거 연결형 fallback 보고서](./product-updates/UPD-20260813-31-r12-grounded-report.md)
+- [ADR-0062 — R12 source assessment 무결성 재검증](./decisions/ADR-0062-r12-source-assessment-integrity.md)
+- [UPD-20260813-32 — R12 source assessment 무결성 gate](./product-updates/UPD-20260813-32-r12-source-integrity.md)
+- [HR-20260813-24 — R12 source 무결성 경계 검토](./reports/human/HR-20260813-24-r12-source-integrity-review.md)

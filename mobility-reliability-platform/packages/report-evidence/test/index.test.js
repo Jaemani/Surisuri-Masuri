@@ -67,3 +67,15 @@ test('rejects forged assessment scope and malformed typed facts', () => {
   malformed.facts[0].value.validationEventCount = malformed.facts[0].value.validationCount + 1
   assert.throws(() => validateFactBundle(malformed), /FACT_VALUE_INVALID/)
 })
+
+test('recomputes the complete source assessment hash before deriving facts', () => {
+  const changed = structuredClone(assessment)
+  changed.components[0].validationCount += 1
+  assert.throws(() => buildSyntheticCalibrationReport(changed), (error) => error instanceof ReportEvidenceError && error.code === 'ASSESSMENT_HASH_MISMATCH')
+})
+
+test('rejects a rehashed assessment that weakens the accepted source contract', () => {
+  const forged = structuredClone(assessment)
+  forged.assessmentPolicy.testUsedForTuning = true
+  assert.throws(() => buildSyntheticCalibrationReport(forged), (error) => error instanceof ReportEvidenceError && error.code === 'ASSESSMENT_POLICY_INVALID')
+})
