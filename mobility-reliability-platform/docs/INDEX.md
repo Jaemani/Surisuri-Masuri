@@ -220,3 +220,6 @@ rules baseline을 연결했다. 코드 기준점은 commit `a9b20d9`이다.
 - [ADR-0064 — report claim persistence binding](./decisions/ADR-0064-report-claim-persistence-binding.md)
 - [UPD-20260813-34 — report claim Rules binding](./product-updates/UPD-20260813-34-report-claim-rules-binding.md)
 - [HR-20260813-25 — report claim 저장 경계 검토](./reports/human/HR-20260813-25-report-claim-binding-review.md)
+- [ADR-0065 — 보고서 생성·검토·발행 상태 분리](./decisions/ADR-0065-report-generation-review-publication-states.md)
+- [UPD-20260813-35 — R12 report run lifecycle](./product-updates/UPD-20260813-35-report-run-lifecycle.md)
+- [HR-20260813-26 — R12 생성·검토·발행 상태 화면 검토](./reports/human/HR-20260813-26-report-run-lifecycle-review.md)

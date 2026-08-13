@@ -107,6 +107,10 @@ test.describe('institution console web presentation and repair operations', () =
     await expect(page.getByText('실제 기기 위험도, 현장 calibration, 개별 운영 조치가 아닙니다.')).toBeVisible();
     await expect(page.getByText('R12 · EVIDENCE-GROUNDED REPORT')).toBeVisible();
     await expect(page.getByText('LLM 사용 안 함 · deterministic fallback')).toBeVisible();
+    await expect(page.getByLabel('보고서 실행 상태')).toContainText('Fallback');
+    await expect(page.getByLabel('보고서 실행 상태')).toContainText('사람 검토대기');
+    await expect(page.getByLabel('보고서 실행 상태')).toContainText('발행 상태잠김');
+    await expect(page.getByText('미발행', { exact: true })).toBeVisible();
     await expect(page.getByText('근거 연결됨')).toHaveCount(5);
     await expect(page.getByText('FACT-R11-FALLBACK-POLICY')).toBeVisible();
     await expect(page.getByText('CONTROLLER / ABSTENTION')).toBeVisible();

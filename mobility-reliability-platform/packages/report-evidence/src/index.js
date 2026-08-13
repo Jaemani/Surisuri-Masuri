@@ -15,6 +15,14 @@ export class ReportEvidenceError extends Error {
   constructor(code) { super(code); this.code = code }
 }
 
+const reportRunTransitions = {
+  pending: new Set(['validated', 'failed']),
+  validated: new Set(['completed', 'fallback', 'failed']),
+  completed: new Set(),
+  fallback: new Set(),
+  failed: new Set(),
+}
+
 const stable = (value) => Array.isArray(value)
   ? value.map(stable)
   : value && typeof value === 'object'
@@ -130,4 +138,30 @@ export function buildSyntheticCalibrationReport(assessment) {
   report.reportSha256 = sha256(canonical(payload))
   validateGroundedReport(report, bundle)
   return { bundle, report }
+}
+
+export function createReportRun({ reportRunId, sourceArtifactSha256, factBundleSha256, createdAt }) {
+  if (!/^report-run-[a-f0-9]{16}$/.test(reportRunId) || !/^[a-f0-9]{64}$/.test(sourceArtifactSha256) || !/^[a-f0-9]{64}$/.test(factBundleSha256) || !validTimestamp(createdAt)) throw new ReportEvidenceError('REPORT_RUN_INPUT_INVALID')
+  return { schemaVersion: 'report-run-lifecycle.v1', reportRunId, sourceArtifactSha256, factBundleSha256, status: 'pending', reviewStatus: 'not_ready', publicationStatus: 'unpublished', fallbackUsed: false, failureClass: null, artifactSha256: null, createdAt, completedAt: null, revision: 1 }
+}
+
+export function transitionReportRun(run, targetStatus, options = {}) {
+  exactKeys(run, ['schemaVersion', 'reportRunId', 'sourceArtifactSha256', 'factBundleSha256', 'status', 'reviewStatus', 'publicationStatus', 'fallbackUsed', 'failureClass', 'artifactSha256', 'createdAt', 'completedAt', 'revision'], 'REPORT_RUN_KEYS_INVALID')
+  if (run.schemaVersion !== 'report-run-lifecycle.v1' || !reportRunTransitions[run.status]?.has(targetStatus) || run.publicationStatus !== 'unpublished' || !Number.isSafeInteger(run.revision) || run.revision < 1) throw new ReportEvidenceError('REPORT_RUN_TRANSITION_INVALID')
+  if (targetStatus === 'validated') return { ...run, status: 'validated', revision: run.revision + 1 }
+  if (targetStatus === 'failed') {
+    if (!['source_invalid', 'claim_validation_failed', 'artifact_sealing_failed'].includes(options.failureClass)) throw new ReportEvidenceError('REPORT_RUN_FAILURE_CLASS_REQUIRED')
+    return { ...run, status: 'failed', failureClass: options.failureClass, revision: run.revision + 1 }
+  }
+  if (!/^[a-f0-9]{64}$/.test(options.artifactSha256) || !validTimestamp(options.completedAt)) throw new ReportEvidenceError('REPORT_RUN_TERMINAL_INPUT_INVALID')
+  if (targetStatus === 'fallback' && options.fallbackUsed !== true) throw new ReportEvidenceError('REPORT_RUN_FALLBACK_REQUIRED')
+  if (targetStatus === 'completed' && options.fallbackUsed !== false) throw new ReportEvidenceError('REPORT_RUN_PRIMARY_REQUIRED')
+  return { ...run, status: targetStatus, reviewStatus: 'pending', fallbackUsed: options.fallbackUsed, artifactSha256: options.artifactSha256, completedAt: options.completedAt, revision: run.revision + 1 }
+}
+
+export function buildSyntheticFallbackRun(bundle, report) {
+  validateGroundedReport(report, bundle)
+  const pending = createReportRun({ reportRunId: `report-run-${bundle.sourceArtifactSha256.slice(0, 16)}`, sourceArtifactSha256: bundle.sourceArtifactSha256, factBundleSha256: bundle.factBundleSha256, createdAt: report.generatedAt })
+  const validated = transitionReportRun(pending, 'validated')
+  return transitionReportRun(validated, 'fallback', { fallbackUsed: true, artifactSha256: report.reportSha256, completedAt: report.generatedAt })
 }

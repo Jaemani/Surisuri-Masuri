@@ -336,3 +336,14 @@
 - 경계: Rules defense-in-depth만 증명한다. Admin SDK writer 무결성, production Rules 배포, 사람 승인·발행, 실제 기관 데이터와 Firebase runtime을 증명하지 않는다.
 
 관련: [ADR-0064](../decisions/ADR-0064-report-claim-persistence-binding.md), [UPD-20260813-34](../product-updates/UPD-20260813-34-report-claim-rules-binding.md), [HR-20260813-25](../reports/human/HR-20260813-25-report-claim-binding-review.md)
+
+# EVD-20260813-031 — R12 report run lifecycle과 검토·발행 표시
+
+- 범위: local pure lifecycle, console synthetic presentation, projection label
+- 상태: `pending → validated → fallback`, `reviewStatus=pending`, `publicationStatus=unpublished`; skip/reverse/post-terminal 전이와 failure class 누락 거부
+- UI: 생성 방식·기계 검증·사람 검토·발행 상태 네 단계, 미발행 badge, 승인·내보내기 CTA 없음
+- 검증: report-evidence 15/15 tests, console typecheck, domain pure 32 tests, Playwright console 6/6; snapshot `console-reports-grounded-evidence-console-chromium-linux.png` 직접 시각 확인, SHA-256 `6e6199bbe218c64de09ab7a01f0f8199cee37ebe7722f8cbdb15bea5fd95dc4f`
+- 시각 한계: screenshot 기준 위계·잘림만 확인했다. keyboard, screen reader, 실제 대비 측정, native 접근성과 production 데이터는 미검증이다.
+- 운영 경계: Firebase report worker, 사람 승인·발행 receipt, actual institution report와 production 배포를 증명하지 않는다.
+
+관련: [ADR-0065](../decisions/ADR-0065-report-generation-review-publication-states.md), [UPD-20260813-35](../product-updates/UPD-20260813-35-report-run-lifecycle.md), [HR-20260813-26](../reports/human/HR-20260813-26-report-run-lifecycle-review.md)

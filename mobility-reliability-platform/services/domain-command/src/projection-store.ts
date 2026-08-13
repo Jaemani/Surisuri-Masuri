@@ -392,7 +392,7 @@ function ledgerTransactionType(type: unknown): ConsoleLedgerTransactionType {
   return type as ConsoleLedgerTransactionType;
 }
 function ledgerState(type: unknown): '예약' | '집행 완료' | '예약 취소' { return type === 'execution' ? '집행 완료' : type === 'release' || type === 'reversal' ? '예약 취소' : '예약'; }
-function reportState(status: unknown) { return status === 'completed' ? '발행 완료' : status === 'running' ? '검토 중' : '초안'; }
+function reportState(status: unknown) { return ({ pending: '생성 대기', validated: '검증 완료', completed: '생성 완료 · 검토 대기', fallback: 'Fallback · 검토 대기', failed: '생성 실패', running: '생성 중' } as Record<string, string>)[String(status)] ?? '상태 확인 필요'; }
 function isToday(value: unknown) { const millis = timestampMillis(value); if (!millis) return false; const now = new Date(); const date = new Date(millis); return now.getUTCFullYear() === date.getUTCFullYear() && now.getUTCMonth() === date.getUTCMonth() && now.getUTCDate() === date.getUTCDate(); }
 function repairerAllowedActions(status: RepairStatus): Array<'schedule' | 'start' | 'submit' | 'resume'> { if (status === 'assigned') return ['schedule']; if (status === 'scheduled') return ['start']; if (status === 'in_progress') return ['submit']; if (status === 'needs_correction') return ['resume']; return []; }
 function safeWorkItems(value: unknown): Array<{ categoryCode: string; categoryLabel: string; actionCode: string; actionLabel: string; quantity: number; lineAmountKrw: number }> {

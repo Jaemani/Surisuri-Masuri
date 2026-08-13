@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import assessment from '../../contracts/fixtures/reliability-calibration-assessment.v1.valid.json' with { type: 'json' }
 import consoleSnapshot from '../../../apps/console/src/data/r12GroundedReport.json' with { type: 'json' }
-import { ReportEvidenceError, buildSyntheticCalibrationReport, validateFactBundle, validateGroundedReport } from '../src/index.js'
+import { ReportEvidenceError, buildSyntheticCalibrationReport, buildSyntheticFallbackRun, createReportRun, transitionReportRun, validateFactBundle, validateGroundedReport } from '../src/index.js'
 
 test('builds deterministic aggregate facts and a fully grounded fallback report', () => {
   const first = buildSyntheticCalibrationReport(assessment)
@@ -105,4 +105,31 @@ test('rejects identifier value channels and arbitrary artifact identities', () =
   const substituted = structuredClone(report)
   substituted.reportId = `report-${'0'.repeat(16)}`
   assert.throws(() => validateGroundedReport(substituted, bundle), /REPORT_INVALID/)
+})
+
+test('moves a deterministic report through validation into fallback review', () => {
+  const { bundle, report } = buildSyntheticCalibrationReport(assessment)
+  const run = buildSyntheticFallbackRun(bundle, report)
+  assert.equal(run.status, 'fallback')
+  assert.equal(run.reviewStatus, 'pending')
+  assert.equal(run.publicationStatus, 'unpublished')
+  assert.equal(run.fallbackUsed, true)
+  assert.equal(run.artifactSha256, report.reportSha256)
+})
+
+test('rejects skipped, reversed, and post-terminal report run transitions', () => {
+  const pending = createReportRun({ reportRunId: `report-run-${assessment.assessmentSha256.slice(0, 16)}`, sourceArtifactSha256: assessment.assessmentSha256, factBundleSha256: '1'.repeat(64), createdAt: assessment.generatedAt })
+  assert.throws(() => transitionReportRun(pending, 'fallback', { fallbackUsed: true, artifactSha256: '2'.repeat(64), completedAt: assessment.generatedAt }), /REPORT_RUN_TRANSITION_INVALID/)
+  const validated = transitionReportRun(pending, 'validated')
+  const fallback = transitionReportRun(validated, 'fallback', { fallbackUsed: true, artifactSha256: '2'.repeat(64), completedAt: assessment.generatedAt })
+  assert.throws(() => transitionReportRun(fallback, 'completed', { fallbackUsed: false, artifactSha256: '3'.repeat(64), completedAt: assessment.generatedAt }), /REPORT_RUN_TRANSITION_INVALID/)
+})
+
+test('requires an allowlisted failure class and separates primary from fallback', () => {
+  const pending = createReportRun({ reportRunId: `report-run-${assessment.assessmentSha256.slice(0, 16)}`, sourceArtifactSha256: assessment.assessmentSha256, factBundleSha256: '1'.repeat(64), createdAt: assessment.generatedAt })
+  assert.throws(() => transitionReportRun(pending, 'failed'), /REPORT_RUN_FAILURE_CLASS_REQUIRED/)
+  const failed = transitionReportRun(pending, 'failed', { failureClass: 'source_invalid' })
+  assert.equal(failed.reviewStatus, 'not_ready')
+  const validated = transitionReportRun(pending, 'validated')
+  assert.throws(() => transitionReportRun(validated, 'completed', { fallbackUsed: true, artifactSha256: '2'.repeat(64), completedAt: assessment.generatedAt }), /REPORT_RUN_PRIMARY_REQUIRED/)
 })
