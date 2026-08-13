@@ -172,6 +172,8 @@ def validate_device_group_time_holdout(episodes: list[Mapping[str, Any]]) -> Non
 def validate_reliability_dataset(dataset: Mapping[str, Any]) -> None:
     """Validate internal R10 dataset semantics without logging record values."""
 
+    if not isinstance(dataset, Mapping):
+        raise DatasetValidationError("reliability dataset:object")
     expected_root = {
         "schemaVersion": DATASET_VERSION,
         "generatorVersion": GENERATOR_VERSION,
@@ -196,6 +198,7 @@ def validate_reliability_dataset(dataset: Mapping[str, Any]) -> None:
     if not isinstance(replacement_events, list):
         raise DatasetValidationError("reliability replacement events:invalid")
     replacement_by_id: dict[str, Mapping[str, Any]] = {}
+    reset_reference_count: dict[str, int] = {}
     for event in replacement_events:
         if not isinstance(event, Mapping) or set(event) != {
             "eventId",
@@ -221,6 +224,7 @@ def validate_reliability_dataset(dataset: Mapping[str, Any]) -> None:
             raise DatasetValidationError("reliability replacement event provenance:invalid")
         _timestamp(event.get("occurredAt"), "replacement occurredAt")
         replacement_by_id[event_id] = event
+        reset_reference_count[event_id] = 0
     seen_episode_ids: set[str] = set()
     for episode in episodes:
         if not isinstance(episode, Mapping):
@@ -268,6 +272,8 @@ def validate_reliability_dataset(dataset: Mapping[str, Any]) -> None:
         reset_reason = episode.get("riskStartReason")
         reset_event = episode.get("riskResetEventId")
         if reset_reason == "component_replaced":
+            if not isinstance(reset_event, str):
+                raise DatasetValidationError("reliability risk reset event:identity")
             event = replacement_by_id.get(reset_event)
             if event is None:
                 raise DatasetValidationError("reliability risk reset event:missing")
@@ -277,6 +283,7 @@ def validate_reliability_dataset(dataset: Mapping[str, Any]) -> None:
                 or event["occurredAt"] != episode["riskStartAt"]
             ):
                 raise DatasetValidationError("reliability risk reset event:linkage")
+            reset_reference_count[reset_event] += 1
         elif reset_reason == "observation_started":
             if reset_event is not None:
                 raise DatasetValidationError("reliability risk reset event:unexpected")
@@ -284,10 +291,14 @@ def validate_reliability_dataset(dataset: Mapping[str, Any]) -> None:
             raise DatasetValidationError("reliability risk start reason:invalid")
         for key in ("cumulativeDistanceM", "meanDailyDistanceM"):
             value = episode.get(key)
+            try:
+                finite = math.isfinite(value) if isinstance(value, int | float) else False
+            except OverflowError:
+                finite = False
             if (
                 not isinstance(value, int | float)
                 or isinstance(value, bool)
-                or not math.isfinite(value)
+                or not finite
                 or value < 0
             ):
                 raise DatasetValidationError(f"reliability episode {key}:invalid")
@@ -302,6 +313,14 @@ def validate_reliability_dataset(dataset: Mapping[str, Any]) -> None:
                 raise DatasetValidationError("reliability episode outcome kind:invalid")
         elif "outcomeAt" in episode or "outcomeKind" in episode:
             raise DatasetValidationError("reliability censored episode outcome:unexpected")
+    if any(count != 1 for count in reset_reference_count.values()):
+        raise DatasetValidationError("reliability replacement event:orphan_or_reused")
+    coverage = {
+        split: {episode["component"] for episode in episodes if episode["split"] == split}
+        for split in SPLIT_STARTS
+    }
+    if any(coverage[split] != set(COMPONENTS) for split in SPLIT_STARTS):
+        raise DatasetValidationError("reliability component coverage:incomplete")
     validate_device_group_time_holdout(episodes)
 
 

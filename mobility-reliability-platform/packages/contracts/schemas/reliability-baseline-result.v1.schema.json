@@ -22,7 +22,8 @@
     "methods",
     "limitations",
     "deploymentAuthorized",
-    "deploymentDecision"
+    "deploymentDecision",
+    "resultSha256"
   ],
   "properties": {
     "schemaVersion": { "const": "reliability-baseline-result.v1" },
@@ -148,7 +149,8 @@
       }
     },
     "deploymentAuthorized": { "const": false },
-    "deploymentDecision": { "const": "defer" }
+    "deploymentDecision": { "const": "defer" },
+    "resultSha256": { "$ref": "#/$defs/sha256" }
   },
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },

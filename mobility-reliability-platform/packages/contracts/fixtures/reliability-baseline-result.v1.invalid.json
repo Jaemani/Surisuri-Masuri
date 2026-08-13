@@ -24,5 +24,6 @@
   "limitations": ["synthetic_data_only"],
   "deploymentAuthorized": true,
   "deploymentDecision": "defer",
+  "resultSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "rawCoordinates": [37.5665, 126.978]
 }

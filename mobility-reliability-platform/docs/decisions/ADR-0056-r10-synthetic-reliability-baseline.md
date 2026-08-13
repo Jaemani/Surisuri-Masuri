@@ -40,6 +40,6 @@
 
 ## 구현 결과와 한계
 
-합성 episode generator, device-group/time holdout validator, 세 기준선 evaluator와 결과 semantic validator를 구현했다. 기본 합성 데이터에서 controller train 표본은 3개로 최소 4개보다 작아 세 method 모두 판단을 유보한다. 신규 10개 테스트를 포함한 ML test 83개가 local CPU 환경에서 통과했다.
+합성 episode generator, device-group/time holdout validator, 세 기준선 evaluator와 결과 semantic validator를 구현했다. 기본 합성 데이터에서 controller train 표본은 3개로 최소 4개보다 작아 세 method 모두 판단을 유보한다. self-hash로 aggregate count를 포함한 결과 변조를 감지한다. 신규 14개 테스트를 포함한 ML test 87개가 local CPU 환경에서 통과했다.
 
 실제 수리·주행 export, field holdout, 실제 부품별 sample·metric, 모델 학습, confidence interval, 사용자 알림, Firebase/production 배포는 수행하지 않았다. 합성 수치는 제품 효과나 안전 성능으로 사용할 수 없다.

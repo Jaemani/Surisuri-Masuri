@@ -89,3 +89,43 @@ def test_distance_features_are_finite_and_available_at_decision() -> None:
     non_finite["episodes"][0]["meanDailyDistanceM"] = math.inf
     with pytest.raises(DatasetValidationError, match="invalid"):
         validate_reliability_dataset(non_finite)
+    huge = copy.deepcopy(generate_reliability_dataset())
+    huge["episodes"][0]["cumulativeDistanceM"] = 10**10000
+    with pytest.raises(DatasetValidationError, match="invalid"):
+        validate_reliability_dataset(huge)
+
+
+@pytest.mark.parametrize("malformed", [None, [], "bad"])
+def test_malformed_root_fails_with_domain_error(malformed: object) -> None:
+    with pytest.raises(DatasetValidationError, match="dataset:object"):
+        validate_reliability_dataset(malformed)  # type: ignore[arg-type]
+
+
+def test_replacement_events_and_component_coverage_are_exact() -> None:
+    orphan = copy.deepcopy(generate_reliability_dataset())
+    orphan["replacementEvents"].append(
+        {
+            **orphan["replacementEvents"][0],
+            "eventId": "5d9de7c7-eccd-42ff-a85a-ab09abe53fc2",
+        }
+    )
+    with pytest.raises(DatasetValidationError, match="orphan_or_reused"):
+        validate_reliability_dataset(orphan)
+    missing_component = copy.deepcopy(generate_reliability_dataset())
+    missing_component["episodes"] = [
+        row
+        for row in missing_component["episodes"]
+        if not (row["split"] == "test" and row["component"] == "controller")
+    ]
+    remaining_reset_ids = {
+        row["riskResetEventId"]
+        for row in missing_component["episodes"]
+        if "riskResetEventId" in row
+    }
+    missing_component["replacementEvents"] = [
+        event
+        for event in missing_component["replacementEvents"]
+        if event["eventId"] in remaining_reset_ids
+    ]
+    with pytest.raises(DatasetValidationError, match="coverage:incomplete"):
+        validate_reliability_dataset(missing_component)

@@ -103,20 +103,20 @@ def test_result_semantics_reject_count_and_method_cohort_tampering() -> None:
     result = evaluate_reliability_baselines(generate_reliability_dataset())
     bad_counts = copy.deepcopy(result)
     bad_counts["counts"]["censored"] += 1
-    with pytest.raises(DatasetValidationError, match="counts:not_reconciled"):
+    with pytest.raises(DatasetValidationError, match="result hash:mismatch"):
         validate_reliability_result(bad_counts)
     bad_cohort = copy.deepcopy(result)
     bad_cohort["methods"]["fixedInterval"]["components"][0]["sampleCount"] += 1
-    with pytest.raises(DatasetValidationError, match="component counts:not_reconciled"):
+    with pytest.raises(DatasetValidationError, match="result hash:mismatch"):
         validate_reliability_result(bad_cohort)
     disconnected_top_level = copy.deepcopy(result)
     disconnected_top_level["counts"]["observations"] += 1
     disconnected_top_level["counts"]["censored"] += 1
-    with pytest.raises(DatasetValidationError, match="top-level cohort:mismatch"):
+    with pytest.raises(DatasetValidationError, match="result hash:mismatch"):
         validate_reliability_result(disconnected_top_level)
     impossible_devices = copy.deepcopy(result)
     impossible_devices["counts"]["devices"] = impossible_devices["counts"]["observations"] + 1
-    with pytest.raises(DatasetValidationError, match="device count:impossible"):
+    with pytest.raises(DatasetValidationError, match="result hash:mismatch"):
         validate_reliability_result(impossible_devices)
 
 

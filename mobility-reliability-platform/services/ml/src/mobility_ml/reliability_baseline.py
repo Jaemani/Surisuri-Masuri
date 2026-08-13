@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from .manifest import DatasetValidationError, _validate_repository_schema
+from .manifest import DatasetValidationError, _validate_repository_schema, canonical_json
 from .reliability_dataset import (
     DATASET_VERSION,
     HORIZON_DAYS,
@@ -184,6 +185,10 @@ def validate_reliability_result(result: Mapping[str, Any]) -> None:
         error_type=DatasetValidationError,
         label=RESULT_VERSION,
     )
+    expected_hash = result["resultSha256"]
+    payload = {key: value for key, value in result.items() if key != "resultSha256"}
+    if hashlib.sha256(canonical_json(payload)).hexdigest() != expected_hash:
+        raise DatasetValidationError("reliability baseline result hash:mismatch")
     counts = result["counts"]
     if counts["observedOutcomes"] + counts["censored"] != counts["observations"]:
         raise DatasetValidationError("reliability baseline counts:not_reconciled")
@@ -326,5 +331,6 @@ def evaluate_reliability_baselines(
         "deploymentAuthorized": False,
         "deploymentDecision": "defer",
     }
+    result["resultSha256"] = hashlib.sha256(canonical_json(result)).hexdigest()
     validate_reliability_result(result)
     return result

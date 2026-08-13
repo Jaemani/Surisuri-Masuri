@@ -7,7 +7,7 @@
 - 출처: `reliability_dataset.py`, `reliability_baseline.py`, 신규 unit tests
 - 상태: generated / 사람 검토 대기
 - 확인 항목: deterministic episode/hash, explicit replacement risk reset, device-group/time holdout, future-label leakage 차단, fixed interval·distance·Kaplan–Meier 동일 cohort 평가, data-insufficient abstention, semantic count reconciliation
-- 검증: 신규 reliability 10 tests, 전체 ML 83 tests, Ruff format·lint 통과
+- 검증: 신규 reliability 14 tests, 전체 ML 87 tests, Ruff format·lint 통과
 - privacy·안전 경계: 결과에 episode/group ID·outcome time·raw GPS·좌표·PII 없음, `trainingPerformed=false`, deployment false/defer
 - 현재 증명하지 않는 것: 실제 수리·주행 export, 실제 cohort/metric/risk curve, field 성능, 모델 학습, 모바일 추론, Firebase·production 배포
 - 사용처: [ADR-0056](../decisions/ADR-0056-r10-synthetic-reliability-baseline.md), [UPD-20260813-26](../product-updates/UPD-20260813-26-r10-synthetic-reliability-baseline.md), [HR-20260813-19](../reports/human/HR-20260813-19-r10-synthetic-reliability-baseline.md), [R10](../reports/fixed/2026-09-30.md)

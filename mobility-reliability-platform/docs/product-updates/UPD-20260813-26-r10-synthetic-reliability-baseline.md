@@ -32,8 +32,8 @@ reviewed_at: TBD
 
 | 완료 조건 | 결과 |
 | --- | --- |
-| 신규 reliability test | 10 passed |
-| 전체 ML 회귀 | 83 passed / local CPU |
+| 신규 reliability test | 14 passed |
+| 전체 ML 회귀 | 87 passed / local CPU |
 | Ruff format·lint | pass |
 | 실제 field·배포 | 수행하지 않음 |
 

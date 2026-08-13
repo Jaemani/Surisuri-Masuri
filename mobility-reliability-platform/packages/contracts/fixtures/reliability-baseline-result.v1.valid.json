@@ -103,5 +103,6 @@
     "not_for_safety_critical_failure_prediction"
   ],
   "deploymentAuthorized": false,
-  "deploymentDecision": "defer"
+  "deploymentDecision": "defer",
+  "resultSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 }
