@@ -629,17 +629,20 @@ content_hash, sensitivity, created_at, expires_at?
 `/reportRuns/{reportRunId}` 및 `/claims/{claimId}`:
 
 ```text
-reportRun: report_type, audience, generator_version,
+reportRun: report_run_id, tenant_id, report_type, audience, generator_version,
 prompt_hash, report_schema_version, validator_version,
 fact_bundle_hash, fact_count, model_provider?, model_version?,
 status, failure_class?, fallback_used,
 artifact_path?, artifact_hash?, created_at, completed_at?
 
-claim: claim_text, claim_type, fact_ids[],
+claim: claim_id, report_run_id, tenant_id, fact_bundle_hash,
+claim_content_hash, claim_text, claim_type, fact_ids[],
 validation_status, validation_codes[], created_at
 ```
 
 근거 없는 주요 claim은 `unsupported`로 표시하고 최종본에서 제외하거나 `[확인 필요]`로 강등한다. report artifact가 크면 Storage에 두고 Firestore에는 상태와 hash만 둔다.
+
+Client read를 유지하는 동안 claim의 tenant/report/claim path ID, 부모 report 존재와 양쪽 `fact_bundle_hash`가 모두 일치해야 한다. 이 persistence envelope은 ID를 금지하는 safe report content artifact와 분리한다.
 
 ## 멱등성 계약
 

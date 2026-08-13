@@ -217,3 +217,6 @@ rules baseline을 연결했다. 코드 기준점은 commit `a9b20d9`이다.
 - [HR-20260813-24 — R12 source 무결성 경계 검토](./reports/human/HR-20260813-24-r12-source-integrity-review.md)
 - [ADR-0063 — R12 완전한 Fact·claim profile](./decisions/ADR-0063-r12-complete-fact-claim-profile.md)
 - [UPD-20260813-33 — R12 완전한 Fact·claim profile](./product-updates/UPD-20260813-33-r12-complete-profile.md)
+- [ADR-0064 — report claim persistence binding](./decisions/ADR-0064-report-claim-persistence-binding.md)
+- [UPD-20260813-34 — report claim Rules binding](./product-updates/UPD-20260813-34-report-claim-rules-binding.md)
+- [HR-20260813-25 — report claim 저장 경계 검토](./reports/human/HR-20260813-25-report-claim-binding-review.md)

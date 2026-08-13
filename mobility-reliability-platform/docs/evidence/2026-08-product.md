@@ -326,3 +326,13 @@
 - 경계: R11 synthetic abstention 전용 profile이다. candidate claim disposition, Firebase persistence envelope, tenant/parent binding, 사람 승인·발행과 production 배포는 별도다.
 
 관련: [ADR-0063](../decisions/ADR-0063-r12-complete-fact-claim-profile.md), [UPD-20260813-33](../product-updates/UPD-20260813-33-r12-complete-profile.md)
+
+# EVD-20260813-030 — report claim tenant·parent binding
+
+- 범위: local Firestore Rules Emulator
+- 허용: active case worker가 같은 tenant의 exact report/claim ID와 동일 Fact bundle hash로 결합된 부모·claim 단건 읽기
+- 거부: wrong stored tenant, wrong report ID, claim path/field ID 불일치, parent/claim bundle hash 불일치, 부모 없는 orphan claim, 모든 direct client write
+- 검증: `pnpm --filter @mobility-reliability/firebase-rules test`; 2 files, 41 tests 통과
+- 경계: Rules defense-in-depth만 증명한다. Admin SDK writer 무결성, production Rules 배포, 사람 승인·발행, 실제 기관 데이터와 Firebase runtime을 증명하지 않는다.
+
+관련: [ADR-0064](../decisions/ADR-0064-report-claim-persistence-binding.md), [UPD-20260813-34](../product-updates/UPD-20260813-34-report-claim-rules-binding.md), [HR-20260813-25](../reports/human/HR-20260813-25-report-claim-binding-review.md)

@@ -81,6 +81,31 @@ service cloud.firestore {
         && resource.data.tenant_id == tenantId;
     }
 
+    function reportPath(tenantId, reportRunId) {
+      return /databases/$(database)/documents/tenants/$(tenantId)/reportRuns/$(reportRunId);
+    }
+
+    function canReadReportRun(tenantId, reportRunId) {
+      return isOperationalStaff(tenantId)
+        && hasMatchingTenant(tenantId)
+        && 'report_run_id' in resource.data
+        && resource.data.report_run_id == reportRunId;
+    }
+
+    function canReadReportClaim(tenantId, reportRunId, claimId) {
+      return isOperationalStaff(tenantId)
+        && hasMatchingTenant(tenantId)
+        && 'report_run_id' in resource.data
+        && resource.data.report_run_id == reportRunId
+        && 'claim_id' in resource.data
+        && resource.data.claim_id == claimId
+        && 'fact_bundle_hash' in resource.data
+        && exists(reportPath(tenantId, reportRunId))
+        && get(reportPath(tenantId, reportRunId)).data.tenant_id == tenantId
+        && get(reportPath(tenantId, reportRunId)).data.report_run_id == reportRunId
+        && get(reportPath(tenantId, reportRunId)).data.fact_bundle_hash == resource.data.fact_bundle_hash;
+    }
+
     function isOwnPerson(tenantId, personId) {
       return hasOwnPerson(tenantId)
         && get(membershipPath(tenantId)).data.person_id == personId;
@@ -262,11 +287,11 @@ service cloud.firestore {
       }
 
       match /reportRuns/{reportRunId} {
-        allow get, list: if isOperationalStaff(tenantId) && hasMatchingTenant(tenantId);
+        allow get, list: if canReadReportRun(tenantId, reportRunId);
         allow write: if false;
 
         match /claims/{claimId} {
-          allow get, list: if isOperationalStaff(tenantId);
+          allow get, list: if canReadReportClaim(tenantId, reportRunId, claimId);
           allow write: if false;
         }
       }

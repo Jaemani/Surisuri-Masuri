@@ -403,8 +403,15 @@ describe('least-privilege client read boundary', () => {
       ['alerts/alert-b/deliveries/delivery-1', {}],
       ['modelPredictions/prediction-1', {}],
       ['evidenceFacts/fact-1', {}],
-      ['reportRuns/report-1', {}],
-      ['reportRuns/report-1/claims/claim-1', {}]
+      ['reportRuns/report-1', {
+        report_run_id: 'report-1',
+        fact_bundle_hash: 'bundle-hash-1'
+      }],
+      ['reportRuns/report-1/claims/claim-1', {
+        report_run_id: 'report-1',
+        claim_id: 'claim-1',
+        fact_bundle_hash: 'bundle-hash-1'
+      }]
     ];
     for (const [path, data] of readablePaths) {
       await seedDocument(`tenants/tenant-a/${path}`, {
@@ -433,6 +440,41 @@ describe('least-privilege client read boundary', () => {
         )
       )
     );
+  });
+
+  test('report claims require exact tenant, parent, path IDs, and fact bundle binding', async () => {
+    await seedMembership('tenant-a', 'case-worker', {
+      roles: ['case_worker'],
+      personId: 'worker-person'
+    });
+    await seedDocument('tenants/tenant-a/reportRuns/report-valid', {
+      tenant_id: 'tenant-a',
+      report_run_id: 'report-valid',
+      fact_bundle_hash: 'bundle-valid'
+    });
+    await seedDocument('tenants/tenant-a/reportRuns/report-valid/claims/claim-valid', {
+      tenant_id: 'tenant-a',
+      report_run_id: 'report-valid',
+      claim_id: 'claim-valid',
+      fact_bundle_hash: 'bundle-valid'
+    });
+    const invalidClaims = [
+      ['report-valid/claims/claim-wrong-tenant', { tenant_id: 'tenant-b', report_run_id: 'report-valid', claim_id: 'claim-wrong-tenant', fact_bundle_hash: 'bundle-valid' }],
+      ['report-valid/claims/claim-wrong-report', { tenant_id: 'tenant-a', report_run_id: 'report-other', claim_id: 'claim-wrong-report', fact_bundle_hash: 'bundle-valid' }],
+      ['report-valid/claims/claim-path-mismatch', { tenant_id: 'tenant-a', report_run_id: 'report-valid', claim_id: 'claim-other', fact_bundle_hash: 'bundle-valid' }],
+      ['report-valid/claims/claim-wrong-bundle', { tenant_id: 'tenant-a', report_run_id: 'report-valid', claim_id: 'claim-wrong-bundle', fact_bundle_hash: 'bundle-other' }],
+      ['report-orphan/claims/claim-orphan', { tenant_id: 'tenant-a', report_run_id: 'report-orphan', claim_id: 'claim-orphan', fact_bundle_hash: 'bundle-valid' }]
+    ];
+    for (const [path, data] of invalidClaims) {
+      await seedDocument(`tenants/tenant-a/reportRuns/${path}`, data);
+    }
+
+    const db = testEnvironment.authenticatedContext('case-worker').firestore();
+    await assertSucceeds(getDoc(doc(db, 'tenants/tenant-a/reportRuns/report-valid')));
+    await assertSucceeds(getDoc(doc(db, 'tenants/tenant-a/reportRuns/report-valid/claims/claim-valid')));
+    for (const [path] of invalidClaims) {
+      await assertFails(getDoc(doc(db, `tenants/tenant-a/reportRuns/${path}`)));
+    }
   });
 
   test.each(['guardian', 'repairer', 'auditor'])(
@@ -651,7 +693,9 @@ describe('server-owned mutation boundary', () => {
       'tenants/tenant-a/repairs/repair-1',
       'tenants/tenant-a/repairs/repair-1/items/item-1',
       'tenants/tenant-a/inspections/inspection-1',
-      'tenants/tenant-a/inspections/inspection-1/observations/observation-1'
+      'tenants/tenant-a/inspections/inspection-1/observations/observation-1',
+      'tenants/tenant-a/reportRuns/report-1',
+      'tenants/tenant-a/reportRuns/report-1/claims/claim-1'
     ];
 
     for (const path of protectedPaths) {
