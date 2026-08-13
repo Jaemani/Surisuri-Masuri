@@ -1,5 +1,17 @@
 # 2026년 8월 제품 증거
 
+## EVD-20260813-023 — console 예방점검 근거·유보 UI
+
+- 생성: 2026-08-13 / Codex 작업 실행
+- 환경·데이터: local WSL2 / synthetic / Expo web·Playwright console visual
+- 출처: console 예방점검 React UI, E2E flow, visual snapshot
+- 상태: generated / 사람 검토 대기
+- 확인 항목: 운영 검토·판단 유보·등록 일정 요약, 근거 출처 분리, 확인 사실/부족 데이터/다음 조치, 점수 없는 abstention, 고장·안전 보증 금지 문구
+- 검증: console typecheck/test/build, Playwright console 4 passed
+- 시각 증거: `tests/e2e/console-web.spec.ts-snapshots/console-inspection-evidence-console-chromium-linux.png`
+- 현재 증명하지 않는 것: 실제 기관 이해도·접근성, 실제 점검·field metric, Firebase·production 배포
+- 사용처: [ADR-0057](../decisions/ADR-0057-console-inspection-evidence-ui.md), [UPD-20260813-27](../product-updates/UPD-20260813-27-console-inspection-evidence-ui.md), [HR-20260813-20](../reports/human/HR-20260813-20-console-inspection-evidence-ui.md), [R10](../reports/fixed/2026-09-30.md)
+
 ## EVD-20260813-022 — R10 local synthetic reliability baseline
 
 - 생성: 2026-08-13 / Codex 작업 실행

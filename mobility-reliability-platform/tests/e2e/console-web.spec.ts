@@ -48,4 +48,21 @@ test.describe('institution console web presentation and repair operations', () =
       animations: 'disabled',
     });
   });
+
+  test('separates inspection evidence, abstention, and operational next action', async ({ page }) => {
+    await page.goto('/');
+
+    await page.getByRole('button', { name: /예방점검 12/ }).click();
+    await expect(page.getByRole('heading', { name: '예방점검' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '근거별 검토함' })).toBeVisible();
+    await expect(page.getByText('우선순위 예측이 아닙니다')).toBeVisible();
+    await page.getByRole('button', { name: /이경자 · MOB-23874/ }).click();
+    await expect(page.getByText('판단 유보', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('decision-time 거리 요약')).toBeVisible();
+    await expect(page.getByText(/고장 시점이나 안전을 보증하지 않습니다/)).toBeVisible();
+    await expect(page.getByText(/원본 이동경로|원시 위치|좌표|고장 확률/)).toHaveCount(0);
+    await expect(page).toHaveScreenshot('console-inspection-evidence.png', {
+      animations: 'disabled',
+    });
+  });
 });
