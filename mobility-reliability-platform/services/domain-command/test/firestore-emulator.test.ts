@@ -91,6 +91,7 @@ describe('Firestore command adapter', () => {
     expect(summary.data()).toMatchObject({ tenant_id: tenantId, person_id: 'person-1', available_krw: 320000, reserved_krw: 180000 });
     const entries = await summary.ref.collection('transactions').get();
     expect(entries.size).toBe(2);
+    expect(entries.docs[0]?.data()).toHaveProperty('transaction_id');
     expect(entries.docs[0]?.data()).not.toHaveProperty('transactionId');
   });
 
@@ -121,8 +122,25 @@ describe('Firestore command adapter', () => {
     await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'scheduled', expectedRevision: 3, scheduledAt }, 'complete-03');
     await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'in_progress', expectedRevision: 4 }, 'complete-04');
     await transition(repairer, { repairRequestId: created.resourceId, toStatus: 'repairer_submitted', expectedRevision: 5, billedAmountKrw: 170000, workItems: [{ categoryCode: 'brakes', actionCode: 'repair', quantity: 1, lineAmountKrw: 170000 }] }, 'complete-05');
-    await db.doc(`tenants/${tenantId}/subsidyAccounts/account-1`).set({ tenant_id: tenantId, account_id: 'account-1', person_id: 'person-1', policy_version_id: 'policy-1', allocated_krw: 500000, adjustment_krw: 0, reserved_krw: 0, executed_krw: 0, available_krw: 500000, reserved_by_work_order: {}, status: 'active' });
+    await db.doc(`tenants/${tenantId}/subsidyAccounts/account-1`).set({ tenant_id: tenantId, account_id: 'account-1', person_id: 'person-1', policy_version_id: 'policy-1', allocated_krw: 500000, adjustment_krw: 0, reserved_krw: 170000, executed_krw: 0, available_krw: 330000, reserved_by_work_order: { [created.resourceId]: 170000 }, status: 'active' });
+    await db.doc(`tenants/${tenantId}/subsidyDecisions/decision-1`).set({ tenant_id: tenantId, decision_id: 'decision-1', work_order_id: created.resourceId, account_id: 'account-1', person_id: 'person-1', status: 'approved', approved_amount_krw: 170000 });
+    const scope = { accountId: 'account-1', personId: 'person-1', policyVersionId: 'policy-1', reasonCode: 'repair_support', workOrderId: created.resourceId };
+    const append = (command: AppendSubsidyTransactionCommand, key: string) => store.appendSubsidy({ actor: worker, command, idempotencyKey: key, bodyHash: bodyHash(command) });
+    await expect(append({ ...scope, transactionType: 'execution', amountKrw: 170000 }, 'complete-execution-before-verification')).rejects.toMatchObject({ code: 'EXECUTION_STATUS_INVALID' });
+    await db.doc(`tenants/${tenantId}/subsidyAccounts/account-1`).update({ status: 'closed' });
+    await expect(transition(worker, { repairRequestId: created.resourceId, toStatus: 'center_verified', expectedRevision: 6, subsidyDecisionId: 'decision-closed', subsidyAccountId: 'account-1' }, 'complete-closed-account')).rejects.toMatchObject({ code: 'SUBSIDY_ACCOUNT_MISMATCH' });
+    await db.doc(`tenants/${tenantId}/subsidyAccounts/account-1`).update({ status: 'active' });
+    await expect(transition(worker, { repairRequestId: created.resourceId, toStatus: 'center_verified', expectedRevision: 6, subsidyDecisionId: 'decision-missing', subsidyAccountId: 'account-1' }, 'complete-missing-decision')).rejects.toMatchObject({ code: 'SUBSIDY_DECISION_MISMATCH' });
     await transition(worker, { repairRequestId: created.resourceId, toStatus: 'center_verified', expectedRevision: 6, subsidyDecisionId: 'decision-1', subsidyAccountId: 'account-1' }, 'complete-06');
+    await db.doc(`tenants/${tenantId}/subsidyAccounts/account-other`).set({ tenant_id: tenantId, account_id: 'account-other', person_id: 'person-1', policy_version_id: 'policy-1', allocated_krw: 170000, adjustment_krw: 0, reserved_krw: 170000, executed_krw: 0, available_krw: 0, reserved_by_work_order: { [created.resourceId]: 170000 }, status: 'active' });
+    await expect(append({ ...scope, accountId: 'account-other', transactionType: 'execution', amountKrw: 170000 }, 'complete-execution-wrong-account')).rejects.toMatchObject({ code: 'SUBSIDY_ACCOUNT_MISMATCH' });
+    await db.doc(`tenants/${tenantId}/subsidyAccounts/account-1`).update({ status: 'closed' });
+    await expect(append({ ...scope, transactionType: 'execution', amountKrw: 170000 }, 'complete-execution-closed-account')).rejects.toMatchObject({ code: 'SUBSIDY_ACCOUNT_MISMATCH' });
+    await db.doc(`tenants/${tenantId}/subsidyAccounts/account-1`).update({ status: 'active' });
+    await db.doc(`tenants/${tenantId}/subsidyPolicies/policy-1`).update({ status: 'inactive' });
+    await expect(append({ ...scope, transactionType: 'execution', amountKrw: 170000 }, 'complete-execution-inactive-policy')).rejects.toMatchObject({ code: 'SUBSIDY_POLICY_INACTIVE' });
+    await db.doc(`tenants/${tenantId}/subsidyPolicies/policy-1`).update({ status: 'active' });
+    await append({ ...scope, transactionType: 'execution', amountKrw: 170000 }, 'complete-execution-verified');
     const completed = await transition(worker, { repairRequestId: created.resourceId, toStatus: 'completed', expectedRevision: 7 }, 'complete-07');
 
     const repairs = await db.collection(`tenants/${tenantId}/repairs`).get();
@@ -134,5 +152,18 @@ describe('Firestore command adapter', () => {
     expect(items.size).toBe(1);
     expect(items.docs[0]?.data()).toMatchObject({ tenant_id: tenantId, repair_id: completed.eventId, category_code: 'brakes', action_code: 'repair', quantity: 1, line_amount_krw: 170000, source_quality: 'verified' });
     expect(items.docs[0]?.data()).not.toHaveProperty('detail_text');
+  });
+
+  emulatorTest('allows subsidy execution after a repair reaches completed status', async () => {
+    const tenantId = `tenant-${randomUUID()}`;
+    await seed(tenantId);
+    const workOrderId = 'work-completed-execution';
+    const now = Timestamp.now();
+    await db.doc(`tenants/${tenantId}/repairWorkOrders/${workOrderId}`).set({ tenant_id: tenantId, work_order_id: workOrderId, requester_person_id: 'person-1', device_id: 'device-1', issue_summary: '완료된 수리', public_funding_involved: true, subsidy_account_id: 'account-2', billed_amount_krw: 1000, status: 'completed', revision: 1, created_by: 'worker-uid', updated_by: 'worker-uid', created_at: now, updated_at: now });
+    await db.doc(`tenants/${tenantId}/subsidyAccounts/account-2`).set({ tenant_id: tenantId, account_id: 'account-2', person_id: 'person-1', policy_version_id: 'policy-1', allocated_krw: 1000, adjustment_krw: 0, reserved_krw: 1000, executed_krw: 0, available_krw: 0, reserved_by_work_order: { [workOrderId]: 1000 }, status: 'active' });
+    const command: AppendSubsidyTransactionCommand = { accountId: 'account-2', personId: 'person-1', policyVersionId: 'policy-1', workOrderId, transactionType: 'execution', amountKrw: 1000, reasonCode: 'repair_support' };
+    const result = await new FirestoreDomainCommandStore(db).appendSubsidy({ actor: actor(tenantId, 'case_worker'), command, idempotencyKey: 'completed-execution-allowed', bodyHash: bodyHash(command) });
+    expect(result.transactionId).toEqual(expect.any(String));
+    expect((await db.doc(`tenants/${tenantId}/subsidyAccounts/account-2`).get()).data()).toMatchObject({ reserved_krw: 0, executed_krw: 1000 });
   });
 });

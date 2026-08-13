@@ -33,6 +33,29 @@ test.describe('institution console web presentation and repair operations', () =
     await expect(page.getByText('수리사 처리 대기')).toBeVisible();
   });
 
+  test('records center verification and subsidy execution as two projection-backed steps', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /수리 운영 7/ }).click();
+    await page.getByRole('button', { name: /등받이 고정 레버 교체/ }).click();
+
+    await expect(page.getByText('센터 검증 · 지원금 집행')).toBeVisible();
+    await expect(page.getByLabel('검증 및 집행 순서')).toContainText('1 · 센터 검증');
+    await expect(page.getByLabel('검증 및 집행 순서')).toContainText('2 · projection 확인');
+    await expect(page.getByLabel('검증 및 집행 순서')).toContainText('3 · 지원금 집행');
+    await page.getByLabel('수리 결과를 확인했습니다.').check();
+    await page.getByLabel('청구 금액을 확인했습니다.').check();
+    await page.getByLabel('지원금 적격성을 확인했습니다.').check();
+    await expect(page.getByRole('button', { name: '검증 후 집행 요청' })).toBeEnabled();
+    await expect(page).toHaveScreenshot('console-repair-authority-review.png', { animations: 'disabled' });
+
+    await page.getByRole('button', { name: '검증 후 집행 요청' }).click();
+    await expect(page.getByText('센터 검증과 지원금 집행을 각각 기록하고 최신 원장을 확인했습니다.')).toBeVisible();
+    await expect(page.getByText('지원금 집행 원장까지 확인되었습니다.')).toBeVisible();
+    await expect(page.getByText('projection revision 5 · center_verified')).toBeVisible();
+    await page.getByRole('button', { name: '지원금 원장' }).first().click();
+    await expect(page.getByText('합성 기관 담당자')).toBeVisible();
+  });
+
   test('opens a device record with verified repair history and operational actions', async ({ page }) => {
     await page.goto('/');
 

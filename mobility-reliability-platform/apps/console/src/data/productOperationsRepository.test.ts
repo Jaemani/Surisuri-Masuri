@@ -5,6 +5,7 @@ import {
   FirebaseOperationsRepository,
   OperationsRepositoryError,
   createOperationsApiEndpoints,
+  runCenterVerificationAndSubsidyExecution,
   type FirebaseOperationsRepositoryDependencies,
 } from './productOperationsRepository'
 
@@ -63,6 +64,58 @@ describe('DemoOperationsRepository', () => {
     expect(result.nextStage).toBe('assigned')
     expect(result.repair.partner).toBe('한마음 모빌리티')
     expect(result.ledger).toHaveLength(4)
+  })
+
+  it('keeps center verification and subsidy execution as separate authoritative demo mutations', async () => {
+    const repository = new DemoOperationsRepository()
+    const submitted = (await repository.listRepairs()).find((repair) => repair.id === 'SR-2026-074')!
+
+    await repository.transitionRepair({ repairRequestId: submitted.id, expectedRevision: submitted.revision, toStatus: 'center_verified', subsidyAccountId: submitted.subsidyContext!.accountId, subsidyDecisionId: 'decision-test' })
+    const verified = (await repository.listRepairs()).find((repair) => repair.id === submitted.id)!
+    expect(verified).toMatchObject({ domainStatus: 'center_verified', revision: 5, subsidyContext: { executionState: 'execution_pending' } })
+    expect(await repository.listLedger()).toHaveLength(4)
+
+    await repository.appendSubsidyTransaction({ accountId: submitted.subsidyContext!.accountId, personId: submitted.subsidyContext!.personId, policyVersionId: submitted.subsidyContext!.policyVersionId, transactionType: 'execution', amountKrw: submitted.billedAmountKrw!, workOrderId: submitted.id, reasonCode: 'CENTER_VERIFIED_REPAIR_EXECUTION' })
+    const executed = (await repository.listRepairs()).find((repair) => repair.id === submitted.id)!
+    expect(executed.subsidyContext?.executionState).toBe('executed')
+    expect(await repository.listLedger()).toEqual(expect.arrayContaining([expect.objectContaining({ transactionId: 'demo-execution-SR-2026-074', transactionType: 'execution', id: 'SR-2026-074' })]))
+  })
+
+  it('rejects subsidy execution before center verification', async () => {
+    const repository = new DemoOperationsRepository()
+    const submitted = (await repository.listRepairs()).find((repair) => repair.id === 'SR-2026-074')!
+
+    await expect(repository.appendSubsidyTransaction({ accountId: submitted.subsidyContext!.accountId, personId: submitted.subsidyContext!.personId, policyVersionId: submitted.subsidyContext!.policyVersionId, transactionType: 'execution', amountKrw: submitted.billedAmountKrw!, workOrderId: submitted.id, reasonCode: 'CENTER_VERIFIED_REPAIR_EXECUTION' })).rejects.toMatchObject({ code: 'EXECUTION_STATUS_INVALID' })
+  })
+
+  it('preserves verified state when the separate execution command fails', async () => {
+    class ExecutionFailureRepository extends DemoOperationsRepository {
+      override async appendSubsidyTransaction(): Promise<never> {
+        throw new OperationsRepositoryError('EXECUTION_REJECTED', 'synthetic execution rejection', 409)
+      }
+    }
+    const repository = new ExecutionFailureRepository()
+    const repair = (await repository.listRepairs()).find((item) => item.id === 'SR-2026-074')!
+
+    const result = await runCenterVerificationAndSubsidyExecution({ repository, repair, refresh: () => repository.listRepairs() })
+
+    expect(result).toMatchObject({ verification: 'verified', execution: 'pending', reason: 'execution_failed' })
+    expect((await repository.listRepairs()).find((item) => item.id === repair.id)).toMatchObject({ domainStatus: 'center_verified', subsidyContext: { executionState: 'execution_pending' } })
+  })
+
+  it('does not report execution until the immutable transaction is visible in the refreshed projection', async () => {
+    class DelayedExecutionProjectionRepository extends DemoOperationsRepository {
+      override async appendSubsidyTransaction() {
+        return { commandType: 'append_subsidy_transaction' as const, tenantId: 'demo-tenant', resourceId: 'account-choi', eventId: 'event-delayed', transactionId: 'tx-delayed' }
+      }
+    }
+    const repository = new DelayedExecutionProjectionRepository()
+    const repair = (await repository.listRepairs()).find((item) => item.id === 'SR-2026-074')!
+
+    const result = await runCenterVerificationAndSubsidyExecution({ repository, repair, refresh: () => repository.listRepairs() })
+
+    expect(result).toEqual({ verification: 'verified', execution: 'pending', reason: 'execution_not_confirmed' })
+    expect((await repository.listRepairs()).find((item) => item.id === repair.id)?.subsidyContext?.executionState).toBe('execution_pending')
   })
 })
 
@@ -141,9 +194,56 @@ describe('FirebaseOperationsRepository', () => {
     expect(JSON.parse(String(calls[0].init?.body))).toEqual({ tenantId: 'tenant-seoul-west', accountId: 'account-1', personId: 'person-1', policyVersionId: 'policy-2026', transactionType: 'reservation', amountKrw: 180000, reasonCode: 'REPAIR_ESTIMATE', workOrderId: 'repair-1' })
   })
 
+  it('uses a distinct idempotency key for verification and execution commands', async () => {
+    const calls: RequestInit[] = []
+    let keyIndex = 0
+    const fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(init ?? {})
+      const body = JSON.parse(String(init?.body))
+      return body.toStatus
+        ? json({ commandType: 'transition_repair_request', tenantId: 'tenant-seoul-west', resourceId: 'repair-1', eventId: 'event-verify', revision: 7, status: 'center_verified' })
+        : json({ commandType: 'append_subsidy_transaction', tenantId: 'tenant-seoul-west', resourceId: 'account-1', eventId: 'event-execute', transactionId: 'tx-execute' })
+    }
+    const repository = new FirebaseOperationsRepository(dependencies(fetch as typeof globalThis.fetch, { createIdempotencyKey: () => `command-key-${++keyIndex}` }))
+
+    await repository.transitionRepair({ repairRequestId: 'repair-1', expectedRevision: 6, toStatus: 'center_verified', subsidyAccountId: 'account-1', subsidyDecisionId: 'decision-1' })
+    await repository.appendSubsidyTransaction({ accountId: 'account-1', personId: 'person-1', policyVersionId: 'policy-2026', transactionType: 'execution', amountKrw: 72000, workOrderId: 'repair-1', reasonCode: 'CENTER_VERIFIED_REPAIR_EXECUTION' })
+
+    expect(calls.map((call) => (call.headers as Record<string, string>)['Idempotency-Key'])).toEqual(['command-key-1', 'command-key-2'])
+  })
+
   it('fails closed when a projection is malformed instead of substituting synthetic data', async () => {
     const fetch = async () => json([{ id: 'repair-1' }])
     const repository = new FirebaseOperationsRepository(dependencies(fetch as typeof globalThis.fetch))
+
+    await expect(repository.listRepairs()).rejects.toMatchObject({ code: 'INVALID_PROJECTION' })
+  })
+
+  it('parses the purpose-limited repair authority and subsidy context', async () => {
+    const projection = [{
+      id: 'repair-1', user: '이용자 C-1042', device: 'MOB-1', issue: '브레이크', request: '2026. 08. 13', partner: '한마음', amount: '₩72,000',
+      workItems: [{ categoryCode: 'brakes', categoryLabel: '브레이크', actionCode: 'repair', actionLabel: '수리', quantity: 1, lineAmountKrw: 72000 }],
+      stage: 'submitted', domainStatus: 'repairer_submitted', priority: '보통', revision: 6, publicFundingInvolved: true, billedAmountKrw: 72000,
+      subsidyContext: { accountId: 'account-1', personId: 'person-1', policyVersionId: 'policy-1', reservedAmountKrw: 72000, executedAmountKrw: 0, executionState: 'verification_required' },
+    }]
+    const repository = new FirebaseOperationsRepository(dependencies((async () => json(projection)) as typeof globalThis.fetch))
+
+    await expect(repository.listRepairs()).resolves.toEqual(projection)
+  })
+
+  it.each([
+    { field: 'revision', mutate: (projection: Array<Record<string, any>>) => { projection[0].revision = 1.5 } },
+    { field: 'quantity', mutate: (projection: Array<Record<string, any>>) => { projection[0].workItems[0].quantity = 0 } },
+    { field: 'line amount', mutate: (projection: Array<Record<string, any>>) => { projection[0].workItems[0].lineAmountKrw = -1 } },
+  ])('rejects unsafe authority projection $field', async ({ mutate }) => {
+    const projection: Array<Record<string, any>> = [{
+      id: 'repair-1', user: '이용자', device: 'MOB-1', issue: '브레이크', request: '오늘', partner: '한마음', amount: '₩1',
+      workItems: [{ categoryCode: 'brakes', categoryLabel: '브레이크', actionCode: 'repair', actionLabel: '수리', quantity: 1, lineAmountKrw: 1 }],
+      stage: 'submitted', domainStatus: 'repairer_submitted', priority: '보통', revision: 1, publicFundingInvolved: true, billedAmountKrw: 1,
+      subsidyContext: { accountId: 'account-1', personId: 'person-1', policyVersionId: 'policy-1', reservedAmountKrw: 1, executedAmountKrw: 0, executionState: 'verification_required' },
+    }]
+    mutate(projection)
+    const repository = new FirebaseOperationsRepository(dependencies((async () => json(projection)) as typeof globalThis.fetch))
 
     await expect(repository.listRepairs()).rejects.toMatchObject({ code: 'INVALID_PROJECTION' })
   })

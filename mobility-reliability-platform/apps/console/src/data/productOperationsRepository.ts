@@ -44,17 +44,32 @@ export type RepairRecord = {
   amount: string
   workItems: Array<{ categoryCode: string; categoryLabel: string; actionCode: string; actionLabel: string; quantity: number; lineAmountKrw: number }>
   stage: WorkflowStage
+  domainStatus: DomainRepairStatus
   priority: '높음' | '보통' | '낮음'
   /** Server projection revision. Required for a production status transition. */
   revision: number
+  publicFundingInvolved: boolean
+  billedAmountKrw: number | null
+  subsidyContext: null | {
+    accountId: string
+    personId: string
+    policyVersionId: string
+    decisionId?: string
+    reservedAmountKrw: number
+    executedAmountKrw: number
+    executionState: 'verification_required' | 'execution_pending' | 'executed'
+  }
 }
 
 export type LedgerEntry = {
+  transactionId: string
+  transactionType: SubsidyTransactionType
   date: string
   id: string
   user: string
   item: string
   amount: string
+  amountKrw: number
   state: '예약' | '집행 완료' | '예약 취소'
   actor: string
 }
@@ -197,6 +212,13 @@ export type RepairTransitionResult = {
   nextStage: WorkflowStage | null
 }
 
+export type FundingAuthorityResult = {
+  verification: 'verified'
+  execution: 'executed' | 'pending'
+  reason?: 'projection_refresh_failed' | 'projection_not_confirmed' | 'execution_failed' | 'execution_refresh_failed' | 'execution_not_confirmed'
+  error?: unknown
+}
+
 /**
  * Product Operations is a read model and domain-command boundary for the console.
  *
@@ -221,6 +243,53 @@ export interface ProductOperationsRepository {
   advanceRepair(command: RepairAdvanceCommand): Promise<RepairTransitionResult>
   transitionRepair(command: RepairTransitionCommand): Promise<CommandReceipt>
   appendSubsidyTransaction(command: SubsidyCommand): Promise<CommandReceipt>
+}
+
+/**
+ * Compose two independent authoritative commands without pretending they are
+ * atomic. Once verification succeeds, failures only return a pending outcome;
+ * this function never resubmits the verification mutation.
+ */
+export async function runCenterVerificationAndSubsidyExecution(input: {
+  repository: ProductOperationsRepository
+  repair: RepairRecord
+  note?: string
+  refresh: () => Promise<RepairRecord[]>
+}): Promise<FundingAuthorityResult> {
+  const { repository, repair } = input
+  const context = repair.subsidyContext
+  if (!context || !Number.isSafeInteger(repair.billedAmountKrw) || (repair.billedAmountKrw ?? 0) <= 0) throw new OperationsRepositoryError('INVALID_PROJECTION', 'The repair projection does not contain a positive validated subsidy amount.')
+  const billedAmountKrw = repair.billedAmountKrw as number
+  if (!context.decisionId) throw new OperationsRepositoryError('SUBSIDY_DECISION_REQUIRED', 'A recorded subsidy decision is required before center verification.')
+  if (context.reservedAmountKrw < billedAmountKrw) throw new OperationsRepositoryError('RESERVATION_REQUIRED', 'The work order does not have enough reserved subsidy balance for execution.')
+  if (repair.domainStatus !== 'center_verified' && repair.domainStatus !== 'completed') {
+    await repository.transitionRepair({ repairRequestId: repair.id, expectedRevision: repair.revision, toStatus: 'center_verified', subsidyAccountId: context.accountId, subsidyDecisionId: context.decisionId, ...optional('note', input.note) })
+    let refreshed: RepairRecord[]
+    try {
+      refreshed = await input.refresh()
+    } catch (error) {
+      return { verification: 'verified', execution: 'pending', reason: 'projection_refresh_failed', error }
+    }
+    const verified = refreshed.find((item) => item.id === repair.id)
+    if (!verified || verified.domainStatus !== 'center_verified') return { verification: 'verified', execution: 'pending', reason: 'projection_not_confirmed' }
+  }
+  try {
+    await repository.appendSubsidyTransaction({ accountId: context.accountId, personId: context.personId, policyVersionId: context.policyVersionId, transactionType: 'execution', amountKrw: billedAmountKrw, workOrderId: repair.id, reasonCode: 'CENTER_VERIFIED_REPAIR_EXECUTION' })
+  } catch (error) {
+    try { await input.refresh() } catch { /* later recovery is read-only */ }
+    return { verification: 'verified', execution: 'pending', reason: 'execution_failed', error }
+  }
+  let executionProjection: RepairRecord[]
+  try {
+    executionProjection = await input.refresh()
+  } catch (error) {
+    return { verification: 'verified', execution: 'pending', reason: 'execution_refresh_failed', error }
+  }
+  const executed = executionProjection.find((item) => item.id === repair.id)
+  if (executed?.subsidyContext?.executionState !== 'executed') {
+    return { verification: 'verified', execution: 'pending', reason: 'execution_not_confirmed' }
+  }
+  return { verification: 'verified', execution: 'executed' }
 }
 
 export class NotConfiguredError extends Error {
@@ -318,17 +387,17 @@ const demoDevices: DeviceRecord[] = [
 ]
 
 const demoRepairs: RepairRecord[] = [
-  { id: 'SR-2026-081', user: '박정호', device: 'MOB-23991', issue: '주행 중 좌측 쏠림', request: '오늘 08:35', partner: '미배정', amount: '₩180,000', workItems: [], stage: 'new', priority: '높음', revision: 1 },
-  { id: 'SR-2026-079', user: '이경자', device: 'MOB-23874', issue: '충전 단자 접촉 불량', request: '어제 16:10', partner: '한마음 모빌리티', amount: '₩95,000', workItems: [], stage: 'assigned', priority: '보통', revision: 3 },
-  { id: 'SR-2026-074', user: '최민수', device: 'MOB-23703', issue: '등받이 고정 레버 교체', request: '08. 10. 11:22', partner: '케어휠 수리소', amount: '₩72,000', workItems: [{ categoryCode: 'seat_frame', categoryLabel: '시트·프레임', actionCode: 'replace', actionLabel: '교체', quantity: 1, lineAmountKrw: 72000 }], stage: 'submitted', priority: '보통', revision: 4 },
-  { id: 'SR-2026-069', user: '김서윤', device: 'MOB-24018', issue: '타이어 마모 점검', request: '08. 08. 14:05', partner: '한마음 모빌리티', amount: '₩58,000', workItems: [{ categoryCode: 'wheel_tire', categoryLabel: '바퀴·타이어', actionCode: 'inspect', actionLabel: '점검', quantity: 1, lineAmountKrw: 58000 }], stage: 'verified', priority: '낮음', revision: 5 },
+  { id: 'SR-2026-081', user: '박정호', device: 'MOB-23991', issue: '주행 중 좌측 쏠림', request: '오늘 08:35', partner: '미배정', amount: '₩180,000', workItems: [], stage: 'new', domainStatus: 'requested', priority: '높음', revision: 1, publicFundingInvolved: true, billedAmountKrw: null, subsidyContext: { accountId: 'account-park', personId: 'person-park', policyVersionId: 'policy-2026', reservedAmountKrw: 0, executedAmountKrw: 0, executionState: 'verification_required' } },
+  { id: 'SR-2026-079', user: '이경자', device: 'MOB-23874', issue: '충전 단자 접촉 불량', request: '어제 16:10', partner: '한마음 모빌리티', amount: '₩95,000', workItems: [], stage: 'assigned', domainStatus: 'in_progress', priority: '보통', revision: 3, publicFundingInvolved: true, billedAmountKrw: null, subsidyContext: { accountId: 'account-lee', personId: 'person-lee', policyVersionId: 'policy-2026', reservedAmountKrw: 0, executedAmountKrw: 0, executionState: 'verification_required' } },
+  { id: 'SR-2026-074', user: '최민수', device: 'MOB-23703', issue: '등받이 고정 레버 교체', request: '08. 10. 11:22', partner: '케어휠 수리소', amount: '₩72,000', workItems: [{ categoryCode: 'seat_frame', categoryLabel: '시트·프레임', actionCode: 'replace', actionLabel: '교체', quantity: 1, lineAmountKrw: 72000 }], stage: 'submitted', domainStatus: 'repairer_submitted', priority: '보통', revision: 4, publicFundingInvolved: true, billedAmountKrw: 72000, subsidyContext: { accountId: 'account-choi', personId: 'person-choi', policyVersionId: 'policy-2026', decisionId: 'decision-SR-2026-074', reservedAmountKrw: 72000, executedAmountKrw: 0, executionState: 'verification_required' } },
+  { id: 'SR-2026-069', user: '김서윤', device: 'MOB-24018', issue: '타이어 마모 점검', request: '08. 08. 14:05', partner: '한마음 모빌리티', amount: '₩58,000', workItems: [{ categoryCode: 'wheel_tire', categoryLabel: '바퀴·타이어', actionCode: 'inspect', actionLabel: '점검', quantity: 1, lineAmountKrw: 58000 }], stage: 'verified', domainStatus: 'center_verified', priority: '낮음', revision: 5, publicFundingInvolved: true, billedAmountKrw: 58000, subsidyContext: { accountId: 'account-kim', personId: 'person-kim', policyVersionId: 'policy-2026', decisionId: 'decision-SR-2026-069', reservedAmountKrw: 0, executedAmountKrw: 58000, executionState: 'executed' } },
 ]
 
 const demoLedger: LedgerEntry[] = [
-  { date: '08. 13', id: 'SR-2026-081', user: '박정호', item: '조향부 점검 및 교정', amount: '₩180,000', state: '예약', actor: '김은정 담당자' },
-  { date: '08. 12', id: 'SR-2026-074', user: '최민수', item: '등받이 고정 레버', amount: '₩72,000', state: '집행 완료', actor: '케어휠 수리소' },
-  { date: '08. 08', id: 'SR-2026-069', user: '김서윤', item: '타이어 마모 점검', amount: '₩58,000', state: '집행 완료', actor: '김은정 담당자' },
-  { date: '08. 04', id: 'SR-2026-062', user: '윤옥순', item: '배터리 상태 점검', amount: '₩110,000', state: '예약 취소', actor: '김은정 담당자' },
+  { transactionId: 'tx-reserve-081', transactionType: 'reservation', date: '08. 13', id: 'SR-2026-081', user: '박정호', item: '조향부 점검 및 교정', amount: '₩180,000', amountKrw: 180000, state: '예약', actor: '김은정 담당자' },
+  { transactionId: 'tx-execute-068', transactionType: 'execution', date: '08. 12', id: 'SR-2026-068', user: '윤옥순', item: '배터리 단자 정비', amount: '₩72,000', amountKrw: 72000, state: '집행 완료', actor: '케어휠 수리소' },
+  { transactionId: 'tx-execute-069', transactionType: 'execution', date: '08. 08', id: 'SR-2026-069', user: '김서윤', item: '타이어 마모 점검', amount: '₩58,000', amountKrw: 58000, state: '집행 완료', actor: '김은정 담당자' },
+  { transactionId: 'tx-reserve-074', transactionType: 'reservation', date: '08. 10', id: 'SR-2026-074', user: '최민수', item: '등받이 고정 레버 교체', amount: '₩72,000', amountKrw: 72000, state: '예약', actor: '김은정 담당자' },
 ]
 
 const demoInspections: InspectionRecord[] = [
@@ -390,6 +459,7 @@ export class DemoOperationsRepository implements ProductOperationsRepository {
     const updated = {
       ...repair,
       stage: nextStage,
+      domainStatus: nextStage === 'assigned' ? 'assigned' as const : nextStage === 'submitted' ? 'repairer_submitted' as const : nextStage === 'verified' ? 'center_verified' as const : repair.domainStatus,
       partner: nextStage === 'assigned' ? demoPartnerLabels[command.repairStationId ?? ''] ?? '한마음 모빌리티' : repair.partner,
       revision: repair.revision + 1,
     }
@@ -401,11 +471,33 @@ export class DemoOperationsRepository implements ProductOperationsRepository {
     const repair = this.repairs.find((item) => item.id === command.repairRequestId)
     if (!repair) throw new Error(`REPAIR_NOT_FOUND: ${command.repairRequestId}`)
     if (repair.revision !== command.expectedRevision) throw new OperationsRepositoryError('REQUEST_REJECTED', 'REVISION_CONFLICT: reload before changing this repair.', 409)
-    return { commandType: 'transition_repair_request', tenantId: 'demo-tenant', resourceId: repair.id, eventId: `demo-event-${repair.id}-${repair.revision + 1}`, revision: repair.revision + 1, status: command.toStatus }
+    const nextRevision = repair.revision + 1
+    const stage = command.toStatus === 'center_verified' || command.toStatus === 'completed' ? 'verified' : command.toStatus === 'assigned' ? 'assigned' : repair.stage
+    const subsidyContext = command.toStatus === 'center_verified' && repair.subsidyContext
+      ? { ...repair.subsidyContext, decisionId: command.subsidyDecisionId, executionState: 'execution_pending' as const }
+      : repair.subsidyContext
+    this.repairs = this.repairs.map((item) => item.id === repair.id ? { ...item, domainStatus: command.toStatus, stage, revision: nextRevision, subsidyContext } : item)
+    return { commandType: 'transition_repair_request', tenantId: 'demo-tenant', resourceId: repair.id, eventId: `demo-event-${repair.id}-${nextRevision}`, revision: nextRevision, status: command.toStatus }
   }
 
   async appendSubsidyTransaction(command: SubsidyCommand): Promise<CommandReceipt> {
-    return { commandType: 'append_subsidy_transaction', tenantId: 'demo-tenant', resourceId: command.accountId, eventId: `demo-ledger-${command.accountId}`, transactionId: `demo-tx-${command.accountId}` }
+    const repair = command.workOrderId ? this.repairs.find((item) => item.id === command.workOrderId) : undefined
+    if (command.transactionType === 'execution' && repair?.domainStatus !== 'center_verified' && repair?.domainStatus !== 'completed') {
+      throw new OperationsRepositoryError('EXECUTION_STATUS_INVALID', '지원금 집행은 센터 검증 후에만 가능합니다.', 409)
+    }
+    if (command.transactionType === 'execution' && repair) {
+      const reservedKrw = this.ledger.filter((entry) => entry.id === repair.id && entry.transactionType === 'reservation').reduce((sum, entry) => sum + entry.amountKrw, 0)
+      const executedKrw = this.ledger.filter((entry) => entry.id === repair.id && entry.transactionType === 'execution').reduce((sum, entry) => sum + entry.amountKrw, 0)
+      if (command.amountKrw > reservedKrw - executedKrw) throw new OperationsRepositoryError('LEDGER_EXECUTION_EXCEEDS_RESERVATION', '지원금 집행액이 남은 예약액을 초과합니다.', 409)
+    }
+    const transactionId = `demo-${command.transactionType}-${command.workOrderId ?? command.accountId}`
+    if (command.transactionType === 'execution' && repair) {
+      this.repairs = this.repairs.map((item) => item.id === repair.id && item.subsidyContext ? { ...item, subsidyContext: { ...item.subsidyContext, reservedAmountKrw: item.subsidyContext.reservedAmountKrw - command.amountKrw, executedAmountKrw: item.subsidyContext.executedAmountKrw + command.amountKrw, executionState: 'executed' as const } } : item)
+      if (!this.ledger.some((entry) => entry.transactionId === transactionId)) {
+        this.ledger = [{ transactionId, transactionType: 'execution', date: '08. 13', id: repair.id, user: repair.user, item: repair.workItems.map((item) => `${item.categoryLabel} ${item.actionLabel}`).join(', ') || '수리 지원금 집행', amount: `₩${command.amountKrw.toLocaleString('ko-KR')}`, amountKrw: command.amountKrw, state: '집행 완료', actor: '합성 기관 담당자' }, ...this.ledger]
+      }
+    }
+    return { commandType: 'append_subsidy_transaction', tenantId: 'demo-tenant', resourceId: command.accountId, eventId: `demo-ledger-${command.accountId}`, transactionId }
   }
 }
 
@@ -499,6 +591,12 @@ const numberAt = (value: Record<string, unknown>, key: string): number => {
   return value[key]
 }
 
+const integerAt = (value: Record<string, unknown>, key: string, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number => {
+  const candidate = value[key]
+  if (typeof candidate !== 'number' || !Number.isSafeInteger(candidate) || candidate < minimum || candidate > maximum) throw new OperationsRepositoryError('INVALID_PROJECTION', `Projection field ${key} must be a safe integer between ${minimum} and ${maximum}.`)
+  return candidate
+}
+
 const enumAt = <T extends string>(value: Record<string, unknown>, key: string, allowed: readonly T[]): T => {
   const candidate = stringAt(value, key)
   if (!allowed.includes(candidate as T)) throw new OperationsRepositoryError('INVALID_PROJECTION', `Projection field ${key} has an unsupported value.`)
@@ -554,13 +652,22 @@ const parseDevices: ProjectionParser<DeviceRecord[]> = (value) => arrayOf(value,
 
 const parseRepairs: ProjectionParser<RepairRecord[]> = (value) => arrayOf(value, (item) => {
   const record = asRecord(item)
-  const workItems = record.workItems === undefined ? [] : arrayOf(record.workItems, (candidate) => { const work = asRecord(candidate); return { categoryCode: stringAt(work, 'categoryCode'), categoryLabel: stringAt(work, 'categoryLabel'), actionCode: stringAt(work, 'actionCode'), actionLabel: stringAt(work, 'actionLabel'), quantity: numberAt(work, 'quantity'), lineAmountKrw: numberAt(work, 'lineAmountKrw') } })
-  return { id: stringAt(record, 'id'), user: stringAt(record, 'user'), device: stringAt(record, 'device'), issue: stringAt(record, 'issue'), request: stringAt(record, 'request'), partner: stringAt(record, 'partner'), amount: stringAt(record, 'amount'), workItems, stage: enumAt(record, 'stage', ['new', 'assigned', 'submitted', 'verified']), priority: enumAt(record, 'priority', ['높음', '보통', '낮음']), revision: numberAt(record, 'revision') }
+  const workItems = record.workItems === undefined ? [] : arrayOf(record.workItems, (candidate) => { const work = asRecord(candidate); return { categoryCode: stringAt(work, 'categoryCode'), categoryLabel: stringAt(work, 'categoryLabel'), actionCode: stringAt(work, 'actionCode'), actionLabel: stringAt(work, 'actionLabel'), quantity: integerAt(work, 'quantity', 1, 20), lineAmountKrw: integerAt(work, 'lineAmountKrw', 0) } })
+  if (workItems.length > 20) throw new OperationsRepositoryError('INVALID_PROJECTION', 'Projection field workItems exceeds the bounded item count.')
+  const context = record.subsidyContext === null ? null : asRecord(record.subsidyContext)
+  const decisionId = context && context.decisionId !== undefined ? stringAt(context, 'decisionId') : undefined
+  const billedAmountKrw = record.billedAmountKrw
+  if (billedAmountKrw !== null && (typeof billedAmountKrw !== 'number' || !Number.isSafeInteger(billedAmountKrw) || billedAmountKrw < 0)) throw new OperationsRepositoryError('INVALID_PROJECTION', 'Projection field billedAmountKrw must be a non-negative integer or null.')
+  if (typeof record.publicFundingInvolved !== 'boolean') throw new OperationsRepositoryError('INVALID_PROJECTION', 'Projection field publicFundingInvolved must be boolean.')
+  return { id: stringAt(record, 'id'), user: stringAt(record, 'user'), device: stringAt(record, 'device'), issue: stringAt(record, 'issue'), request: stringAt(record, 'request'), partner: stringAt(record, 'partner'), amount: stringAt(record, 'amount'), workItems, stage: enumAt(record, 'stage', ['new', 'assigned', 'submitted', 'verified']), domainStatus: enumAt(record, 'domainStatus', ['requested', 'under_review', 'assigned', 'scheduled', 'in_progress', 'repairer_submitted', 'needs_correction', 'center_verified', 'completed', 'reopened', 'rejected', 'cancelled']), priority: enumAt(record, 'priority', ['높음', '보통', '낮음']), revision: integerAt(record, 'revision', 1), publicFundingInvolved: record.publicFundingInvolved, billedAmountKrw, subsidyContext: context ? { accountId: stringAt(context, 'accountId'), personId: stringAt(context, 'personId'), policyVersionId: stringAt(context, 'policyVersionId'), ...optional('decisionId', decisionId), reservedAmountKrw: integerAt(context, 'reservedAmountKrw', 0), executedAmountKrw: integerAt(context, 'executedAmountKrw', 0), executionState: enumAt(context, 'executionState', ['verification_required', 'execution_pending', 'executed']) } : null }
 })
 
 const parseLedger: ProjectionParser<LedgerEntry[]> = (value) => arrayOf(value, (item) => {
   const record = asRecord(item)
-  return { date: stringAt(record, 'date'), id: stringAt(record, 'id'), user: stringAt(record, 'user'), item: stringAt(record, 'item'), amount: stringAt(record, 'amount'), state: enumAt(record, 'state', ['예약', '집행 완료', '예약 취소']), actor: stringAt(record, 'actor') }
+  const transactionType = enumAt(record, 'transactionType', ['allocation', 'reservation', 'execution', 'release', 'adjustment', 'reversal'])
+  const amountKrw = integerAt(record, 'amountKrw', transactionType === 'adjustment' ? -Number.MAX_SAFE_INTEGER : 1)
+  if (amountKrw === 0) throw new OperationsRepositoryError('INVALID_PROJECTION', 'Projection field amountKrw must not be zero.')
+  return { transactionId: stringAt(record, 'transactionId'), transactionType, date: stringAt(record, 'date'), id: stringAt(record, 'id'), user: stringAt(record, 'user'), item: stringAt(record, 'item'), amount: stringAt(record, 'amount'), amountKrw, state: enumAt(record, 'state', ['예약', '집행 완료', '예약 취소']), actor: stringAt(record, 'actor') }
 })
 
 const parseInspections: ProjectionParser<InspectionRecord[]> = (value) => arrayOf(value, (item) => {

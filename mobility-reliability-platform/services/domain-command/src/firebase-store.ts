@@ -105,8 +105,16 @@ export class FirestoreDomainCommandStore implements CommandStore {
       if (input.command.subsidyAccountId) {
         const account = await tx.get(this.summaryRef(input.actor.tenantId, input.command.subsidyAccountId));
         const data = account.data();
-        if (!account.exists || data?.tenant_id !== input.actor.tenantId || data.person_id !== current.beneficiaryId) {
+        if (!account.exists || data?.tenant_id !== input.actor.tenantId || data.account_id !== input.command.subsidyAccountId || data.person_id !== current.beneficiaryId || data.status !== 'active' || typeof data.policy_version_id !== 'string' || !data.policy_version_id) {
           throw new DomainCommandError('SUBSIDY_ACCOUNT_MISMATCH', 'The subsidy decision does not belong to the repair beneficiary.', 409);
+        }
+      }
+      if (input.command.toStatus === 'center_verified' && current.publicFundingInvolved) {
+        if (!input.command.subsidyDecisionId || !input.command.subsidyAccountId) throw new DomainCommandError('SUBSIDY_DECISION_REQUIRED', 'Publicly funded verification requires a recorded subsidy decision.');
+        const decision = await tx.get(this.tenantRef(input.actor.tenantId).collection('subsidyDecisions').doc(input.command.subsidyDecisionId));
+        const data = decision.data();
+        if (!decision.exists || data?.tenant_id !== input.actor.tenantId || data.decision_id !== input.command.subsidyDecisionId || data.work_order_id !== current.id || data.account_id !== input.command.subsidyAccountId || data.person_id !== current.beneficiaryId || data.status !== 'approved' || !Number.isSafeInteger(data.approved_amount_krw) || data.approved_amount_krw < (current.billedAmountKrw ?? 0)) {
+          throw new DomainCommandError('SUBSIDY_DECISION_MISMATCH', 'The approved subsidy decision does not match this repair, account, beneficiary, or billed amount.', 409);
         }
       }
 
@@ -142,6 +150,14 @@ export class FirestoreDomainCommandStore implements CommandStore {
       if (replay) return replay;
       this.assertTenantEntity(personSnapshot, input.actor.tenantId, 'person_id', input.command.personId, 'BENEFICIARY_NOT_FOUND');
       this.assertTenantEntity(policySnapshot, input.actor.tenantId, 'policy_version_id', input.command.policyVersionId, 'SUBSIDY_POLICY_NOT_FOUND');
+      if (policySnapshot.data()?.status !== 'active') throw new DomainCommandError('SUBSIDY_POLICY_INACTIVE', 'The subsidy policy is not active.', 409);
+
+      if (summarySnapshot.exists) {
+        const accountData = summarySnapshot.data();
+        if (accountData?.tenant_id !== input.actor.tenantId || accountData.account_id !== input.command.accountId || accountData.person_id !== input.command.personId || accountData.policy_version_id !== input.command.policyVersionId || accountData.status !== 'active') {
+          throw new DomainCommandError('SUBSIDY_ACCOUNT_MISMATCH', 'The subsidy account is not active or does not match the transaction scope.', 409);
+        }
+      }
 
       let workOrder: RepairWorkOrder | undefined;
       if (input.command.workOrderId) {
@@ -152,7 +168,8 @@ export class FirestoreDomainCommandStore implements CommandStore {
         if (!workOrder.publicFundingInvolved) throw new DomainCommandError('PUBLIC_FUNDING_NOT_ENABLED', 'This repair is not eligible for a public subsidy transaction.', 409);
         if (input.command.transactionType === 'reservation' && workOrder.requestedAmountKrw !== undefined && input.command.amountKrw > workOrder.requestedAmountKrw) throw new DomainCommandError('RESERVATION_EXCEEDS_REQUEST', 'The reservation exceeds the requested public-funding amount.', 409);
         if (input.command.transactionType === 'execution') {
-          if (!['repairer_submitted', 'center_verified', 'completed'].includes(workOrder.status)) throw new DomainCommandError('EXECUTION_STATUS_INVALID', 'Subsidy execution requires submitted repair evidence.', 409);
+          if (!['center_verified', 'completed'].includes(workOrder.status)) throw new DomainCommandError('EXECUTION_STATUS_INVALID', 'Subsidy execution requires center-verified repair evidence.', 409);
+          if (!workOrder.subsidyAccountId || workOrder.subsidyAccountId !== input.command.accountId) throw new DomainCommandError('SUBSIDY_ACCOUNT_MISMATCH', 'Execution must use the subsidy account recorded by center verification.', 409);
           if (workOrder.billedAmountKrw !== undefined && input.command.amountKrw > workOrder.billedAmountKrw) throw new DomainCommandError('EXECUTION_EXCEEDS_BILL', 'The execution exceeds the repairer-submitted amount.', 409);
         }
       }

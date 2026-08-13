@@ -27,4 +27,6 @@ Wire commands are camelCase; Firestore documents are encoded explicitly as snake
 
 `InMemoryCommandStore` and the pure `DomainCommandKernel` provide deterministic unit tests. `pnpm test:emulator` verifies the real Firestore adapter, including canonical paths, replay/conflict, optimistic concurrency, assignment enforcement, and the person-scoped subsidy ledger.
 
+Subsidy `execution` is accepted only after a work order reaches `center_verified` or `completed`; repairer submission alone is not authorization. The operator repair projection exposes a validated, purpose-limited subsidy command context only when tenant, beneficiary, account, and policy linkage resolve without ambiguity. Its `executed` state is derived from an immutable execution transaction, not from the repair status. Ledger rows preserve their unique transaction ID and typed transaction kind.
+
 This repository does not claim production deployment. Firebase project registration, App Check rollout, institution policy configuration, cross-organization repair-station grants, and field pilot evidence remain deployment gates.

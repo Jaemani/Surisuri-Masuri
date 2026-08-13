@@ -1,5 +1,21 @@
 # 2026년 8월 제품 증거
 
+## EVD-20260813-025 — 센터 검증·지원금 집행 authority loop
+
+- 생성: 2026-08-13 / Codex 작업 실행
+- 환경·데이터: local WSL2 / synthetic console / Firestore Emulator
+- 출처: domain command store·purpose-limited projections, console repository·UI, unit·Emulator·Playwright tests
+- 상태: generated / 사람 검토 대기
+- 확인 항목: center verification과 execution 분리, 명령 사이 projection refresh, partial-success 표시, distinct idempotency, verification 전 execution 거부, validated subsidy context, immutable transaction 기반 executed 상태, unique ledger transaction ID
+- 저장 위치: 코드 `apps/console/src/App.tsx`, `apps/console/src/data/productOperationsRepository.ts`, `services/domain-command/src/firebase-store.ts`, `services/domain-command/src/projection-store.ts`; 테스트 `apps/console/src/data/productOperationsRepository.test.ts`, `services/domain-command/test/firestore-emulator.test.ts`, `services/domain-command/test/projection-emulator.test.ts`, `tests/e2e/console-web.spec.ts`; 시각 증거 `tests/e2e/console-web.spec.ts-snapshots/console-repair-authority-review-console-chromium-linux.png`
+- 접근 권한: 모두 repository working tree에 있으며 repository 접근 권한이 있는 개발자만 읽을 수 있다. Firestore Emulator 데이터는 local process에만 존재하고 production Firebase project나 public bucket에 업로드하지 않았다.
+- 재현 명령 — console synthetic adapter: `pnpm --filter @mobility-reliability/console test`, `pnpm --filter @mobility-reliability/console typecheck`, `pnpm --filter @mobility-reliability/console build`, `pnpm test:e2e --project=console-chromium` (local Vite server 필요)
+- 재현 명령 — Emulator server/projection 경계: `pnpm --filter @mobility-reliability/domain-command test`, `pnpm --filter @mobility-reliability/domain-command test:emulator` (Firestore Emulator 필요)
+- 검증: console 25 tests/typecheck/build, domain 32 tests, Emulator 19 scenarios, Playwright console 6 flows. Playwright와 Emulator 수치는 서로 다른 adapter/server 경계의 결과이며 하나의 production composition 테스트가 아니다.
+- 시각 증거 SHA-256: `a80adf54fb43c17d9e79526008e3caec1f51201cdc815dc03cbcff0f8e9613df` (snapshot binary). 소스 working tree가 미커밋 상태이므로 source commit hash는 이 증거에 고정하지 않았다. 파일과 결과는 SHA-256 재계산 가능하다.
+- 현재 증명하지 않는 것: 실제 기관·수리·지원금·사용자 데이터, 실제 승인·집행, production Firebase Auth/App Check composition·배포, 실제 기관 계정 lifecycle, 기관 이해도·접근성
+- 사용처: [ADR-0059](../decisions/ADR-0059-center-verification-subsidy-authority-loop.md), [UPD-20260813-29](../product-updates/UPD-20260813-29-center-verification-subsidy-authority-loop.md), [HR-20260813-22](../reports/human/HR-20260813-22-center-verification-subsidy-authority-loop.md)
+
 ## EVD-20260813-024 — R10 합성 reliability 비교 presentation
 
 - 생성: 2026-08-13 / Codex 작업 실행

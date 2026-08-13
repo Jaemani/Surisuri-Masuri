@@ -34,6 +34,54 @@ export type ConsoleDeviceTimelineEntry = {
   tone: 'success' | 'warning' | 'info';
 };
 
+export type ConsoleRepairSubsidyExecutionState = 'verification_required' | 'execution_pending' | 'executed';
+
+export type ConsoleRepairSubsidyContext = {
+  /** Only emitted after the referenced, tenant-scoped account is validated. */
+  accountId: string;
+  personId: string;
+  policyVersionId: string;
+  decisionId?: string;
+  /** Remaining reservation available for this exact work order. */
+  reservedAmountKrw: number;
+  /** Net immutable execution amount after exact reversals. */
+  executedAmountKrw: number;
+  executionState: ConsoleRepairSubsidyExecutionState;
+};
+
+export type ConsoleRepairRecord = {
+  id: string;
+  user: string;
+  device: string;
+  issue: string;
+  request: string;
+  partner: string;
+  amount: string;
+  workItems: Array<{ categoryCode: string; categoryLabel: string; actionCode: string; actionLabel: string; quantity: number; lineAmountKrw: number }>;
+  stage: 'new' | 'assigned' | 'submitted' | 'verified';
+  domainStatus: import('./types.js').RepairStatus;
+  publicFundingInvolved: boolean;
+  billedAmountKrw: number | null;
+  subsidyContext: ConsoleRepairSubsidyContext | null;
+  priority: string;
+  revision: number;
+};
+
+export type ConsoleLedgerTransactionType = import('./types.js').SubsidyTransactionType;
+
+export type ConsoleLedgerEntry = {
+  date: string;
+  id: string;
+  transactionId: string;
+  transactionType: ConsoleLedgerTransactionType;
+  user: string;
+  item: string;
+  amount: string;
+  amountKrw: number;
+  state: '예약' | '집행 완료' | '예약 취소';
+  actor: string;
+};
+
 export interface MobileRepairerSnapshot {
   roleSession: { role: 'repairer'; displayName: string; isDemo: false };
   repairJobs: Array<{

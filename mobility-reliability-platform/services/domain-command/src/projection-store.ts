@@ -1,7 +1,7 @@
 import { Timestamp, getFirestore, type DocumentData, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { DomainCommandError } from './canonical.js';
 import { DeviceTimelineProjectionError, replayDeviceRepairTimeline, type VerifiedRepairHeader, type VerifiedRepairItem } from './device-timeline-projector.js';
-import type { ConsoleDeviceRecord, ConsoleDeviceTimelineEntry, ConsoleProjectionName, DeviceTimelineEntry, MobileProductSnapshot, ProductProjectionStore } from './projection-types.js';
+import type { ConsoleDeviceRecord, ConsoleDeviceTimelineEntry, ConsoleLedgerEntry, ConsoleLedgerTransactionType, ConsoleProjectionName, ConsoleRepairRecord, ConsoleRepairSubsidyContext, DeviceTimelineEntry, MobileProductSnapshot, ProductProjectionStore } from './projection-types.js';
 import type { ActorContext, RepairStatus } from './types.js';
 
 const MAX_PROJECTION_DOCUMENTS = 200;
@@ -51,7 +51,9 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
     const ownOrders = workOrders.filter((doc) => doc.data().requester_person_id === actor.personId && doc.data().device_id === deviceId).sort(byUpdatedDesc);
     ownOrders.forEach(assertValidRepairDocument);
     const activeOrder = ownOrders.find((doc) => activeRepairStatuses.has(doc.data().status));
-    const account = accounts.find((doc) => doc.data().person_id === actor.personId && doc.data().status !== 'closed');
+    const eligibleAccounts = accounts.filter((doc) => doc.data().person_id === actor.personId && doc.data().status === 'active' && optionalString(doc.data(), 'account_id') === doc.id && Boolean(optionalString(doc.data(), 'policy_version_id')));
+    if (eligibleAccounts.length > 1) throw new DomainCommandError('AMBIGUOUS_SUBSIDY_ACCOUNT', 'More than one active subsidy account is available.', 409);
+    const account = eligibleAccounts[0];
     const displayName = `이용자 ${shortCode(actor.personId)}`;
     const accountData = account?.data();
     const allocated = safeMoney(accountData?.allocated_krw);
@@ -91,12 +93,14 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
     const needsDevices = ['dashboard', 'users', 'devices', 'repairs', 'inspections'].includes(projection);
     const needsRepairs = ['dashboard', 'repairs', 'ledger', 'partners'].includes(projection);
     const needsRepairArchive = projection === 'devices';
-    const [people, assignments, devices, repairs, repairArchive] = await Promise.all([
+    const needsSubsidyAccounts = ['dashboard', 'repairs', 'ledger'].includes(projection);
+    const [people, assignments, devices, repairs, repairArchive, subsidyAccounts] = await Promise.all([
       needsPeople ? this.collection(tenant, 'people') : [],
       needsAssignments ? this.collection(tenant, 'deviceAssignments') : [],
       needsDevices ? this.collection(tenant, 'devices') : [],
       needsRepairs ? this.collection(tenant, 'repairWorkOrders') : [],
       needsRepairArchive ? this.collection(tenant, 'repairs') : [],
+      needsSubsidyAccounts ? this.collection(tenant, 'subsidyAccounts') : [],
     ]);
     repairs.forEach(assertValidRepairDocument);
     const names = new Map(people.map((doc) => [doc.id, `이용자 ${optionalString(doc.data(), 'public_code') ?? shortCode(doc.id)}`]));
@@ -127,14 +131,34 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
     if (projection === 'repairs') {
       const partners = await this.collection(tenant, 'repairStations');
       for (const partner of partners) partnerById.set(partner.id, publicPartnerName(partner));
-      return repairs.filter((repair) => !['rejected', 'cancelled'].includes(String(repair.data().status))).sort(byUpdatedDesc).map((repair) => this.consoleRepair(repair, names, deviceById, partnerById));
+      const executedByAccountAndWorkOrder = new Map<string, number>();
+      for (const account of subsidyAccounts) {
+        const transactions = await this.bounded(account.ref.collection('transactions').limit(MAX_LEDGER_TRANSACTIONS + 1).get(), 'subsidy transactions', actor.tenantId, MAX_LEDGER_TRANSACTIONS);
+        transactions.forEach(assertValidLedgerTransaction);
+        const executionById = new Map(transactions.filter((transaction) => transaction.data().transaction_type === 'execution').map((transaction) => [ledgerTransactionId(transaction), transaction]));
+        for (const transaction of transactions) {
+          assertTransactionAccountBinding(transaction, account);
+          const workOrderId = optionalString(transaction.data(), 'work_order_id');
+          if (transaction.data().transaction_type === 'execution' && workOrderId) {
+            const key = `${account.id}:${workOrderId}`;
+            executedByAccountAndWorkOrder.set(key, (executedByAccountAndWorkOrder.get(key) ?? 0) + safeMoney(transaction.data().amount_krw));
+          }
+          if (transaction.data().transaction_type === 'reversal' && workOrderId) {
+            const original = executionById.get(requiredString(transaction.data(), 'reverses_transaction_id', 'CORRUPT_SUBSIDY_TRANSACTION'));
+            if (!original || optionalString(original.data(), 'work_order_id') !== workOrderId || original.data().amount_krw !== transaction.data().amount_krw) throw new DomainCommandError('CORRUPT_SUBSIDY_TRANSACTION', 'A reversal does not match its execution transaction.', 500);
+            const key = `${account.id}:${workOrderId}`;
+            executedByAccountAndWorkOrder.set(key, (executedByAccountAndWorkOrder.get(key) ?? 0) - safeMoney(transaction.data().amount_krw));
+          }
+        }
+      }
+      return repairs.filter((repair) => !['rejected', 'cancelled'].includes(String(repair.data().status))).sort(byUpdatedDesc).map((repair): ConsoleRepairRecord => this.consoleRepair(repair, names, deviceById, partnerById, subsidyAccounts, executedByAccountAndWorkOrder));
     }
-    if (projection === 'ledger') return this.consoleLedger(actor.tenantId, await this.collection(tenant, 'subsidyAccounts'), names);
+    if (projection === 'ledger') return this.consoleLedger(actor.tenantId, subsidyAccounts, names);
     if (projection === 'inspections') return (await this.collection(tenant, 'inspections')).map((inspection) => ({ user: names.get(String(inspection.data().person_id)) ?? '이용자', device: publicDevice(deviceById.get(String(inspection.data().device_id))), due: dateLabel(inspection.data().scheduled_at ?? inspection.data().started_at, '미정'), reason: inspectionReason(inspection.data()?.reason_code), score: inspectionDecision(inspection.data()?.decision_code), confidence: inspectionConfidence(inspection.data()?.confidence_band) }));
     if (projection === 'partners') return (await this.collection(tenant, 'repairStations')).map((partner) => ({ name: publicPartnerName(partner), contact: '복지관 등록 연락망', active: `${repairs.filter((repair) => repair.data().repair_station_id === partner.id && activeRepairStatuses.has(repair.data().status)).length}건`, completed: `${safeCount(partner.data()?.completed_count)}건`, sla: optionalString(partner.data(), 'sla_label') ?? '측정 전', tone: partner.data().status === 'active' ? 'success' : 'warning' }));
     if (projection === 'reports') return (await this.collection(tenant, 'reportRuns')).map((report) => ({ title: reportTitle(report.data()?.report_type), type: reportTypeLabel(report.data()?.report_type), date: dateLabel(report.data().completed_at ?? report.data().created_at, '작성 중'), state: reportState(report.data()?.status), facts: String(safeCount(report.data()?.fact_count)) }));
-    const [inspections, accounts] = await Promise.all([this.collection(tenant, 'inspections'), this.collection(tenant, 'subsidyAccounts')]);
-    return this.dashboard(repairs, inspections, accounts, devices, names);
+    const inspections = await this.collection(tenant, 'inspections');
+    return this.dashboard(repairs, inspections, subsidyAccounts, devices, names);
   }
 
   private async repairerSnapshot(actor: ActorContext, tenant: FirebaseFirestore.DocumentReference): Promise<MobileProductSnapshot> {
@@ -252,18 +276,28 @@ export class FirestoreProductProjectionStore implements ProductProjectionStore {
     }
   }
 
-  private consoleRepair(repair: QueryDocumentSnapshot, names: Map<string, string>, devices: Map<string, QueryDocumentSnapshot>, partners: Map<string, string>) {
+  private consoleRepair(repair: QueryDocumentSnapshot, names: Map<string, string>, devices: Map<string, QueryDocumentSnapshot>, partners: Map<string, string>, subsidyAccounts: QueryDocumentSnapshot[], executedByAccountAndWorkOrder: Map<string, number>): ConsoleRepairRecord {
     const status = repair.data().status as RepairStatus;
-    return { id: repair.id, user: names.get(String(repair.data().requester_person_id)) ?? `이용자 ${shortCode(String(repair.data().requester_person_id))}`, device: publicDevice(devices.get(String(repair.data().device_id))), issue: safeOperationalIssue(repair.data()), request: dateLabel(repair.data().created_at, '날짜 미확인'), partner: partners.get(String(repair.data().repair_station_id)) ?? '미배정', amount: moneyLabel(repair.data().billed_amount_krw ?? repair.data().requested_amount_krw), workItems: safeWorkItems(repair.data().work_items), stage: consoleStage(status), priority: repair.data().priority === 'urgent_review' ? '높음' : repair.data().priority === 'routine' ? '낮음' : '보통', revision: requiredPositiveInteger(repair.data(), 'revision', 'CORRUPT_REPAIR_DOCUMENT') };
+    const personId = requiredString(repair.data(), 'requester_person_id', 'CORRUPT_REPAIR_DOCUMENT');
+    const billedAmountKrw = nullableMoney(repair.data().billed_amount_krw);
+    return { id: repair.id, user: names.get(personId) ?? `이용자 ${shortCode(personId)}`, device: publicDevice(devices.get(String(repair.data().device_id))), issue: safeOperationalIssue(repair.data()), request: dateLabel(repair.data().created_at, '날짜 미확인'), partner: partners.get(String(repair.data().repair_station_id)) ?? '미배정', amount: moneyLabel(billedAmountKrw ?? repair.data().requested_amount_krw), workItems: safeWorkItems(repair.data().work_items), stage: consoleStage(status), domainStatus: status, publicFundingInvolved: repair.data().public_funding_involved === true, billedAmountKrw, subsidyContext: repair.data().public_funding_involved === true ? subsidyContext(repair, personId, subsidyAccounts, status, billedAmountKrw, executedByAccountAndWorkOrder) : null, priority: repair.data().priority === 'urgent_review' ? '높음' : repair.data().priority === 'routine' ? '낮음' : '보통', revision: requiredPositiveInteger(repair.data(), 'revision', 'CORRUPT_REPAIR_DOCUMENT') };
   }
 
-  private async consoleLedger(tenantId: string, accounts: QueryDocumentSnapshot[], names: Map<string, string>) {
-    const rows: Array<{ date: string; id: string; user: string; item: string; amount: string; state: '예약' | '집행 완료' | '예약 취소'; actor: string; occurred: number }> = [];
-    for (const account of accounts) {
+  private async consoleLedger(tenantId: string, accounts: QueryDocumentSnapshot[], names: Map<string, string>): Promise<ConsoleLedgerEntry[]> {
+    const rows: Array<ConsoleLedgerEntry & { occurred: number }> = [];
+    const transactionIds = new Set<string>();
+      for (const account of accounts) {
       const remaining = MAX_LEDGER_TRANSACTIONS - rows.length;
       const transactions = await this.bounded(account.ref.collection('transactions').limit(remaining + 1).get(), 'subsidy transactions', tenantId, remaining);
-      transactions.forEach(assertValidLedgerTransaction);
-      rows.push(...transactions.map((transaction) => ({ date: dateLabel(transaction.data().occurred_at, '날짜 미확인'), id: optionalString(transaction.data(), 'work_order_id') ?? transaction.id, user: names.get(String(account.data().person_id)) ?? `이용자 ${shortCode(String(account.data().person_id))}`, item: transactionLabel(transaction.data().transaction_type), amount: moneyLabel(transaction.data().amount_krw), state: ledgerState(transaction.data().transaction_type), actor: '기관 담당자', occurred: timestampMillis(transaction.data().occurred_at) })));
+      transactions.forEach((transaction) => { assertValidLedgerTransaction(transaction); assertTransactionAccountBinding(transaction, account); });
+      rows.push(...transactions.map((transaction) => {
+        const transactionId = ledgerTransactionId(transaction);
+        if (transactionIds.has(transactionId)) throw new DomainCommandError('DUPLICATE_LEDGER_TRANSACTION', 'The ledger projection contains a duplicate transaction identifier.', 500);
+        transactionIds.add(transactionId);
+        const transactionType = ledgerTransactionType(transaction.data().transaction_type);
+        const amountKrw = transactionType === 'adjustment' ? safeSignedMoney(transaction.data().amount_krw) : safeMoney(transaction.data().amount_krw);
+        return { date: dateLabel(transaction.data().occurred_at, '날짜 미확인'), id: optionalString(transaction.data(), 'work_order_id') ?? transactionId, transactionId, transactionType, user: names.get(String(account.data().person_id)) ?? `이용자 ${shortCode(String(account.data().person_id))}`, item: transactionLabel(transactionType), amount: signedMoneyLabel(amountKrw), amountKrw, state: ledgerState(transactionType), actor: '기관 담당자', occurred: timestampMillis(transaction.data().occurred_at) };
+      }));
     }
     return rows.sort((a, b) => b.occurred - a.occurred).slice(0, 100).map(({ occurred: _occurred, ...row }) => row);
   }
@@ -284,7 +318,8 @@ function isOperationalRole(role: string) { return role === 'case_worker' || role
 function activeAt(data: DocumentData | undefined) { const now = Date.now(); const validFrom = timestampMillis(data?.valid_from); const validTo = data?.valid_to === undefined || data?.valid_to === null ? Number.POSITIVE_INFINITY : timestampMillis(data.valid_to); return data?.status === 'active' && validFrom > 0 && validFrom <= now && validTo > now; }
 function assertUniqueActiveAssignments(assignments: QueryDocumentSnapshot[]) { const people = new Set<string>(); const devices = new Set<string>(); for (const assignment of assignments) { const person = requiredString(assignment.data(), 'person_id', 'CORRUPT_DEVICE_ASSIGNMENT'); const device = requiredString(assignment.data(), 'device_id', 'CORRUPT_DEVICE_ASSIGNMENT'); if (people.has(person) || devices.has(device)) throw new DomainCommandError('AMBIGUOUS_DEVICE_ASSIGNMENT', 'Active device assignments are not unique.', 409); people.add(person); devices.add(device); } }
 function assertValidRepairDocument(repair: QueryDocumentSnapshot) { if (!allRepairStatuses.has(repair.data().status)) throw new DomainCommandError('CORRUPT_REPAIR_DOCUMENT', 'A repair document has an unsupported status.', 500); requiredString(repair.data(), 'requester_person_id', 'CORRUPT_REPAIR_DOCUMENT'); requiredString(repair.data(), 'device_id', 'CORRUPT_REPAIR_DOCUMENT'); requiredPositiveInteger(repair.data(), 'revision', 'CORRUPT_REPAIR_DOCUMENT'); }
-function assertValidLedgerTransaction(transaction: QueryDocumentSnapshot) { if (!['allocation', 'reservation', 'execution', 'release', 'reversal', 'adjustment'].includes(String(transaction.data().transaction_type))) throw new DomainCommandError('CORRUPT_SUBSIDY_TRANSACTION', 'A subsidy transaction has an unsupported type.', 500); if (!Number.isSafeInteger(transaction.data().amount_krw) || transaction.data().amount_krw < 0) throw new DomainCommandError('CORRUPT_SUBSIDY_TRANSACTION', 'A subsidy transaction has an invalid amount.', 500); }
+function assertValidLedgerTransaction(transaction: QueryDocumentSnapshot) { const type = String(transaction.data().transaction_type); const amount = transaction.data().amount_krw; if (!['allocation', 'reservation', 'execution', 'release', 'reversal', 'adjustment'].includes(type)) throw new DomainCommandError('CORRUPT_SUBSIDY_TRANSACTION', 'A subsidy transaction has an unsupported type.', 500); if (!Number.isSafeInteger(amount) || amount === 0 || (type !== 'adjustment' && amount < 0)) throw new DomainCommandError('CORRUPT_SUBSIDY_TRANSACTION', 'A subsidy transaction has an invalid amount.', 500); }
+function assertTransactionAccountBinding(transaction: QueryDocumentSnapshot, account: QueryDocumentSnapshot) { const data = transaction.data(); const accountData = account.data(); if (optionalString(data, 'account_id') !== account.id || optionalString(data, 'person_id') !== optionalString(accountData, 'person_id') || optionalString(data, 'policy_version_id') !== optionalString(accountData, 'policy_version_id')) throw new DomainCommandError('CORRUPT_SUBSIDY_TRANSACTION', 'A subsidy transaction does not match its parent account scope.', 500); }
 function byUpdatedDesc(a: QueryDocumentSnapshot, b: QueryDocumentSnapshot) { return timestampMillis(b.data().updated_at ?? b.data().created_at) - timestampMillis(a.data().updated_at ?? a.data().created_at); }
 function optionalString(data: DocumentData | undefined, field: string): string | undefined { const value = data?.[field]; return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
 function requiredString(data: DocumentData | undefined, field: string, code: string): string { const value = optionalString(data, field); if (!value) throw new DomainCommandError(code, `Projection field ${field} is invalid.`, 500); return value; }
@@ -300,6 +335,39 @@ function deviceName(data: DocumentData | undefined) { const manufacturer = optio
 function mobileDeviceStatus(status: unknown): 'healthy' | 'attention' { if (status === 'active') return 'healthy'; if (status === 'maintenance') return 'attention'; throw new DomainCommandError('CORRUPT_DEVICE_DOCUMENT', 'The assigned device has an unsupported status.', 500); }
 function consoleDeviceStatus(status: unknown): { health: string; state: string } { if (status === 'active') return { health: '양호', state: '정상' }; if (status === 'maintenance') return { health: '점검 권장', state: '주의' }; if (status === 'unassigned') return { health: '미배정', state: '대기' }; if (status === 'retired' || status === 'lost') return { health: '운영 제외', state: '확인 필요' }; throw new DomainCommandError('CORRUPT_DEVICE_DOCUMENT', 'A device has an unsupported status.', 500); }
 function safeOperationalIssue(data: DocumentData | undefined) { return data?.issue_redaction_status === 'verified' ? optionalString(data, 'issue_summary_redacted') ?? '수리 요청 상세 확인 필요' : optionalString(data, 'issue_category_label') ?? '수리 요청 상세 확인 필요'; }
+function subsidyContext(repair: QueryDocumentSnapshot, personId: string, accounts: QueryDocumentSnapshot[], status: RepairStatus, billedAmountKrw: number | null, executedByAccountAndWorkOrder: Map<string, number>): ConsoleRepairSubsidyContext | null {
+  const repairData = repair.data();
+  const linkedAccountId = optionalString(repairData, 'subsidy_account_id');
+  const eligible = accounts.filter((candidate) => {
+    const data = candidate.data();
+    return data.tenant_id === repairData.tenant_id && data.status === 'active' && optionalString(data, 'person_id') === personId && optionalString(data, 'account_id') === candidate.id && Boolean(optionalString(data, 'policy_version_id'));
+  });
+  const account = linkedAccountId
+    ? eligible.find((candidate) => candidate.id === linkedAccountId)
+    : eligible.length === 1 ? eligible[0] : undefined;
+  if (!account) return null;
+  const data = account.data();
+  const canonicalAccountId = optionalString(data, 'account_id');
+  const canonicalPersonId = optionalString(data, 'person_id');
+  const policyVersionId = optionalString(data, 'policy_version_id');
+  const decisionId = optionalString(repairData, 'subsidy_decision_id');
+  if (canonicalAccountId !== account.id || (linkedAccountId && canonicalAccountId !== linkedAccountId) || canonicalPersonId !== personId || !policyVersionId) return null;
+  const executedAmountKrw = executedByAccountAndWorkOrder.get(`${canonicalAccountId}:${repair.id}`) ?? 0;
+  if (executedAmountKrw < 0 || (billedAmountKrw !== null && executedAmountKrw > billedAmountKrw)) throw new DomainCommandError('CORRUPT_SUBSIDY_TRANSACTION', 'Net execution is outside the billed repair amount.', 500);
+  const reservedByWorkOrder = data.reserved_by_work_order;
+  if (!reservedByWorkOrder || typeof reservedByWorkOrder !== 'object' || Array.isArray(reservedByWorkOrder)) throw new DomainCommandError('CORRUPT_SUBSIDY_ACCOUNT', 'The subsidy account reservation map is invalid.', 500);
+  const reservedAmountKrw = safeMoney((reservedByWorkOrder as Record<string, unknown>)[repair.id]);
+  const executionRecorded = (status === 'center_verified' || status === 'completed') && billedAmountKrw !== null && executedAmountKrw === billedAmountKrw;
+  return {
+    accountId: canonicalAccountId,
+    personId: canonicalPersonId,
+    policyVersionId,
+    ...(decisionId ? { decisionId } : {}),
+    reservedAmountKrw,
+    executedAmountKrw,
+    executionState: executionRecorded ? 'executed' : status === 'center_verified' || status === 'completed' ? 'execution_pending' : 'verification_required',
+  };
+}
 function publicPartnerName(partner: QueryDocumentSnapshot) { return optionalString(partner.data(), 'display_name') ?? `수리소 ${shortCode(partner.id)}`; }
 function inspectionReason(code: unknown) { return ({ routine_cycle: '정기 점검 주기 도래', repair_followup: '수리 후 확인', usage_change: '사용량 변화 확인' } as Record<string, string>)[String(code)] ?? '점검 사유 확인 필요'; }
 function inspectionDecision(code: unknown) { return ({ healthy: '양호', review: '검토', inspection_recommended: '점검 권장' } as Record<string, string>)[String(code)] ?? '검토'; }
@@ -313,10 +381,16 @@ function nullableMoney(value: unknown): number | null { return Number.isSafeInte
 function safeSignedMoney(value: unknown) { return Number.isSafeInteger(value) ? value as number : 0; }
 function safeCount(value: unknown) { return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0; }
 function moneyLabel(value: unknown) { return `₩${safeMoney(value).toLocaleString('ko-KR')}`; }
+function signedMoneyLabel(value: number) { return `${value < 0 ? '-' : ''}₩${Math.abs(value).toLocaleString('ko-KR')}`; }
 function distanceLabel(value: unknown) { return Number.isFinite(value) && (value as number) >= 0 ? `${Math.round((value as number) / 1000).toLocaleString('ko-KR')} km` : '—'; }
 function mobileRepairStatus(status: unknown): 'received' | 'assigned' | 'visit_scheduled' | 'completed' { if (status === 'completed') return 'completed'; if (status === 'scheduled' || status === 'in_progress' || status === 'repairer_submitted' || status === 'center_verified') return 'visit_scheduled'; if (status === 'assigned') return 'assigned'; return 'received'; }
 function consoleStage(status: RepairStatus): 'new' | 'assigned' | 'submitted' | 'verified' { if (status === 'repairer_submitted' || status === 'needs_correction') return 'submitted'; if (status === 'center_verified' || status === 'completed') return 'verified'; if (status === 'assigned' || status === 'scheduled' || status === 'in_progress') return 'assigned'; return 'new'; }
 function transactionLabel(type: unknown) { return ({ allocation: '지원금 배정', reservation: '수리 지원금 예약', execution: '수리 지원금 집행', release: '예약 해제', reversal: '집행 취소', adjustment: '지원금 조정' } as Record<string, string>)[String(type)] ?? '지원금 변동'; }
+function ledgerTransactionId(transaction: QueryDocumentSnapshot): string { return optionalString(transaction.data(), 'transaction_id') ?? transaction.id; }
+function ledgerTransactionType(type: unknown): ConsoleLedgerTransactionType {
+  if (!['allocation', 'reservation', 'execution', 'release', 'adjustment', 'reversal'].includes(String(type))) throw new DomainCommandError('CORRUPT_SUBSIDY_TRANSACTION', 'A subsidy transaction has an unsupported type.', 500);
+  return type as ConsoleLedgerTransactionType;
+}
 function ledgerState(type: unknown): '예약' | '집행 완료' | '예약 취소' { return type === 'execution' ? '집행 완료' : type === 'release' || type === 'reversal' ? '예약 취소' : '예약'; }
 function reportState(status: unknown) { return status === 'completed' ? '발행 완료' : status === 'running' ? '검토 중' : '초안'; }
 function isToday(value: unknown) { const millis = timestampMillis(value); if (!millis) return false; const now = new Date(); const date = new Date(millis); return now.getUTCFullYear() === date.getUTCFullYear() && now.getUTCMonth() === date.getUTCMonth() && now.getUTCDate() === date.getUTCDate(); }
@@ -330,7 +404,7 @@ function safeWorkItems(value: unknown): Array<{ categoryCode: string; categoryLa
     if (!candidate || typeof candidate !== 'object') throw new DomainCommandError('CORRUPT_REPAIR_DOCUMENT', 'A repair work item is invalid.', 500);
     const item = candidate as Record<string, unknown>;
     const categoryCode = String(item.category_code); const actionCode = String(item.action_code);
-    if (!categories[categoryCode] || !actions[actionCode] || !Number.isSafeInteger(item.quantity) || !Number.isSafeInteger(item.line_amount_krw)) throw new DomainCommandError('CORRUPT_REPAIR_DOCUMENT', 'A repair work item contains invalid values.', 500);
+    if (!categories[categoryCode] || !actions[actionCode] || !Number.isSafeInteger(item.quantity) || (item.quantity as number) < 1 || (item.quantity as number) > 20 || !Number.isSafeInteger(item.line_amount_krw) || (item.line_amount_krw as number) < 0 || (item.line_amount_krw as number) > 100_000_000) throw new DomainCommandError('CORRUPT_REPAIR_DOCUMENT', 'A repair work item contains invalid values.', 500);
     return { categoryCode, categoryLabel: categories[categoryCode], actionCode, actionLabel: actions[actionCode], quantity: item.quantity as number, lineAmountKrw: item.line_amount_krw as number };
   });
 }
