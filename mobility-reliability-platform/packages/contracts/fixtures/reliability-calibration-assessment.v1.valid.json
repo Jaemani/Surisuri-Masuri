@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "reliability-calibration-assessment.v1",
+  "assessmentId": "25783bf0-b1b3-5947-b37c-cc7b51535ade",
+  "generatedAt": "2026-08-13T13:00:00Z",
+  "evaluationScope": "synthetic_only",
+  "sourceKind": "synthetic",
+  "evaluatorVersion": "r11-calibration-estimability.v1",
+  "policyVersion": "r11-calibration-abstention-policy.v1",
+  "lineage": {
+    "datasetSha256": "e322548d33bb1c8a3014a21ae0c527a8862c2780f49c1589c1106d51064e63a2",
+    "baselineResultSha256": "c6712452fbc2b967b3d896ca1877fc6810df372aacd487587155cc3dd7b9278f"
+  },
+  "assessmentPolicy": {
+    "method": "kaplan_meier",
+    "horizonDays": 30,
+    "riskThreshold": 0.5,
+    "minimumSamples": 30,
+    "minimumEvents": 10,
+    "minimumDistinctScores": 3,
+    "validationPurpose": "calibration_and_abstention_assessment",
+    "testPurpose": "untouched_final_measurement",
+    "testUsedForTuning": false
+  },
+  "factBoundary": {
+    "riskResetSourceQuality": "verified_synthetic",
+    "explicitRiskResetFactCount": 6,
+    "componentLinkInferenceAllowed": false,
+    "rawRepairTextIncluded": false,
+    "identityIncluded": false
+  },
+  "components": [
+    { "component": "battery", "validationCount": 8, "validationEventCount": 6, "testCount": 8, "testEventCount": 6, "distinctValidationScoreCount": 1, "fallback": "fixed_interval_and_human_review", "calibrationStatus": "not_estimable", "abstention": true, "notEstimableReason": "calibration_sample_insufficient" },
+    { "component": "brake", "validationCount": 6, "validationEventCount": 5, "testCount": 6, "testEventCount": 4, "distinctValidationScoreCount": 1, "fallback": "fixed_interval_and_human_review", "calibrationStatus": "not_estimable", "abstention": true, "notEstimableReason": "calibration_sample_insufficient" },
+    { "component": "controller", "validationCount": 3, "validationEventCount": 1, "testCount": 3, "testEventCount": 1, "distinctValidationScoreCount": 0, "fallback": "fixed_interval_and_human_review", "calibrationStatus": "not_estimable", "abstention": true, "notEstimableReason": "reliability_train_insufficient" }
+  ],
+  "limitations": ["synthetic_data_only", "no_field_calibration", "aggregate_only", "no_individual_action", "not_for_safety_critical_failure_prediction"],
+  "deploymentAuthorized": false,
+  "deploymentDecision": "defer",
+  "assessmentSha256": "a2be7299b68d29a71ed0f89fd12e8571988942d1f4f8acf0eb9898c4d5eb8de7"
+}

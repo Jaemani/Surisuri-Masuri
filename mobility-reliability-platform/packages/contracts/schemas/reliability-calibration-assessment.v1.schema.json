@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.internal/reliability-calibration-assessment.v1.schema.json",
+  "title": "ReliabilityCalibrationAssessmentV1",
+  "description": "Aggregate synthetic-only calibration and abstention assessment. It cannot authorize individual action or deployment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "assessmentId", "generatedAt", "evaluationScope", "sourceKind", "evaluatorVersion", "policyVersion", "lineage", "assessmentPolicy", "factBoundary", "components", "limitations", "deploymentAuthorized", "deploymentDecision", "assessmentSha256"],
+  "properties": {
+    "schemaVersion": { "const": "reliability-calibration-assessment.v1" },
+    "assessmentId": { "type": "string", "format": "uuid" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "evaluationScope": { "const": "synthetic_only" },
+    "sourceKind": { "const": "synthetic" },
+    "evaluatorVersion": { "const": "r11-calibration-estimability.v1" },
+    "policyVersion": { "const": "r11-calibration-abstention-policy.v1" },
+    "lineage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["datasetSha256", "baselineResultSha256"],
+      "properties": { "datasetSha256": { "$ref": "#/$defs/sha256" }, "baselineResultSha256": { "$ref": "#/$defs/sha256" } }
+    },
+    "assessmentPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["method", "horizonDays", "riskThreshold", "minimumSamples", "minimumEvents", "minimumDistinctScores", "validationPurpose", "testPurpose", "testUsedForTuning"],
+      "properties": {
+        "method": { "const": "kaplan_meier" },
+        "horizonDays": { "const": 30 },
+        "riskThreshold": { "const": 0.5 },
+        "minimumSamples": { "const": 30 },
+        "minimumEvents": { "const": 10 },
+        "minimumDistinctScores": { "const": 3 },
+        "validationPurpose": { "const": "calibration_and_abstention_assessment" },
+        "testPurpose": { "const": "untouched_final_measurement" },
+        "testUsedForTuning": { "const": false }
+      }
+    },
+    "factBoundary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["riskResetSourceQuality", "explicitRiskResetFactCount", "componentLinkInferenceAllowed", "rawRepairTextIncluded", "identityIncluded"],
+      "properties": {
+        "riskResetSourceQuality": { "const": "verified_synthetic" },
+        "explicitRiskResetFactCount": { "type": "integer", "minimum": 0 },
+        "componentLinkInferenceAllowed": { "const": false },
+        "rawRepairTextIncluded": { "const": false },
+        "identityIncluded": { "const": false }
+      }
+    },
+    "components": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "$ref": "#/$defs/component" } },
+    "limitations": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["synthetic_data_only", "no_field_calibration", "aggregate_only", "no_individual_action", "not_for_safety_critical_failure_prediction"] } },
+    "deploymentAuthorized": { "const": false },
+    "deploymentDecision": { "const": "defer" },
+    "assessmentSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["split", "sampleCount", "eventCount", "censoredCount", "predictedRisk", "observedRate", "absoluteCalibrationError", "brierScore"],
+      "properties": {
+        "split": { "enum": ["validation", "test"] },
+        "sampleCount": { "type": "integer", "minimum": 1 },
+        "eventCount": { "type": "integer", "minimum": 0 },
+        "censoredCount": { "type": "integer", "minimum": 0 },
+        "predictedRisk": { "type": "number", "minimum": 0, "maximum": 1 },
+        "observedRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "absoluteCalibrationError": { "type": "number", "minimum": 0, "maximum": 1 },
+        "brierScore": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "component": {
+      "type": "object", "additionalProperties": false,
+      "required": ["component", "calibrationStatus", "abstention", "validationCount", "validationEventCount", "testCount", "testEventCount", "distinctValidationScoreCount", "fallback"],
+      "properties": {
+        "component": { "enum": ["battery", "brake", "controller", "motor", "seat_frame", "wheel_tire"] },
+        "calibrationStatus": { "enum": ["evaluated", "not_estimable"] },
+        "abstention": { "type": "boolean" },
+        "notEstimableReason": { "enum": ["reliability_train_insufficient", "calibration_sample_insufficient", "calibration_event_insufficient", "score_variation_insufficient"] },
+        "validationCount": { "type": "integer", "minimum": 1 },
+        "validationEventCount": { "type": "integer", "minimum": 0 },
+        "testCount": { "type": "integer", "minimum": 1 },
+        "testEventCount": { "type": "integer", "minimum": 0 },
+        "distinctValidationScoreCount": { "type": "integer", "minimum": 0 },
+        "fallback": { "const": "fixed_interval_and_human_review" },
+        "validation": { "$ref": "#/$defs/metrics" },
+        "test": { "$ref": "#/$defs/metrics" },
+        "individualActionAllowed": { "const": false }
+      },
+      "allOf": [
+        { "if": { "properties": { "calibrationStatus": { "const": "evaluated" } }, "required": ["calibrationStatus"] }, "then": { "required": ["validation", "test", "individualActionAllowed"], "properties": { "abstention": { "const": false }, "validation": { "$ref": "#/$defs/metrics" }, "test": { "$ref": "#/$defs/metrics" }, "individualActionAllowed": { "const": false }, "notEstimableReason": false } } },
+        { "if": { "properties": { "calibrationStatus": { "const": "not_estimable" } }, "required": ["calibrationStatus"] }, "then": { "required": ["notEstimableReason"], "properties": { "abstention": { "const": true }, "validation": false, "test": false, "individualActionAllowed": false } } }
+      ]
+    }
+  }
+}

@@ -255,6 +255,18 @@ const cases = [
     fixture: 'fixtures/reliability-comparison-artifact.v1.invalid.json',
     expected: false,
   },
+  {
+    name: 'valid reliability calibration assessment v1',
+    schema: 'schemas/reliability-calibration-assessment.v1.schema.json',
+    fixture: 'fixtures/reliability-calibration-assessment.v1.valid.json',
+    expected: true,
+  },
+  {
+    name: 'invalid reliability calibration assessment v1 rejects field, tuning, inferred linkage, metrics on abstention, and deployment',
+    schema: 'schemas/reliability-calibration-assessment.v1.schema.json',
+    fixture: 'fixtures/reliability-calibration-assessment.v1.invalid.json',
+    expected: false,
+  },
 ]
 
 for (const testCase of cases) {

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "reliability-calibration-assessment.v1",
+  "assessmentId": "25783bf0-b1b3-5947-b37c-cc7b51535ade",
+  "generatedAt": "2026-08-13T13:00:00Z",
+  "evaluationScope": "field",
+  "sourceKind": "synthetic",
+  "evaluatorVersion": "r11-calibration-estimability.v1",
+  "policyVersion": "r11-calibration-abstention-policy.v1",
+  "lineage": { "datasetSha256": "e322548d33bb1c8a3014a21ae0c527a8862c2780f49c1589c1106d51064e63a2", "baselineResultSha256": "c6712452fbc2b967b3d896ca1877fc6810df372aacd487587155cc3dd7b9278f" },
+  "assessmentPolicy": { "method": "kaplan_meier", "horizonDays": 30, "riskThreshold": 0.5, "minimumSamples": 30, "minimumEvents": 10, "minimumDistinctScores": 3, "validationPurpose": "calibration_and_abstention_assessment", "testPurpose": "untouched_final_measurement", "testUsedForTuning": true },
+  "factBoundary": { "riskResetSourceQuality": "verified_synthetic", "explicitRiskResetFactCount": 6, "componentLinkInferenceAllowed": true, "rawRepairTextIncluded": false, "identityIncluded": false },
+  "components": [{ "component": "battery", "validationCount": 8, "validationEventCount": 6, "testCount": 8, "testEventCount": 6, "distinctValidationScoreCount": 1, "fallback": "fixed_interval_and_human_review", "calibrationStatus": "not_estimable", "abstention": true, "notEstimableReason": "calibration_sample_insufficient", "test": { "split": "test", "sampleCount": 8, "eventCount": 6, "censoredCount": 2, "predictedRisk": 0.75, "observedRate": 0.75, "absoluteCalibrationError": 0, "brierScore": 0.1875 } }],
+  "limitations": ["synthetic_data_only"],
+  "deploymentAuthorized": true,
+  "deploymentDecision": "deploy",
+  "assessmentSha256": "e45183f265f278d0c0031346f882de24429b259fc4632cb1db30a81b1124f877"
+}

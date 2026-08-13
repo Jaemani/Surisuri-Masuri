@@ -26,6 +26,7 @@
 - `quality-baseline-result.v1.schema.json`: `quality-features.v1`와 분리된 synthetic-only rules baseline 결과. split별/전체 metric, 네 known class와 `unknown_review_required` confusion matrix, prediction·abstain·feature hash를 strict하게 기록한다.
 - `reliability-baseline-result.v1.schema.json`: R10 time-to-inspection baseline 결과의 synthetic-only contract. `device-group-time-holdout.v1` 시간창·leakage flag·counts reconciliation, fixed interval·cumulative distance·Kaplan–Meier 방법과 component별 `data_insufficient` abstention을 기록하며 `deploymentAuthorized=false`와 `deploymentDecision=defer`를 고정한다. 실제 event/censoring 데이터·성능·field/production 배포를 의미하지 않는다.
 - `reliability-comparison-artifact.v1.schema.json`: R10 baseline 결과에서 파생한 aggregate-only presentation wire contract. train curve와 test metric 출처, identity-free component 비교, read-only internal synthetic demo와 deployment defer를 고정한다. 산술 합계·component 중복·metric lineage는 Python semantic validator가 추가 검증한다.
+- `reliability-calibration-assessment.v1.schema.json`: R11 calibration estimability·abstention 평가 계약. validation 표본·사건·distinct score 자격을 먼저 검사하고, 부족하면 calibration metric을 금지한 채 고정주기·사람 검토 fallback으로 닫는다. 합성 aggregate-only, explicit verified-synthetic reset fact, untouched test, no individual action과 deployment defer를 고정한다.
 
 R07-B1에서는 규칙 baseline 결과를 이 feature contract에 넣지 않는다. baseline output이
 추가될 때는 별도 versioned result schema와 lineage/evaluation contract로 분리한다.
