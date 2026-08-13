@@ -118,9 +118,25 @@
 | [HR-20260811-03](./HR-20260811-03-r07-feature-rules-baseline.md) | R07 feature contract·rules baseline | `draft` |
 | [HR-20260813-04](./HR-20260813-04-mobile-ui-audit.md) | 현재 Android 모바일 흐름 UX·접근성 감사 | `draft` |
 | [HR-20260813-05](./HR-20260813-05-domain-command-boundary.md) | 수리·지원금 Firebase Domain Command 경계 | `draft` |
+| [HR-20260813-06](./HR-20260813-06-product-read-projection.md) | 제품 읽기 projection 구현 | `draft` |
+| [HR-20260813-07](./HR-20260813-07-completed-repair-history.md) | 완료 수리 이력 구현 | `draft` |
+| [HR-20260813-08](./HR-20260813-08-repair-intake-center-actions.md) | 수리 접수·복지관 action 화면 | `draft` |
+| [HR-20260813-09](./HR-20260813-09-repairer-command-security.md) | 수리사 상태 변경 보안 | `draft` |
+| [HR-20260813-10](./HR-20260813-10-repairer-work-view.md) | 수리사 작업 목록 데이터 | `draft` |
+| [HR-20260813-11](./HR-20260813-11-mobile-repairer-command-adapter.md) | 모바일 수리사 command 연결부 | `draft` |
+| [HR-20260813-12](./HR-20260813-12-repairer-mobile-workspace.md) | 수리사 모바일 작업 흐름 | `draft` |
+| [HR-20260813-13](./HR-20260813-13-structured-repair-items.md) | 수리 작업 항목 표준화 | `draft` |
+| [HR-20260813-14](./HR-20260813-14-repair-items-product-connection.md) | 수리 항목 모바일·복지관 연결 | `draft` |
+| [HR-20260813-15](./HR-20260813-15-device-code-verification.md) | 수리 전 기기 코드 확인 | `draft` |
+| [HR-20260813-16](./HR-20260813-16-native-qr-verification.md) | QR 기기 확인 | `draft` |
+| [HR-20260813-17](./HR-20260813-17-r07-pytorch-candidate.md) | PyTorch 최소 후보와 배포 유보 | `draft` |
 | [HR-20260813-18](./HR-20260813-18-console-completed-repair-timeline.md) | 복지관 콘솔 완료 수리 타임라인 설계 점검 | `generated` |
 | [HR-20260813-19](./HR-20260813-19-r10-synthetic-reliability-baseline.md) | R10 합성 reliability baseline 구현 점검 | `generated` |
 | [HR-20260813-20](./HR-20260813-20-console-inspection-evidence-ui.md) | 복지관 예방점검 설명 화면 점검 | `generated` |
 | [HR-20260813-21](./HR-20260813-21-r10-synthetic-reliability-presentation.md) | 합성 reliability 기준선 비교 화면 점검 | `generated` |
 | [HR-20260813-22](./HR-20260813-22-center-verification-subsidy-authority-loop.md) | 센터 검증·지원금 집행 흐름 점검 | `generated` |
-- [HR-20260813-23 — 보정 가능성 화면 사람 검토](./HR-20260813-23-calibration-readiness-review.md)
+| [HR-20260813-23](./HR-20260813-23-calibration-readiness-review.md) | 보정 가능성 화면 사람 검토 | `generated` |
+| [HR-20260813-24](./HR-20260813-24-r12-source-integrity-review.md) | R12 source 무결성 경계 | `generated` |
+| [HR-20260813-25](./HR-20260813-25-report-claim-binding-review.md) | report claim 저장 경계 | `generated` |
+| [HR-20260813-26](./HR-20260813-26-report-run-lifecycle-review.md) | R12 생성·검토·발행 상태 | `generated` |
+| [HR-20260813-27](./HR-20260813-27-mobile-session-summary.md) | 모바일 주행 종료 결과 | `generated` |

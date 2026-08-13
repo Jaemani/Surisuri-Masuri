@@ -6,7 +6,7 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "check": "pnpm check:docs && pnpm -r --if-present check",
-    "check:docs": "node scripts/check-doc-links.mjs",
+    "check:docs": "node scripts/check-doc-links.mjs && node scripts/check-doc-integrity.mjs",
     "check:firebase": "pnpm --filter @mobility-reliability/firebase-rules test",
     "doctor": "node scripts/doctor.mjs",
     "test": "pnpm -r --if-present test",

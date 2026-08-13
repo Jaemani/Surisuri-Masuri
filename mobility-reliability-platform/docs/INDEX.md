@@ -4,20 +4,22 @@
 
 ## 1. 프로젝트를 처음 읽는 순서
 
-1. [프로젝트 상세 개요](./PROJECT_OVERVIEW.md) — 배경, 사용자, 제품 흐름, 기술 목표, 현재 사실
-2. [프로젝트 헌장](./PROJECT_CHARTER.md) — 승인된 범위, 비목표, 성공 조건, 재사용 경계
-3. [시스템 아키텍처](./architecture/SYSTEM_ARCHITECTURE.md) — 런타임 경계와 신뢰 경계
-4. [8개월 로드맵](./ROADMAP.md) — 2026년 5월~12월 월별 기술 게이트
-5. [마스터 실행계획](./plans/MASTER_EXECUTION_PLAN.md) — 작업흐름, 의존성, 반월 단위 실행과 완료 조건
-6. [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md) — 테스트 수준, KPI, 실기기·현장 증거 규칙
-7. [Telemetry 복구 실행계획](./plans/TELEMETRY_RECOVERY_PLAN.md) — lease, fencing, sweeper, generation-pinned recovery
-8. [정기보고·회의 운영계획](./plans/REPORTING_AND_MEETING_PLAN.md) — 월 2회, 총 16회 계획 보고와 실제 기록 방법
-9. [리포트 운영 인덱스](./reports/README.md) — fixed 사전작성본과 human 요청 리포트의 상태·발행 경계
-10. [데이터·ML·AI 실행계획](./plans/DATA_ML_AI_PLAN.md) — 데이터 계보, 두 모델, 근거형 보고서 에이전트
-11. [릴리스·파일럿·최종 데모 계획](./plans/RELEASE_PILOT_DEMO_PLAN.md) — 환경 승격, 현장 도입, 발표·포트폴리오 증거
-12. [위험 등록부](./plans/RISK_REGISTER.md) — 현재 위험, 탐지 신호, 대응과 차단 조건
-13. [모바일·운영 콘솔 제품 경험 방향](./plans/PRODUCT_EXPERIENCE_DIRECTION.md) — 두 표면의 사용자 과업, 정보구조, 개인정보·시각 원칙
-14. [Firebase 제품 연결 handoff](./handoffs/FIREBASE_PRODUCT_CONNECTION.md) — command endpoint, projection 공백, 다른 환경 실행 경계
+1. [현재 구현 상태](./handoffs/CURRENT_STATUS.md) — 기준 commit, 로드맵 게이트, 검증 환경, 미연결 범위
+2. [프로젝트 상세 개요](./PROJECT_OVERVIEW.md) — 배경, 사용자, 제품 흐름, 기술 목표
+3. [프로젝트 헌장](./PROJECT_CHARTER.md) — 승인된 범위, 비목표, 성공 조건, 재사용 경계
+4. [시스템 아키텍처](./architecture/SYSTEM_ARCHITECTURE.md) — 런타임 경계와 신뢰 경계
+5. [8개월 로드맵](./ROADMAP.md) — 2026년 5월~12월 월별 기술 게이트
+6. [마스터 실행계획](./plans/MASTER_EXECUTION_PLAN.md) — 작업흐름, 의존성, 반월 단위 실행과 완료 조건
+7. [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md) — 테스트 수준, KPI, 실기기·현장 증거 규칙
+8. [Telemetry 복구 실행계획](./plans/TELEMETRY_RECOVERY_PLAN.md) — lease, fencing, sweeper, generation-pinned recovery
+9. [정기보고·회의 운영계획](./plans/REPORTING_AND_MEETING_PLAN.md) — 월 2회, 총 16회 계획 보고와 실제 기록 방법
+10. [리포트 운영 인덱스](./reports/README.md) — fixed 사전작성본과 human 요청 리포트의 상태·발행 경계
+11. [데이터·ML·AI 실행계획](./plans/DATA_ML_AI_PLAN.md) — 데이터 계보, 두 모델, 근거형 보고서 에이전트
+12. [릴리스·파일럿·최종 데모 계획](./plans/RELEASE_PILOT_DEMO_PLAN.md) — 환경 승격, 현장 도입, 발표·포트폴리오 증거
+13. [위험 등록부](./plans/RISK_REGISTER.md) — 현재 위험, 탐지 신호, 대응과 차단 조건
+14. [모바일·운영 콘솔 제품 경험 방향](./plans/PRODUCT_EXPERIENCE_DIRECTION.md) — 두 표면의 사용자 과업, 정보구조, 개인정보·시각 원칙
+15. [Firebase 제품 연결 handoff](./handoffs/FIREBASE_PRODUCT_CONNECTION.md) — command endpoint, projection 공백, 다른 환경 실행 경계
+16. [Mac·iOS Runbook](./development/MAC_IOS_RUNBOOK.md) — clean Mac, Simulator/iPhone, signing, 실기기 증거 경계
 
 ## 2. 질문별 기준 문서
 
@@ -33,7 +35,7 @@
 | ML·AI가 무엇을 판단하고 무엇을 하지 않는가 | [데이터·ML·AI 계획](./plans/DATA_ML_AI_PLAN.md) | [ADR-0006](./decisions/ADR-0006-model-and-llm-responsibility.md), [R07 dataset 결정](./decisions/ADR-0040-r07-quality-dataset-contract.md), [R07 실행 Runbook](./development/ML_R07_RUNBOOK.md) |
 | 어떤 결과를 완료로 인정하는가 | [검증·증거 계획](./plans/VALIDATION_AND_EVIDENCE_PLAN.md) | [증거 인덱스](./evidence/README.md) |
 | 정기보고와 회의록을 어떻게 작성하는가 | [보고·회의 계획](./plans/REPORTING_AND_MEETING_PLAN.md) | [리포트 운영 인덱스](./reports/README.md), [문서 운영 정책](./DOCUMENTATION_POLICY.md) |
-| 실제 제품에서 무엇이 바뀌었는가 | [제품 업데이트](./product-updates/README.md) | [월별 증거](./evidence/2026-07.md) |
+| 실제 제품에서 무엇이 바뀌었는가 | [현재 구현 상태](./handoffs/CURRENT_STATUS.md) | [제품 업데이트](./product-updates/README.md), [7월 증거](./evidence/2026-07.md), [8월 기반 증거](./evidence/2026-08.md), [8월 제품·ML·AI 증거](./evidence/2026-08-product.md) |
 | 심각한 장애가 있었는가 | [인시던트 정책](./incidents/README.md) | 해당 `INC-*` 문서 |
 | 배포 전 native smoke에서 어떤 중대한 실패를 고쳤는가 | [개발 실패 기록](./development/DEVELOPMENT_FAILURE_LOG.md) | [ADR-0038](./decisions/ADR-0038-cold-launch-background-service-reconciliation.md), [EVD-20260723-051](./evidence/2026-07.md#evd-20260723-051--android-background-gps-native-lifecycle-smoke와-cold-launch-복구) |
 | WSL과 실기기에서 어떻게 실행하는가 | [WSL Runbook](./development/WSL_RUNBOOK.md) | 앱·서비스별 README |
@@ -48,6 +50,8 @@
 | 복지관 예방점검 화면에서 근거와 판단 유보를 어떻게 설명하는가 | [ADR-0057](./decisions/ADR-0057-console-inspection-evidence-ui.md) | [R10](./reports/fixed/2026-09-30.md), [UPD-20260813-27](./product-updates/UPD-20260813-27-console-inspection-evidence-ui.md), [EVD-20260813-023](./evidence/2026-08-product.md#evd-20260813-023--console-예방점검-근거유보-ui) |
 | 합성 reliability 비교 수치와 화면 계보를 어떻게 고정하는가 | [ADR-0058](./decisions/ADR-0058-r10-synthetic-reliability-presentation.md) | [R10](./reports/fixed/2026-09-30.md), [UPD-20260813-28](./product-updates/UPD-20260813-28-r10-synthetic-reliability-presentation.md), [EVD-20260813-024](./evidence/2026-08-product.md#evd-20260813-024--r10-합성-reliability-비교-presentation) |
 | 센터 검증과 지원금 집행의 부분 성공을 어떻게 처리하는가 | [ADR-0059](./decisions/ADR-0059-center-verification-subsidy-authority-loop.md) | [UPD-20260813-29](./product-updates/UPD-20260813-29-center-verification-subsidy-authority-loop.md), [EVD-20260813-025](./evidence/2026-08-product.md#evd-20260813-025--센터-검증지원금-집행-authority-loop), [HR-20260813-22](./reports/human/HR-20260813-22-center-verification-subsidy-authority-loop.md) |
+| calibration 표본이 부족할 때 어떻게 판단을 유보하는가 | [R11](./reports/fixed/2026-10-15.md) | [EVD-20260813-026](./evidence/2026-08-product.md#evd-20260813-026--r11-calibration-estimability와-판단-유보) |
+| 근거형 보고서의 생성·검토·발행을 어떻게 분리하는가 | [R12](./reports/fixed/2026-10-31.md) | [EVD-20260813-027](./evidence/2026-08-product.md#evd-20260813-027--r12-fact-bundle과-근거-연결형-fallback-보고서), [EVD-20260813-032](./evidence/2026-08-product.md#evd-20260813-032--unsupported-candidate-claim-disposition) |
 | 모바일·콘솔을 Firebase에 어떻게 연결하는가 | [Firebase 제품 연결 handoff](./handoffs/FIREBASE_PRODUCT_CONNECTION.md) | [Domain Command README](../services/domain-command/README.md), [ADR-0043](./decisions/ADR-0043-welfare-center-repair-operations-product-core.md) |
 | telemetry orphan·stale receipt를 어떻게 분류하는가 | [Reconciliation Runbook](./development/TELEMETRY_RECONCILIATION_RUNBOOK.md) | [ADR-0017](./decisions/ADR-0017-fenced-ingest-recovery.md) |
 
@@ -63,7 +67,11 @@
 
 계획이 실제보다 앞서거나 뒤처져도 계획 문서를 성취 기록처럼 고쳐 쓰지 않는다. 차이는 해당 회차 정기리포트의 `실제 진행 입력란`과 증거 링크에 남긴다.
 
-## 4. 2026-08-11 현재 검증된 구현 경계
+## 4. 2026-08-14 현재 검증된 구현 경계
+
+현재 상태의 단일 기준은 [CURRENT_STATUS](./handoffs/CURRENT_STATUS.md)다. 요약하면 제품·데이터·AI의 local 선행 구현은 R12까지 존재하지만, production Firebase wiring, 실제 iPhone lifecycle, field data·calibration, LLM worker, report writer/persistence, pilot은 아직 완료되지 않았다. 과거 시점의 상세 기록은 아래 historical snapshot으로 보존한다.
+
+## 4.1 2026-08-11 모바일 업로드 historical snapshot
 
 기준일은 2026-08-11이다. 8개월 로드맵에서 M3는 7월에 계획된 모바일 업로드
 복구 게이트로 분리해 관리하며, 아래 구현의 실제 완료일은 2026-08-11이다. 계획 월을
@@ -92,7 +100,7 @@
 [EVD-20260811-001](./evidence/2026-08.md#evd-20260811-001--모바일-upload-disposition과-v4-state-integrity),
 [HR-20260811-01](./reports/human/HR-20260811-01-mobile-upload-disposition.md).
 
-## 4.1 2026-08-11 R07-A 검증된 구현 경계
+## 4.2 2026-08-11 R07-A historical snapshot
 
 8월 R07의 첫 증분으로 모델을 학습하기 전 label·dataset·split 계약을 고정했다. 코드
 기준점은 commit `a20a85b`이다.
@@ -115,7 +123,7 @@
 [EVD-20260811-002](./evidence/2026-08.md#evd-20260811-002--r07-합성-품질-데이터셋-계약과-결정론적-split),
 [HR-20260811-02](./reports/human/HR-20260811-02-r07-dataset-foundation.md).
 
-## 4.2 2026-08-11 현재 R07-B 검증된 구현 경계
+## 4.3 2026-08-11 R07-B historical snapshot
 
 R07-A와 동일한 frozen synthetic manifest에 coordinate-free feature extractor와
 rules baseline을 연결했다. 코드 기준점은 commit `a9b20d9`이다.
@@ -136,7 +144,7 @@ rules baseline을 연결했다. 코드 기준점은 commit `a9b20d9`이다.
 [EVD-20260811-003](./evidence/2026-08.md#evd-20260811-003--r07-feature-contract와-synthetic-rules-baseline),
 [HR-20260811-03](./reports/human/HR-20260811-03-r07-feature-rules-baseline.md).
 
-## 4.3 2026-07-23 당시 검증된 구현 경계 (historical)
+## 4.4 2026-07-23 당시 검증된 구현 경계 (historical)
 
 다음은 문서 작성 시점에 로컬·클린 러너 증거가 연결된 범위다.
 

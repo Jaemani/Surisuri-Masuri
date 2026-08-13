@@ -38,6 +38,7 @@ data/raw/
 data/private/
 artifacts/private/
 artifacts/models/
+artifacts/device-smoke/
 *.sqlite
 *.sqlite3
 

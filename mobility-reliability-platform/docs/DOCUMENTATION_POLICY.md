@@ -39,13 +39,19 @@
 
 ## 상태와 표현 규칙
 
-- 내용 수명주기 상태: `planned`, `in-progress`, `verified`, `blocked`, `superseded`, `cancelled`.
+- 신규 문서는 상태를 한 문구에 합치지 않고 다음 축으로 분리한다.
+  - `document_status`: `draft | reviewed | verified | superseded`
+  - `implementation_scope`: `planned | local | emulator | staging | production | field`
+  - `data_scope`: `none | synthetic | test | field`
+  - `publication_status`: `unpublished | published` — 사람 대상 문서에만 사용
+- 내용 수명주기 표현이 별도로 필요하면 `planned`, `in-progress`, `verified`, `blocked`, `superseded`, `cancelled`를 사용한다. 이는 ADR의 결정 상태 `proposed | accepted | superseded | rejected`와 다른 축이다.
 - 자동 생성·검토 전 문서는 `draft`, 자동 수집했지만 사람 검토 전인 증거는 `generated`를 사용할 수 있다. 두 값은 완료나 검증을 뜻하지 않으며 발행 시 내용 수명주기 상태와 검토자를 확정한다.
 - `draft` 제품 업데이트는 실제 코드 변화의 초안일 수 있지만 공식 릴리스나 외부 발행을 뜻하지 않는다. `verified`로 승격하려면 문서의 주장 범위와 연결된 증거를 사람이 별도 시점에 확인한다.
 - `완료`, `개선`, `안정화`, `검증`이라는 표현은 완료 조건과 근거가 있을 때만 사용한다.
 - 합성 데이터 실험은 `synthetic`, 현장 데이터 검증은 `field`, 로컬 테스트는 `local`로 명시한다.
 - 추정치와 관측치는 분리하고, 숫자에는 측정 기간·모수·단위를 적는다.
 - 자동 생성 문서는 사람 검토 전 `draft` 상태를 유지한다.
+- 2026-08-14 이전 문서의 `implemented-local / synthetic-only`, `generated / 사람 검토 대기` 같은 복합 legacy 상태는 역사 기록으로 보존하되 신규 문서에서 재사용하지 않는다. 수정 시 위 필드로 단계적으로 분리하고 당시 검증 범위를 승격하지 않는다.
 
 ## 금지사항
 

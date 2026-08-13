@@ -12,8 +12,8 @@
 
 - 2026년 5월 1일 ~ 2026년 12월 31일
 - 기술 정기리포트: 매월 2회, 총 16회
-- 현재 상태: local synthetic 제품에서 수리 접수→복지관 배정→수리사 QR 대조·native 일정→복수 구조화 작업 제출→복지관 검증 대기 흐름이 연결됐다. SQLite GPS outbox, telemetry 수집·복구 경계, 지원금 원장, R07 PyTorch 평가 후보와 R10 합성 51-episode 신뢰성 기준선·holdout/abstention 검증도 구현돼 있다.
-- 미검증 상태: Firebase production·staging 연결, 실제 기관·수리사·지원금 처리, Android/iPhone QR·일정·background lifecycle, 야외 GPS와 field holdout, 실제 repair/inspection/trip 신뢰성 dataset·component linkage·censoring·field calibration. 합성 기준선만으로 ONNX 또는 production reliability 배포를 진행하지 않는다.
+- 현재 상태: local synthetic 제품에서 수리 접수→복지관 배정→수리사 QR 대조·native 일정→복수 구조화 작업 제출→센터 검증→지원금 집행의 부분 성공 흐름이 연결됐다. SQLite GPS outbox, telemetry 수집·복구 경계, R07 PyTorch 평가 후보, R10 합성 신뢰성 기준선, R11 calibration 판단 유보, R12 5-Fact deterministic fallback·검토/발행 lifecycle도 구현돼 있다. 정확한 기준 commit과 환경은 [CURRENT_STATUS](./docs/handoffs/CURRENT_STATUS.md)를 따른다.
+- 미검증 상태: Firebase production·staging 연결, 실제 기관·수리사·지원금 처리, Android 실기기/iPhone QR·일정·background lifecycle, 야외 GPS와 field holdout, 실제 repair/inspection/trip 신뢰성 dataset·field calibration, LLM worker·report persistence·사람 발행. 합성 기준선만으로 ONNX 또는 production reliability 배포를 진행하지 않는다.
 
 ## 목표 제품
 

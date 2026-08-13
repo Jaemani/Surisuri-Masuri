@@ -5,7 +5,7 @@
 ## 운영 방식
 
 - 매월 하나의 기술 게이트를 통과한다.
-- 매월 15일과 말일에 계획 기준 기술 정기리포트를 발행한다.
+- 매월 15일과 말일을 계획 기준일로 하는 기술 정기리포트를 준비한다. 실제 발행은 사람 검토·발행일 입력 뒤에만 성립한다.
 - 정기리포트는 실제 진척을 꾸미지 않는다. 계획상 논의와 실제 증빙을 별도 칸에 기록한다.
 - 영업·행정 성과가 없는 기간에는 기술 실험 하나를 완결해 지도, 영상, 그래프, 테스트표 중 하나를 남긴다.
 
@@ -16,7 +16,7 @@
 | 5월 | Product & Workflow Definition | IP 경계, 역할·정보구조, 수리·지원금·이관 계약, GPS 기반 설계 | 요청→수리→검증 제품 흐름과 신규 아키텍처 | R01, R02 |
 | 6월 | Role-aware Mobile Foundation | 사용자·수리사 앱 셸, 인증·기관 권한, 사용자·기기·QR, 수리 요청 slice, offline GPS | 역할별 모바일 데모와 비행기 모드 복구 | R03, R04 |
 | 7월 | Repair Operations & Trusted Telemetry | 복지관 운영 기본화면, 수리사 작업기록, Go ingest, 멱등 receipt·Storage, 위치 정책 | 수리 배정 흐름과 telemetry 실패·복구 테스트 | R05, R06 |
-| 8월 | End-to-end Repair & Subsidy | 수리 상태기계, 기관 배정 정책, 지원금 원장, 알림, 이관 리허설, 품질 baseline | 요청→기관검증 데모와 감사 가능한 원장 | R07, R08 |
+| 8월 | On-device Data Quality ML | label·feature·rules/PyTorch baseline, field admission, 조건부 ONNX·온디바이스 평가 | confusion matrix·ablation 또는 근거 있는 배포 유보 | R07, R08 |
 | 9월 | Device Timeline & Reliability | verified completed legacy repair dry-run bridge, 수리 importer, verified completed-repair 기반 모바일·복지관 console read-time timeline, normalized event 기반 device current-state deterministic replay, Firestore shadow→current/checkpoint atomic promotion, 기기·부품 projection, 주행 품질 ML, 생존분석 baseline | legacy 변환 대조표·역할별 기기 타임라인·시점별 상태 재현·검증된 current promotion과 위험곡선 | R09, R10 |
 | 10월 | Calibrated Preventive Support | calibration, abstention, 수리사 피드백, fact store, AI 보고서 | 근거 클릭형 점검 권고와 평가표 | R11, R12 |
 | 11월 | Institution Reporting & Field Operations | 콘솔 운영 연결, 문서 adapter, pilot, observability, security, accessibility | 운영 대시보드·기관문서와 장애·접근성 비교 | R13, R14 |
@@ -45,6 +45,8 @@
 - Cloud Storage 원본 batch와 BigQuery/파생 집계의 보존·삭제 정책이 분리된다.
 
 ### 8월
+
+수리·지원금은 5~7월 제품 workstream의 선행/후속 증분으로 병행할 수 있지만 R07/R08의 월말 판정 게이트는 데이터 품질 ML이다.
 
 - 데이터 품질 모델이 규칙 기반 판별과 동일 평가셋에서 비교된다.
 - 합성 후보는 가중치·train-only normalization·feature/class 순서와 계보를 가진 load-only artifact로 고정된다.

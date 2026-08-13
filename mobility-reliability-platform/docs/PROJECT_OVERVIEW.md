@@ -155,6 +155,12 @@ PostgreSQL/PostGIS, Kafka, Kubernetes는 필요성이 측정되기 전에는 초
 
 ## 11. 현재 실제 상태
 
+2026-08-14의 기준 commit·로드맵 게이트·검증 환경·미연결 범위는 [CURRENT_STATUS](./handoffs/CURRENT_STATUS.md)를 단일 기준으로 사용한다. 현재 local 선행 구현은 R12까지 존재하지만 production Firebase, 실제 iPhone lifecycle, field calibration, LLM worker와 report persistence, pilot은 완료되지 않았다.
+
+아래 내용은 삭제하지 않은 역사 기록이며 최신 상태로 해석하지 않는다.
+
+### 11.1 2026-08-11 historical snapshot
+
 2026-08-11 기준 신규 저장소 기반, Firebase Rules, foreground/background GPS의 제한된
 native smoke, SQLite outbox·upload state, telemetry v2 계약, fail-closed Go ingest
 kernel과 R07-A synthetic ML dataset 계약까지 범위별 로컬 증거가 있다. Android/iPhone

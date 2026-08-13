@@ -63,13 +63,19 @@ Firestore 문서는 snake_case이고 모바일/HTTP wire만 camelCase다. Rules�
 - guardian 대상 선택·관계 projection: 미구현, fail closed
 - cross-organization repair grant: 미구현, fail closed
 
+### R12 report persistence 경계
+
+`reportRuns/{reportId}`와 하위 `claims/{claimId}`의 client read Rules는 same-tenant parent, exact path/field ID와 Fact bundle hash 결합을 검사하고 direct client write를 차단한다. 이는 defense-in-depth Rules뿐이다. Admin SDK writer, report worker, 실제 Firestore persistence, 사람 승인·발행 receipt와 production 배포는 구현되지 않았다. Local lifecycle과 콘솔은 deterministic synthetic fixture를 사용한다.
+
+현재 정확한 경계는 [CURRENT_STATUS](./CURRENT_STATUS.md)와 [R12 EVD-030~032](../evidence/2026-08-product.md#evd-20260813-030--report-claim-tenantparent-binding)을 따른다.
+
 ## 다른 환경에서 이어받기
 
 ```bash
-pnpm install
-pnpm --filter @mobility-reliability/domain-command test
-pnpm --filter @mobility-reliability/domain-command test:emulator
-pnpm --filter @mobility-reliability/domain-command build
+rtk pnpm install --frozen-lockfile
+rtk pnpm --filter @mobility-reliability/domain-command test
+rtk pnpm --filter @mobility-reliability/domain-command test:emulator
+rtk pnpm --filter @mobility-reliability/domain-command build
 ```
 
 production 연결 전 실제 Firebase project ID, Functions region/base URL, Android/iOS App Check provider와 복지관 tenant fixture를 별도 환경변수/secret으로 공급한다. 토큰과 실제 project config를 Git에 넣지 않는다.

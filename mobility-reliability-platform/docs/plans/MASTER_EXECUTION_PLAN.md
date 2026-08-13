@@ -160,16 +160,15 @@ WS7은 모든 단계의 결정·테스트·실패·화면을 병렬로 수집한
 
 **8월 1차 / R07**
 
-- 수리 상태기계, 기관별 수리소 배정 정책과 감사 가능한 지원금 원장을 구현한다.
-- 레거시 사용자·기기·수리·수리소의 importer dry-run 계약을 고정한다.
+- 수리 상태기계·지원금 원장·이관 계약의 선행 증분이 있으면 별도 제품 workstream으로 기록하며 R07 ML 완료로 계산하지 않는다.
 - 주행/차량 이동/GPS 오류/정지 등 라벨 정의와 검토 도구를 만든다.
 - 속도·가속·정지·방향·accuracy·motion feature를 버전 관리한다.
 - 규칙 baseline과 PyTorch 1D CNN/GRU 등 최소 후보를 같은 split에서 비교한다.
 
 **8월 2차 / R08**
 
-- 선택 모델을 ONNX로 export하고 Python/모바일 feature parity를 검증한다.
-- float/quantized 모델을 Android/iPhone에서 크기·지연·메모리·정확도로 비교한다.
+- field 평가가 후보 효용을 보여주고 별도 ADR이 승인된 경우에만 선택 모델을 ONNX로 export하고 Python/모바일 feature parity를 검증한다.
+- 위 gate가 열린 경우에만 float/quantized 모델을 Android/iPhone에서 크기·지연·메모리·정확도로 비교한다. 열리지 않으면 재현 가능한 defer/abstention 결정을 완료 산출물로 남긴다.
 - 모델 누락·파일 손상·지원하지 않는 version에서 rules fallback을 제공한다.
 
 **월말 게이트**

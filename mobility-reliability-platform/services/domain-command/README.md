@@ -2,11 +2,13 @@
 
 Firebase-first command boundary for repair operations. Clients never write repair, event, or subsidy documents directly.
 
-Exports three Firebase Functions v2 HTTP endpoints:
+Exports five Firebase Functions v2 HTTP endpoints: three command endpoints and two purpose-limited read projections.
 
 - `createRepairRequest` — creates a `requested` work order.
 - `transitionRepairRequest` — performs an optimistic-concurrency transition using `expectedRevision`.
 - `appendSubsidyTransaction` — appends an immutable reservation/execution/release/allocation ledger entry.
+- `getMobileProductSnapshot` — returns a role-limited beneficiary or assigned-repairer product DTO.
+- `getConsoleOperationsSnapshot` — returns a bounded welfare-center operations DTO.
 
 Every request requires:
 

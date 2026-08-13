@@ -20,4 +20,4 @@
 
 종료 직후 사용자가 기록 보존을 확인할 수 있고, 개발 진단 정보와 사용자 제품 언어가 분리된다. 거리·소요시간의 정밀 계산과 서버 동기화 상태는 후속 telemetry projection이 제공해야 한다. 현재 변경은 local/synthetic 및 native 코드 경계이며 실제 Android/iPhone lifecycle·Firebase upload를 증명하지 않는다.
 
-관련: [ADR-0042](./ADR-0042-web-ui-preview-boundary.md), [HR-20260813-05](../reports/human/HR-20260813-05-mobile-session-summary.md)
+관련: [ADR-0042](./ADR-0042-web-ui-preview-boundary.md), [HR-20260813-27](../reports/human/HR-20260813-27-mobile-session-summary.md)

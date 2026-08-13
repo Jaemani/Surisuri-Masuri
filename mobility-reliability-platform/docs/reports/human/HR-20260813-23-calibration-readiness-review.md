@@ -3,7 +3,7 @@
 - 대상 기간: 2026-08-13 local increment
 - 작성자: Codex 구현 초안
 - 검토자: 프로젝트 책임자 확인 대기
-- 로드맵: 9월 R11 calibration·abstention gate
+- 로드맵: 10월 R11 calibration·abstention gate
 - 상태: generated / 사람 검토 대기
 
 ## 계획

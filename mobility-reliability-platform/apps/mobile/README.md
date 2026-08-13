@@ -7,7 +7,7 @@ React Native와 Expo 기반의 사용자·수리사 모바일 앱입니다. Andr
 - 사용자·보호자용 홈, 수리, 내 기기, 복지지원, 설정·알림 제품 화면 구현
 - 동일 코드베이스의 수리사 작업·기기 확인 화면 구현
 - 홈 우선순위는 진행 중 수리·다음 약속·지원금·기기 상태이며 GPS는 선택적 사용량 기록으로 표시
-- 현재 인명·기기·수리·지원금은 deterministic demo이고 Domain Command API와 Firebase 운영 데이터는 미연결
+- 현재 기본 source의 인명·기기·수리·지원금은 deterministic demo다. Domain Command와 read projection 코드는 구현됐지만 production Firebase wiring은 미연결이다.
 
 ## Firebase 제품 어댑터 경계
 
@@ -21,7 +21,7 @@ Firestore를 직접 호출하지 않습니다. 운영 연결 시 다음 세 가�
 기본 endpoint는 다음과 같으며, Firebase Functions 배포 URL이나 API gateway를
 사용할 때 `endpoints`로 명시적으로 바꿀 수 있습니다.
 
-- `GET /getMobileProductSnapshot?tenantId={candidate}`: 서버가 권한 범위를 적용한 제품 read projection(후속 구현)
+- `GET /getMobileProductSnapshot?tenantId={candidate}`: 구현된 역할·권한 제한 제품 read projection
 - `POST /createRepairRequest`: 구현된 `create_repair_request` Domain Command
 
 수리 요청은 `tenantId`, `beneficiaryId`, `deviceId`, `issueSummary`,
@@ -68,10 +68,10 @@ Firestore mutation, event 기록은 `services/domain-command`가 담당합니다
   검증했다. 실제 HTTP 업로더, Firebase ID token/App Check, 서버 ACK endpoint와의 연결은
   아직 미연결이다. 따라서 앱 UI에서 전송을 완료했다고 주장하지 않는다.
 
-M3는 8개월 로드맵에서 7월에 계획한 모바일 업로드 복구 게이트다. 실제 코드 증분의 완료일은
+다음 수치는 historical M3 snapshot이다. M3는 8개월 로드맵에서 7월에 계획한 모바일 업로드 복구 게이트다. 실제 코드 증분의 완료일은
 2026-08-11이며, 코드 기준점은 commit `a9a57cc`, 모바일 테스트는 229건이다. 계획 월과
 실제 완료일을 섞지 않기 위해 이 경계를 제품 업데이트·증거·사람 대상 리포트에서 각각
-분리한다.
+분리한다. 최신 전체 상태와 테스트 수치는 [CURRENT_STATUS](../../docs/handoffs/CURRENT_STATUS.md)를 따른다.
 
 화면에는 원본 좌표나 개발용 sample·upload queue를 표시하지 않습니다. 현재 UI는 local-only session만 만들고 개발 로그에도 좌표를 출력하지 않습니다.
 
@@ -101,8 +101,8 @@ pnpm test
 
 정적 검사와 Node SQLite schema 테스트는 Expo native SQLite나 실기기 background
 GPS 동작을 증명하지 않습니다. `pnpm android`는 native development build이므로
-Android SDK·ADB가 필요합니다. iOS native build는 macOS/Xcode 또는 승인된 EAS
-development build에서 별도로 검증합니다.
+Android SDK·ADB가 필요합니다. 현재 iOS 지원 후보는 macOS/Xcode local build이며,
+EAS 설정은 저장소에 없어 실행 경로로 주장하지 않습니다. [Mac·iOS Runbook](../../docs/development/MAC_IOS_RUNBOOK.md)을 따릅니다.
 
 WSL 저장소와 Windows Android emulator를 연결하는 재현 절차와 화면 근거는
 [WSL Runbook](../../docs/development/WSL_RUNBOOK.md#android-에뮬레이터-빠른-데모)과

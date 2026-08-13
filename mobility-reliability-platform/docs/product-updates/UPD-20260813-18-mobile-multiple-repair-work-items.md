@@ -24,4 +24,4 @@
 
 현장 부품 catalog, 사진 첨부, 실제 수리사 사용성, 실제 복지관 검증과 Firebase production 연결은 증명하지 않는다. 모바일 client 검증은 서버 exact-key·합계 검증을 대체하지 않는다.
 
-관련 계약은 [ADR-0045](../decisions/ADR-0045-structured-repair-work-items.md), 상세 증거는 [EVD-20260813-12](../evidence/2026-08-product.md#evd-20260813-12--모바일-복수-구조화-수리항목)에서 확인한다.
+관련 계약은 [ADR-0045](../decisions/ADR-0045-structured-repair-work-items.md), 상세 증거는 [EVD-20260813-012](../evidence/2026-08-product.md#evd-20260813-012--모바일-복수-구조화-수리항목)에서 확인한다.

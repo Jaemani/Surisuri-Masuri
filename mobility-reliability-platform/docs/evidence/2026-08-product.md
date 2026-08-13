@@ -122,7 +122,7 @@
 - 확인 항목: 시작→기록 중→종료 후 `방금 이동 기록을 저장했어요`와 `휴대폰에 안전하게 보관됨` 표시
 - 증명: 종료 직후 사용자에게 보존 결과가 보이는 UI 상태 전이
 - 한계: 실제 Android/iPhone OS 종료, background location, Firebase ACK, 거리 계산과 현장 사용을 증명하지 않음
-- 사용처: [UPD-20260813-19](../product-updates/UPD-20260813-19-mobile-session-completion-summary.md), [ADR-0049](../decisions/ADR-0049-mobile-session-completion-summary.md), [HR-20260813-05](../reports/human/HR-20260813-05-mobile-session-summary.md)
+- 사용처: [UPD-20260813-19](../product-updates/UPD-20260813-19-mobile-session-completion-summary.md), [ADR-0049](../decisions/ADR-0049-mobile-session-completion-summary.md), [HR-20260813-27](../reports/human/HR-20260813-27-mobile-session-summary.md)
 
 ## EVD-20260813-001 — 제품 중심 모바일과 수리·지원금 도메인 기반
 
@@ -155,7 +155,7 @@
 - 이 증거는 local code, emulator와 deterministic demo UI의 실행 가능성을 증명한다.
 - 실제 Firebase 프로젝트 배포, Domain Command API 연결, 실사용자 데이터 이관, 현장 수리 처리, 공적 보조금 집행을 증명하지 않는다.
 - Playwright는 Expo Web/Vite에서의 UI·상태 전이를 증명하며 Android/iPhone native 동작을 증명하지 않는다.
-# EVD-20260813-02 — Firebase Domain Command transaction 경계
+# EVD-20260813-002 — Firebase Domain Command transaction 경계
 
 - 분류: `LOCAL_EMULATOR`, `SYNTHETIC`
 - 대상: 수리 접수·상태 전환·지원금 원장
@@ -164,7 +164,7 @@
 - 확인 항목: canonical path, snake_case storage, idempotent replay/conflict, optimistic concurrency, assigned-repairer enforcement, person-scoped subsidy account
 - 제한: production deployment와 field evidence가 아니며 실제 사용자·기관 데이터를 사용하지 않음
 
-# EVD-20260813-03 — 모바일·콘솔 운영 repository adapter
+# EVD-20260813-003 — 모바일·콘솔 운영 repository adapter
 
 - 분류: `LOCAL_TEST`, `SYNTHETIC`
 - 모바일: 17 files / 240 tests, typecheck 통과
@@ -173,7 +173,7 @@
 - 금지 경계: 두 adapter 모두 Firestore direct write와 production→demo error fallback 없음
 - 제한: 실제 Firebase token·배포·현장 data를 사용하지 않았고 native device network 호출을 증명하지 않음
 
-# EVD-20260813-04 — 목적 제한 제품 읽기 projection
+# EVD-20260813-033 — 목적 제한 제품 읽기 projection
 
 - 분류: `LOCAL_EMULATOR`, `SYNTHETIC`, `LOCAL_TEST`
 - 서버: Domain Command unit 10개, Firestore Emulator command 4개 + projection 5개 통과
@@ -183,7 +183,7 @@
 - 금지 경계: `privatePeople`, raw GPS/trip, Storage path, repairer subsidy projection, production→demo fallback 없음
 - 제한: production Firebase 배포/Auth/App Check/native network/현장 사용 증거가 아니며 guardian 대상 projection과 cross-organization grant는 미구현
 
-# EVD-20260813-05 — 완료 수리 이력 materialization
+# EVD-20260813-034 — 완료 수리 이력 materialization
 
 - 분류: `LOCAL_EMULATOR`, `SYNTHETIC`
 - 실행: `pnpm --filter @mobility-reliability/domain-command test:emulator`
@@ -192,7 +192,7 @@
 - 개인정보 경계: 완료 repair에 raw issue summary와 memo를 복사하지 않음
 - 제한: repair items·부품 설치/제거·production 배포·실제 현장 수리 완료는 미검증
 
-# EVD-20260813-06 — 수리 접수·복지관 action UI
+# EVD-20260813-006 — 수리 접수·복지관 action UI
 
 - 분류: `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
 - 모바일: typecheck, 18 files / 246 tests, Android/iOS Expo export 통과
@@ -202,7 +202,7 @@
 - 확인 항목: 모바일 category/detail/funding/amount validation과 review, stable idempotency input, projection-pending read-only recovery, console stage-aware synthetic assignment와 operator read-only wait
 - 제한: 실제 Firebase command, native TalkBack/VoiceOver, 현장 직원·이용자 사용 증거가 아님
 
-# EVD-20260813-07 — 수리사 단계형 작업공간
+# EVD-20260813-007 — 수리사 단계형 작업공간
 
 - 분류: `LOCAL_EMULATOR`, `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
 - 서버: 수리사 command exact allowlist, server-owned submitted time, 배정 UID query와 purpose-limited projection
@@ -212,7 +212,7 @@
 - 확인 항목: 일정 확정 → 작업 시작 → 비용 제출 → 복지관 검증 대기, 공개코드 대조, 한 단계 한 CTA, authoritative projection refresh
 - 제한: native picker, QR camera/lookup, 구조화 작업 항목, 실제 Firebase 배포와 실기기 접근성은 미검증
 
-# EVD-20260813-08 — 구조화 수리 항목 end-to-end
+# EVD-20260813-008 — 구조화 수리 항목 end-to-end
 
 - 분류: `LOCAL_EMULATOR`, `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
 - command: category/action/quantity/line amount exact allowlist, 합계-청구액 일치 검증
@@ -221,21 +221,21 @@
 - 검증: mobile 248 tests, console 10 tests/build, domain 12 tests, Emulator 10, Playwright 4 passed
 - 제한: 현장 분류 적합성, 복수 항목 편집 UX, 부품 catalog/component linkage와 실제 배포는 미검증
 
-# EVD-20260813-09 — 현장 기기 공개코드 gate
+# EVD-20260813-009 — 현장 기기 공개코드 gate
 
 - 분류: `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
 - 확인 항목: projection 공개코드와 수동 입력 일치 전 일정·작업 action 비활성화, 대소문자 정규화, 일치 상태 안내
 - 검증: mobile 248 tests, TypeScript, Playwright 4 passed, updated repairer workspace snapshot
 - 제한: QR camera/lookup, 위조 방지, 기기 소유권, native accessibility는 미검증
 
-# EVD-20260813-10 — 네이티브 QR scanner integration
+# EVD-20260813-010 — 네이티브 QR scanner integration
 
 - 분류: `LOCAL_TEST`, `NATIVE_EXPORT`, `SYNTHETIC`, `WEB_VISUAL`
 - 확인 항목: Expo Camera permission flow, QR-only scanner, bounded payload parser, 수동 입력 fallback, 동일 기기-code gate
 - 검증: mobile 19 files / 250 tests, Android/iOS Expo export, Playwright 4 passed
 - 제한: 실제 Android/iPhone 카메라, 저조도·훼손 QR, 위조 방지와 서버 lookup은 미검증
 
-# EVD-20260813-11 — 네이티브 방문 일정 선택
+# EVD-20260813-011 — 네이티브 방문 일정 선택
 
 - 분류: `LOCAL_TEST`, `NATIVE_EXPORT`, `WEB_VISUAL`, `SYNTHETIC`
 - 확인 항목: 현재 이후·180일 이내 client guard, native `Date`의 canonical ISO 변환, Asia/Seoul 표시, 선택값 변경 시에만 idempotency key reset, WSL web fallback
@@ -243,7 +243,7 @@
 - 시각 증거: `tests/e2e/mobile-web.spec.ts-snapshots/mobile-repairer-schedule-mobile-chromium-linux.png`
 - 제한: 실제 Android/iPhone picker 조작, 취소·시간대 경계·native accessibility와 production 예약은 미검증
 
-# EVD-20260813-12 — 모바일 복수 구조화 수리항목
+# EVD-20260813-012 — 모바일 복수 구조화 수리항목
 
 - 분류: `LOCAL_TEST`, `SYNTHETIC`, `WEB_VISUAL`
 - 확인 항목: 1~20개 항목 editor, 항목별 category/action/quantity/line amount, 합계 파생, 제출 전 검토, 수정 후 입력 보존, payload-signature idempotency key
@@ -252,7 +252,7 @@
 - 시각 증거: `tests/e2e/mobile-web.spec.ts-snapshots/mobile-repairer-submit-review-mobile-chromium-linux.png`
 - 제한: 실제 수리·수리사·복지관·보조금 집행, 현장 분류 타당성, native keyboard/accessibility와 production Firebase는 미검증
 
-# EVD-20260813-13 — field holdout·feature admission 계약
+# EVD-20260813-013 — field holdout·feature admission 계약
 
 - 분류: `LOCAL_TEST`, `CONTRACT_FIXTURE`, `NO_FIELD_DATA`
 - 확인 항목: field_pilot evaluation-only manifest, training/deployment 차단, raw-coordinate field 금지, collection→label freeze→evaluation chronology, 가명 group·trace identity, known-label eligibility, exact trace·batch·hash linkage, label-free field feature output
@@ -260,7 +260,7 @@
 - 안전 경계: 오류에는 path/reason만 포함하고 fixture value·좌표를 출력하지 않음
 - 제한: 무작위 fixture와 bridge 검증용 합성 batch만 사용했으며 실제 동의, Android/iPhone trace, server-only consent/artifact 대조, field metric과 ONNX 진입은 미검증
 
-# EVD-20260813-14 — frozen PyTorch load-only artifact
+# EVD-20260813-014 — frozen PyTorch load-only artifact
 
 - 분류: `LOCAL_TEST`, `SYNTHETIC`, `NO_FIELD_DATA`
 - 확인 항목: model state, train-only normalization, ordered feature/class keys, training dataset·manifest, weights와 metadata의 독립 hash; CPU `weights_only` strict load; gradient-off inference; review feature abstain; coordinate/label-free prediction output
@@ -268,7 +268,7 @@
 - 결정: artifact metadata의 training source는 synthetic, deployment decision은 `defer`
 - 제한: 실제 field data·동의·복지관·사용자·실기기, ONNX·양자화·모바일 추론·production 배포와 현장 성능을 증명하지 않음
 
-# EVD-20260813-15 — field evaluation-only harness 계약
+# EVD-20260813-035 — field evaluation-only harness 계약
 
 - 분류: `LOCAL_TEST`, `CONTRACT_FIXTURE`, `SYNTHETIC_BRIDGE`, `NO_FIELD_DATA`
 - 확인 항목: evaluation window, frozen model state·rules version 일치, exact holdout/trace/batch/feature hash linkage, 동일 scored cohort의 rules/PyTorch 비교, label/feature review·missing count reconciliation, 학습 API 미호출
@@ -276,7 +276,7 @@
 - privacy 경계: result에 pseudonymous group, consent digest, feature values, raw samples·coordinates, Firebase/Storage identity 없음
 - 제한: 생성 batch 하나로 evaluation 경계를 검증했으며 실제 field metric, 동의, 참가자 수, 모델 효용, confidence interval, ONNX·모바일·production 배포 증거가 아님
 
-# EVD-20260813-16 — 완료 수리 archive 기기 타임라인 replay
+# EVD-20260813-016 — 완료 수리 archive 기기 타임라인 replay
 
 - 분류: `LOCAL_TEST`, `LOCAL_EMULATOR`, `SYNTHETIC`, `WEB_VISUAL`
 - 확인 항목: 입력 순서 독립 replay와 checksum, as-of 제외, duplicate/device/tenant/source/category/action/quantity fail-closed, verified repair/items 기반 beneficiary timeline, 민감값 미노출
@@ -286,6 +286,9 @@
 - 제한: read-time completed-repair slice이며 전체 Digital Twin, async current projection, legacy import, 부품 lifecycle, 실제 수리·사용자·production 배포가 아님
 # EVD-20260813-026 — R11 calibration estimability와 판단 유보
 
+- 생성: 2026-08-13 KST / Codex 자동 초안; 정확한 생성 시각·source commit은 당시 미기록
+- 환경·데이터·상태: `local` / `synthetic` / `generated` — 사람 검토 전
+- 접근: repository 접근 개발자
 - 범위: local deterministic synthetic evaluator·contract·console presentation
 - 산출물: `reliability-calibration-assessment.v1`, `r11-calibration-estimability.v1`, R11 보고서 readiness section
 - 결과: validation 배터리 8건·브레이크 6건·컨트롤러 3건으로 최소 30건 미달. 세 component 모두 `not_estimable`; calibration metric·curve 0개, fallback `fixed_interval_and_human_review`, deployment defer.
@@ -298,17 +301,24 @@
 관련: [ADR-0060](../decisions/ADR-0060-r11-calibration-estimability-gate.md), [UPD-20260813-30](../product-updates/UPD-20260813-30-calibration-readiness-presentation.md), [HR-20260813-23](../reports/human/HR-20260813-23-calibration-readiness-review.md)
 # EVD-20260813-027 — R12 Fact bundle과 근거 연결형 fallback 보고서
 
+- 생성: 2026-08-13 KST / Codex 자동 초안; 정확한 생성 시각·source commit은 당시 미기록
+- 환경·데이터·상태: `local` / `synthetic` / `generated` — 사람 검토 전
+- 접근: repository 접근 개발자
 - 범위: local deterministic synthetic report package·console presentation
 - 결과: R11 assessment→5 typed Facts→5 grounded claims. LLM 0회, fallbackUsed true, 모든 claim Fact coverage 100%.
 - 검증: report-evidence 7 tests, recursive report/bundle hash, typed fact value, forged scope, dangling/duplicate evidence, camel/snake PII·좌표 key 차단, console snapshot exact equality, Playwright console 6 flows.
 - 저장: `packages/report-evidence`, `apps/console/src/data/r12GroundedReport.json`, `apps/console/src/App.tsx`, `tests/e2e/.../console-reports-grounded-evidence-console-chromium-linux.png`.
 - 재현: `pnpm --filter @mobility-reliability/report-evidence test`; `pnpm --filter @mobility-reliability/console typecheck`; `pnpm exec playwright test tests/e2e/console-web.spec.ts --project=console-chromium`.
 - 경계: 합성 aggregate fallback validator와 UI만 증명한다. 실제 Fact Store, LLM, 기관·사용자 보고서, production Firebase, 사람 승인·발행·운영 조치를 증명하지 않는다.
+- 후속 증분: EVD-20260813-028~032가 source hash, complete profile, 저장 결합, lifecycle, unsupported claim omission을 추가한다. 이 항목의 7-test 수치는 당시 최초 slice로 보존한다.
 
 관련: [ADR-0061](../decisions/ADR-0061-r12-grounded-report-fallback.md), [UPD-20260813-31](../product-updates/UPD-20260813-31-r12-grounded-report.md)
 
 # EVD-20260813-028 — R12 source assessment self-hash gate
 
+- 생성: 2026-08-13 KST / Codex 자동 초안; 정확한 생성 시각·source commit은 당시 미기록
+- 환경·데이터·상태: `local` / `synthetic` / `generated` — 사람 검토 전
+- 위치·접근: `packages/report-evidence`, repository 접근 개발자
 - 범위: local deterministic Node report boundary·synthetic R11 fixture
 - 확인: R11 Python canonical JSON과 호환되는 locale 비의존 key 정렬, assessment 전체 self-hash 재계산, root/lineage/policy/fact-boundary/limitations/component allowlist
 - 공격 회귀: hash를 갱신하지 않은 nested count 변조 거부, test tuning을 허용하도록 의미를 바꾼 입력 거부
@@ -319,6 +329,9 @@
 
 # EVD-20260813-029 — R12 complete Fact·claim profile
 
+- 생성: 2026-08-13 KST / Codex 자동 초안; 정확한 생성 시각·source commit은 당시 미기록
+- 환경·데이터·상태: `local` / `synthetic` / `generated` — 사람 검토 전
+- 위치·접근: `packages/report-evidence`, repository 접근 개발자
 - 범위: local deterministic synthetic report validator
 - 공격 회귀: scope Fact 제거, claim coverage 누락, fact↔claim type 불일치, 전화번호 형태 임의 Fact ID, 임의 report ID 거부
 - 불변조건: battery/brake/controller readiness + fallback + synthetic boundary 정확히 5개, Fact당 정확히 하나의 결정론적 claim
@@ -329,6 +342,9 @@
 
 # EVD-20260813-030 — report claim tenant·parent binding
 
+- 생성: 2026-08-13 KST / Codex 자동 초안; 정확한 생성 시각·source commit은 당시 미기록
+- 환경·데이터·상태: `local` / `test` / `generated` — 사람 검토 전
+- 위치·접근: Firebase Rules와 Emulator tests, repository 접근 개발자
 - 범위: local Firestore Rules Emulator
 - 허용: active case worker가 같은 tenant의 exact report/claim ID와 동일 Fact bundle hash로 결합된 부모·claim 단건 읽기
 - 거부: wrong stored tenant, wrong report ID, claim path/field ID 불일치, parent/claim bundle hash 불일치, 부모 없는 orphan claim, 모든 direct client write
@@ -339,6 +355,9 @@
 
 # EVD-20260813-031 — R12 report run lifecycle과 검토·발행 표시
 
+- 생성: 2026-08-13 KST / Codex 자동 초안; 정확한 생성 시각·source commit은 당시 미기록
+- 환경·데이터·상태: `local` / `synthetic` / `generated` — 사람 검토 전
+- 위치·접근: report-evidence·console·domain-command와 snapshot, repository 접근 개발자
 - 범위: local pure lifecycle, console synthetic presentation, projection label
 - 상태: `pending → validated → fallback`, `reviewStatus=pending`, `publicationStatus=unpublished`; skip/reverse/post-terminal 전이와 failure class 누락 거부
 - UI: 생성 방식·기계 검증·사람 검토·발행 상태 네 단계, 미발행 badge, 승인·내보내기 CTA 없음
@@ -350,10 +369,13 @@
 
 # EVD-20260813-032 — unsupported candidate claim disposition
 
+- 생성: 2026-08-13 KST / Codex 자동 초안; 정확한 생성 시각·source commit은 당시 미기록
+- 환경·데이터·상태: `local` / `synthetic` / `generated` — 사람 검토 전
+- 위치·접근: `packages/report-evidence`, repository 접근 개발자
 - 범위: local deterministic candidate validator·synthetic Fact bundle
 - 결과: canonical 후보 4개 include, 변조 문장 1개 omit; 민감 key·foreign Fact 후보는 원문/ID echo 없이 omit
 - validation codes: `candidate_shape_or_sensitive_key`, `evidence_cardinality_invalid`, `evidence_not_found`, `claim_identity_or_type_invalid`, `claim_text_unsupported`
 - 검증: report-evidence check, 17/17 tests 통과
 - 경계: LLM 호출, 실제 자유문, 사람 검토 초안, Firebase 저장과 production report를 증명하지 않는다.
 
-관련: [ADR-0066](../decisions/ADR-0066-unsupported-claim-disposition.md), [UPD-20260813-36](../product-updates/UPD-20260813-36-unsupported-claim-omission.md)
+관련: [ADR-0066](../decisions/ADR-0066-unsupported-claim-disposition.md), [UPD-20260813-36](../product-updates/UPD-20260813-36-unsupported-claim-omission.md). 별도 HR은 아직 없으며 [R12](../reports/fixed/2026-10-31.md)의 선행 snapshot에서 사용한다.

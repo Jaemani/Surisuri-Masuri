@@ -87,7 +87,7 @@
 - 수리 work order와 완료 repair event를 분리하고 상태 전이를 actor role과 현재 revision으로 검증한다.
 - 지원금은 allocation·reservation·execution·release·reversal·adjustment 거래를 append-only로 기록한다.
 - ID token, App Check, membership, role, 사람·기기 관계, 목적을 검사하고 immutable domain event를 생성한다.
-- 초기 배포 후보는 Firebase Functions v2 callable/HTTPS이며 구현 전 별도 ADR에서 runtime과 공통 authorization policy 공유 방식을 확정한다.
+- Firebase Functions v2 HTTPS command 3개와 purpose-limited projection 2개가 local/Emulator 범위로 구현됐다. production 배포, 실제 Auth/App Check와 공통 authorization 운영 검증은 아직 별도 승격 게이트다.
 
 ### Async Workers
 
@@ -119,6 +119,8 @@ receipt reconciler의 bounded candidate/checkpoint component와 expiry cleanup d
 - 데이터 부족 또는 distribution shift 시 abstain한다.
 
 ### Report Agent
+
+아래는 목표 구조다. 현재 구현은 local synthetic 5-Fact deterministic fallback, source self-hash, tenant/parent Rules binding, 생성·검토·발행 상태와 unsupported claim omission까지다. LLM worker, Firebase writer/runtime persistence와 사람 발행 승인은 미구현이며 [현재 상태](../handoffs/CURRENT_STATUS.md)를 따른다.
 
 - 모델 값을 다시 계산하지 않는다.
 - 허용된 fact ID만으로 사용자·수리사·복지관별 설명을 구성한다.

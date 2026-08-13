@@ -15,7 +15,7 @@
 
 ## 현재 실제 상태
 
-복지관 콘솔의 기기 관리 화면이 목록과 상세 패널로 분리되었고, 현재 상태·센터 검증 완료 수리 이력·예방점검/수리 운영 이동을 한 화면에서 확인할 수 있다. 서버 projection은 mutable work order가 아니라 verified completed repair archive와 구조화 items를 읽는다. console decoder는 누락되거나 잘못된 timeline을 fail-closed한다. 모바일 beneficiary의 선행 범위는 [UPD-20260813-20](../../product-updates/UPD-20260813-20-completed-repair-timeline-replay.md)과 [EVD-20260813-16](../../evidence/2026-08-product.md#evd-20260813-16--완료-수리-archive-기기-타임라인-replay)에 기록되어 있다.
+복지관 콘솔의 기기 관리 화면이 목록과 상세 패널로 분리되었고, 현재 상태·센터 검증 완료 수리 이력·예방점검/수리 운영 이동을 한 화면에서 확인할 수 있다. 서버 projection은 mutable work order가 아니라 verified completed repair archive와 구조화 items를 읽는다. console decoder는 누락되거나 잘못된 timeline을 fail-closed한다. 모바일 beneficiary의 선행 범위는 [UPD-20260813-20](../../product-updates/UPD-20260813-20-completed-repair-timeline-replay.md)과 [EVD-20260813-016](../../evidence/2026-08-product.md#evd-20260813-016--완료-수리-archive-기기-타임라인-replay)에 기록되어 있다.
 
 ## 결정 후보
 

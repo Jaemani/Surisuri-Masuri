@@ -25,4 +25,4 @@
 
 이 결과는 실제 Android/iPhone picker 조작, 취소, 시스템 시간대 변경, TalkBack/VoiceOver, 키보드와 back gesture를 증명하지 않는다. Firebase production 예약, 실제 수리사 일정, 복지관 연동 성과도 아니다.
 
-관련 계약은 [ADR-0044](../decisions/ADR-0044-repairer-transition-command-boundary.md), 상세 증거는 [EVD-20260813-11](../evidence/2026-08-product.md#evd-20260813-11--네이티브-방문-일정-선택)에서 확인한다.
+관련 계약은 [ADR-0044](../decisions/ADR-0044-repairer-transition-command-boundary.md), 상세 증거는 [EVD-20260813-011](../evidence/2026-08-product.md#evd-20260813-011--네이티브-방문-일정-선택)에서 확인한다.

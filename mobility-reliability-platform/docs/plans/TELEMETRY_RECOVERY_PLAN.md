@@ -388,7 +388,7 @@ host Go가 없는 현재 WSL2에서는 Go 1.26.5 Docker image와 named module/bu
 - runtime route·사용자 흐름 연결 전 Product Update 없음
 - production·field 영향이 없으면 Incident 없음
 - 구현 전 결정 문서 commit, 구현+local evidence commit, clean CI evidence 확정 commit으로 분리한다.
-- commit마다 `Jaemani / leejaeman0227@gmail.com`, `main`, `origin`을 확인한다.
+- commit마다 승인된 repository owner의 로컬 Git identity, `main`, `origin`을 확인한다. 실제 이메일 값은 문서에 복제하지 않는다.
 - 운영 분류·hold·cleanup 재개 절차는 [Telemetry Reconciliation Runbook](../development/TELEMETRY_RECONCILIATION_RUNBOOK.md)을 따른다.
 
 ## 8. 종료 조건

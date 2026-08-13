@@ -46,7 +46,7 @@
 - 분석 필요 시 BigQuery partition/tenant 격리
 - 이벤트 재생 가능한 기기 상태 projection
 - 규칙 기반 baseline과 비교되는 데이터 품질 모델
-- 수리·주행 이력 기반 신뢰성/생존분석 및 calibration
+- 수리·주행 이력 기반 신뢰성/생존분석, calibration estimability 평가, 가능할 때의 calibration 또는 근거 있는 판단 유보
 - 근거 ID를 강제하는 AI 리포트
 - 신규 복지관 콘솔과 기관별 문서 adapter
 - 관측 가능성, 접근성, 개인정보, 장애복구 검증

@@ -4,7 +4,7 @@
 - 상태: implemented-local / synthetic-only
 - version_or_deployment: `r11-calibration-estimability.v1` / production 배포 없음
 - 대상 사용자: 기술 검토자·복지관 콘솔 데모 검토자
-- 로드맵 위치: 9월 R11 calibration·abstention gate
+- 로드맵 위치: 10월 R11 calibration·abstention gate
 
 ## 변경 전 문제
 
