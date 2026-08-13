@@ -28,7 +28,7 @@ function exactKeys(value, expected, code) {
 
 function factText(fact) {
   if (fact.factType === 'component_readiness') return `${fact.value.component} 보정 가능성은 ${fact.value.status}입니다. validation ${fact.value.validationCount}건, 사건 ${fact.value.validationEventCount}건입니다.`
-  if (fact.factType === 'fallback_policy') return `판단 유보 시 ${fact.value.label}을 유지합니다.`
+  if (fact.factType === 'fallback_policy') return '판단 유보 시 고정 점검 일정을 유지하고 담당자가 검토합니다.'
   return '이 결과는 합성 aggregate 평가이며 실제 기기 위험도나 현장 성능을 의미하지 않습니다.'
 }
 
