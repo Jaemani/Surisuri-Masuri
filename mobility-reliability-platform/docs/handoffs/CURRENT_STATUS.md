@@ -38,6 +38,8 @@
 
 정확한 재실행 명령은 각 package README와 [Mac/iOS runbook](../development/MAC_IOS_RUNBOOK.md)을 따른다. 실제 Mac/Xcode/iPhone native build 성공은 아직 증거가 없다.
 
+Mac에서 처음 이어받는 세션은 [2026-08-15 일회성 인수인계](./MAC_CONTINUATION_HANDOFF_2026-08-15.md)를 먼저 읽는다. 최초 실행 결과를 영구 문서와 EVD에 반영한 뒤 해당 문서는 삭제할 수 있다.
+
 ## 제품 표면
 
 - 이용자 모바일: 기기 확인, 수리 요청, 진행 상태, 완료 수리 이력, 지원금 상태, 주행 시작·종료 요약.
@@ -52,4 +54,3 @@
 3. R12 보고서는 현재 deterministic fallback이며 생성 완료와 사람 검토·발행을 분리한다.
 4. `reportRuns/claims` Rules는 구현됐지만 production writer와 persistence는 미연결이다.
 5. 다음 인계 우선순위는 Mac/iPhone L3 smoke, Firebase staging wiring, 승인된 repair export dry-run, field admission 순이다.
-

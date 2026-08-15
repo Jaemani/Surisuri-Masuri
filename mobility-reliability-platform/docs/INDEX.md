@@ -20,6 +20,7 @@
 14. [모바일·운영 콘솔 제품 경험 방향](./plans/PRODUCT_EXPERIENCE_DIRECTION.md) — 두 표면의 사용자 과업, 정보구조, 개인정보·시각 원칙
 15. [Firebase 제품 연결 handoff](./handoffs/FIREBASE_PRODUCT_CONNECTION.md) — command endpoint, projection 공백, 다른 환경 실행 경계
 16. [Mac·iOS Runbook](./development/MAC_IOS_RUNBOOK.md) — clean Mac, Simulator/iPhone, signing, 실기기 증거 경계
+17. [2026-08-15 Mac 일회성 인수인계](./handoffs/MAC_CONTINUATION_HANDOFF_2026-08-15.md) — 첫 Mac 세션의 순서·중단 조건·첫 커밋 기준; 최초 실기기 결과 반영 뒤 삭제 가능
 
 ## 2. 질문별 기준 문서
 
