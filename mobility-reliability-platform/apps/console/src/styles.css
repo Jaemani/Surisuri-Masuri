@@ -7,10 +7,10 @@ button, input { font: inherit; }
 button { cursor: pointer; }
 .app-shell { min-height: 100vh; display: flex; }
 .sidebar { width: 246px; background: var(--navy); color: #fff; flex: 0 0 246px; padding: 25px 15px 17px; display: flex; flex-direction: column; min-height: 100vh; position: sticky; top: 0; height: 100vh; z-index: 10; }
-.brand { display: flex; align-items: center; gap: 10px; padding: 0 10px; margin-bottom: 23px; }
-.brand-mark { width: 31px; height: 31px; border-radius: 10px; background: #6980f5; display: grid; place-items: center; transform: rotate(-10deg); position: relative; }
-.brand-mark::before, .brand-mark::after, .brand-mark span { content: ''; position: absolute; display: block; background: white; border-radius: 8px; height: 5px; transform: rotate(44deg); }
-.brand-mark::before { width: 17px; left: 7px; top: 8px; }.brand-mark::after { width: 11px; left: 10px; top: 17px; }.brand-mark span { width: 7px; left: 12px; top: 23px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 7px; margin-bottom: 23px; }
+.brand-logo-crop { width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; border-radius: 10px; background: #fff; box-shadow: 0 3px 12px #08101f38; position: relative; }
+.brand-logo-crop img { position: absolute; width: 100px; height: 100px; max-width: none; left: -29px; top: -28px; }
+.brand-logo-crop::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: #fff; }
 .brand strong { display: block; font-size: 15px; letter-spacing: -.04em; }.brand small { display: block; color: #a8b1c8; font-size: 10px; margin-top: 2px; }
 .demo-chip { display: flex; align-items: center; gap: 7px; color: #bec8fa; background: #242f50; border: 1px solid #344165; border-radius: 7px; padding: 8px 10px; font-size: 9px; letter-spacing: .06em; font-weight: 700; margin: 0 5px 23px; }.demo-dot { width: 6px; height: 6px; border-radius: 100%; background: #84d9b7; box-shadow: 0 0 0 3px #84d9b71f; }
 .nav-label { color: #77829e; font-size: 10px; font-weight: 700; letter-spacing: .11em; margin: 0 12px 9px; text-transform: uppercase; }.nav-label.second { margin-top: 25px; }

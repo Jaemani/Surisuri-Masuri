@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 
 test.describe('mobile web visual preview', () => {
+  test.beforeEach(async ({ page }) => {
+    // The repairer flow derives its visit label from the current clock. Freeze it
+    // so mobile evidence stays reproducible instead of drifting every day.
+    await page.clock.install({ time: new Date('2026-08-13T03:00:00.000Z') });
+  });
+
   test('renders and completes the primary recording state transition', async ({ page }) => {
     await page.goto('/');
 

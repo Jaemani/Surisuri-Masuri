@@ -112,3 +112,4 @@
 - [UPD-20260813-35](./UPD-20260813-35-report-run-lifecycle.md)
 - [UPD-20260813-36](./UPD-20260813-36-unsupported-claim-omission.md)
 - [UPD-20260813-37](./UPD-20260813-37-web-visual-validation.md)
+- [UPD-20260820-01](./UPD-20260820-01-approved-brand-and-screenshots.md)

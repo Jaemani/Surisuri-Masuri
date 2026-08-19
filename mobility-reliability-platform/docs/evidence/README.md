@@ -74,7 +74,8 @@
 - [2026년 7월](./2026-07.md) — 기반·telemetry·recovery 역사 증거
 - [2026년 8월 기반](./2026-08.md) — upload disposition, R07 dataset/rules, UI baseline
 - [2026년 8월 제품·ML·AI](./2026-08-product.md) — 제품 흐름, R07 후속, R09~R12
-- [EVD-20260820-001 노션 공유용 제품 화면](./EVD-20260820-001-notion-screenshot-set.md) — 교수 미팅용 합성 데모 screenshot과 캡션
+- [EVD-20260820-001 잘못된 placeholder 화면](./EVD-20260820-001-notion-screenshot-set.md) — `superseded`, 외부 공유 금지
+- [EVD-20260820-002 승인 브랜드 제품 화면](./EVD-20260820-002-corrected-brand-screenshot-set.md) — 현재 교수 미팅·노션용 합성 데모 screenshot과 캡션
 
 최신 구현 경계는 개별 증거의 수치가 아니라 [CURRENT_STATUS](../handoffs/CURRENT_STATUS.md)에서 기준 commit과 함께 확인한다.
 

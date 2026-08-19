@@ -160,7 +160,10 @@ function App() {
 
   return <div className="app-shell">
     <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-      <div className="brand"><div className="brand-mark"><span /></div><div><strong>모두의 이동</strong><small>기관 운영 콘솔</small></div></div>
+      <div className="brand">
+        <div className="brand-logo-crop" aria-hidden="true"><img src="/brand/logo-original.png" alt="" /></div>
+        <div><strong>수리수리마수리</strong><small>복지관 운영 콘솔</small></div>
+      </div>
       <div className="demo-chip"><span className="demo-dot" /> DEMO · SYNTHETIC DATA</div>
       <nav className="side-nav" aria-label="주 메뉴">
         <p className="nav-label">운영</p>

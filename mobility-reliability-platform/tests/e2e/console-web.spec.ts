@@ -4,6 +4,10 @@ test.describe('institution console web presentation and repair operations', () =
   test('renders the operating overview without exposing raw trip paths', async ({ page }) => {
     await page.goto('/');
 
+    await expect(page).toHaveTitle('수리수리마수리 | 복지관 운영 콘솔');
+    await expect(page.getByText('수리수리마수리', { exact: true })).toBeVisible();
+    await expect(page.getByText('복지관 운영 콘솔', { exact: true })).toBeVisible();
+    await expect(page.getByText('모두의 이동', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: /좋은 아침이에요|오늘 할 일/ }).first()).toBeVisible();
     await expect(page.getByText(/기기|사용자|수리|점검|보고서/).first()).toBeVisible();
     await expect(page.getByText(/원본 이동경로|원시 위치|좌표/)).toHaveCount(0);
