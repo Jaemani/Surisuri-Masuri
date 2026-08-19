@@ -10,6 +10,7 @@
     "check:firebase": "pnpm --filter @mobility-reliability/firebase-rules test",
     "doctor": "node scripts/doctor.mjs",
     "test": "pnpm -r --if-present test",
+    "capture:console": "playwright test --config=playwright.presentation.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots"
   },
